@@ -4,7 +4,7 @@
 
 Lighting-map è una web application moderna sviluppata con React, Tailwind CSS e Vite per la gestione completa dell'illuminazione pubblica comunale. L'applicazione permette il censimento, la visualizzazione e la gestione dei punti luce, includendo funzionalità per la segnalazione e risoluzione dei guasti, report analitici e una dashboard completa per il monitoraggio dell'impianto.
 
-![Lighting-map Logo](/public/faviconWhite.png)
+![Lighting-map Logo](/lighting-map-low-resolution-logo-white-on-transparent-background.png)
 
 ## 🚀 Funzionalità principali
 
