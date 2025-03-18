@@ -81,11 +81,9 @@ function Header({
 
   const handleSuggestionClick = (value) => {
     setIsLoading(true)
+    handleSearch(value)
+    setIsLoading(false)
 
-    setTimeout(() => {
-      handleSearch(value)
-      setIsLoading(false)
-    }, 500)
   }
 
   const { userData, clearUserData, logout, fetchUserProfile } = useContext(UserContext)
@@ -144,20 +142,7 @@ function Header({
     }
   }, [foundMarkers?.length])
 
-  const handleOpenSearchBar = () => {
-    setIsSearchBarOpen(true)
-    setTimeout(() => {
-      if (searchInputRef.current) {
-        searchInputRef.current.focus()
-      }
-    }, 0)
-  }
 
-  const handleCloseSearchBar = () => {
-    setIsSearchBarOpen(false)
-    setSearchQuery("")
-    handleSearch("")
-  }
 
   // Add event listener to close bottom sheet when clicking on the map
   useEffect(() => {

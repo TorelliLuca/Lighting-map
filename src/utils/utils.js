@@ -41,7 +41,6 @@ export const clearBlanket = (str) => {
   
   export const listIgnoratedFieldsQE = [
     "_id",
-    "numero_palo",
     "composizione_punto",
     "lotto",
     "quadro",

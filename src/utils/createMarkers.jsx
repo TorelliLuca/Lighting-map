@@ -12,7 +12,7 @@ import { BsLightbulbFill } from "rocketicons/bs";
 // Custom Electric Panel component with notification status indicator
 const ElectricPanelMarker = ({ color, hasActiveNotifications, isOutOfLaw }) => {
   return (
-    <div className="flex flex-col items-center justify-center" style={{ width: '55px', height: '65px' }}>
+    <div className="flex flex-col items-center justify-center" style={{ width: '55px', height: '65px', filter: 'drop-shadow(0px 0px 1px white)' }}>
       {/* Main lamp icon */}
       <HousePlug  color={color} style={{ minWidth: '35px', minHeight: '35px' }} />
       

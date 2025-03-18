@@ -9,6 +9,8 @@ import InfoPanel from "../components/InfoPanel"
 import MapButton from "../components/MapButton"
 import { Info, Download, HelpCircle, LocateFixed } from "lucide-react"
 import ResultsBottomSheet from "../components/ResultsBottomSheet"
+// Import the MapLoader component at the top of the file
+import { MapLoader } from "../components/MapLoader"
 
 import { translateString, transformDateToIT } from "../utils/utils"
 import createMarkers from "../utils/createMarkers"
@@ -41,6 +43,8 @@ function Dashboard() {
   const [currentMarkerIndex, setCurrentMarkerIndex] = useState(0)
   const [streetViewVisible, setStreetViewVisible] = useState(false)
   const mapContainerRef = useRef(null)
+  // Add a new state for tracking map loading status
+  const [isMapLoading, setIsMapLoading] = useState(true)
 
   useEffect(() => {
     if (!userData) {
@@ -123,11 +127,19 @@ function Dashboard() {
     }
   }, [])
 
+  // Also update the useEffect that initializes the map to set loading state
   useEffect(() => {
     if (map && selectedCity) {
       loadMapData()
     }
   }, [map, selectedCity])
+
+  // Add another useEffect to set loading state to false when component unmounts
+  useEffect(() => {
+    return () => {
+      setIsMapLoading(false)
+    }
+  }, [])
 
   // Add this useEffect after the other useEffect hooks
   useEffect(() => {
@@ -159,9 +171,13 @@ function Dashboard() {
     return () => window.removeEventListener("resize", handleResize)
   }, [])
 
+  // Update the loadMapData function to show loading state
   const loadMapData = async () => {
     try {
       if (!selectedCity) return
+
+      // Set loading state to true when starting to load data
+      setIsMapLoading(true)
 
       // Clear previous markers first
       removeMarkers()
@@ -197,8 +213,13 @@ function Dashboard() {
       }
 
       startGeolocation()
+
+      // Set loading state to false when data is loaded
+      setIsMapLoading(false)
     } catch (error) {
       console.error("Error loading map data:", error)
+      // Make sure to set loading to false even if there's an error
+      setIsMapLoading(false)
     }
   }
 
@@ -499,7 +520,7 @@ function Dashboard() {
     map.setCenter(
       new window.google.maps.LatLng(Number.parseFloat(firstResult.data.lat), Number.parseFloat(firstResult.data.lng)),
     )
-
+    window.google.maps.event.trigger(firstResult.ref, "gmp-click")
     setSearchQuery("")
     setShowSuggestions(false)
   }
@@ -632,8 +653,12 @@ function Dashboard() {
     )
   }
 
+  // Also update the effect that handles filter and highlight changes
   useEffect(() => {
     if (activeMarkers.length > 0 && map) {
+      // Set loading state to true when reapplying filters
+      setIsMapLoading(true)
+
       // Remove existing markers
       removeMarkers()
       // Recreate markers with new highlighting
@@ -649,6 +674,8 @@ function Dashboard() {
       ).then((newMarkers) => {
         setActiveMarkers(newMarkers)
         applyFilters(newMarkers)
+        // Set loading state to false when done
+        setIsMapLoading(false)
       })
     }
   }, [filterOption, highlightOption])
@@ -672,6 +699,8 @@ function Dashboard() {
         setCurrentMarkerIndex={setCurrentMarkerIndex}
         allMarkers={activeMarkers}
       />
+
+      {isMapLoading && <MapLoader />}
 
       <div className="relative flex-grow" ref={mapContainerRef} id="map-container">
         {/* Main map container - always present */}

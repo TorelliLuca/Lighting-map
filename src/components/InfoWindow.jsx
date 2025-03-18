@@ -81,6 +81,13 @@ const InfoWindow = ({ content, marker, city, userData }) => {
               // Handling non-array fields
               if (marker.marker === "PL") {
                 if (listIgnoratedFieldsPL.includes(key)) return null
+                if (key === "marker"){
+                  value = "Punto luce"
+                  return (
+                  <div className="mb-2 " key={key}>
+                    <strong className="text-blue-800 text-xl">{value}</strong>
+                  </div>
+                )}
                 return (
                   <div className="mb-2" key={key}>
                     <strong className="text-blue-800">{key.replace(/_/g, " ")}:</strong> {value || "N.D."}
@@ -88,11 +95,27 @@ const InfoWindow = ({ content, marker, city, userData }) => {
                 )
               } else {
                 if (listIgnoratedFieldsQE.includes(key)) return null
+                if (key === "marker"){
+                  value = "Quadro elettrico"
+                  console.log("entrato")
+                  return (
+                  <div className="mb-2 " key={key}>
+                    <strong className="text-blue-800 text-xl">{value}</strong>
+                  </div>
+                )}
+                if (key === "numero_palo"){
+                  key = "Numero quadro"
+                  console.log("entrato")
+                  return (
+                  <div className="mb-2" key={key}>
+                    <strong className="text-blue-800">{key.replace(/_/g, " ")}:</strong> {value || "N.D."}
+                  </div>
+                )}else{
                 return (
                   <div className="mb-2" key={key}>
                     <strong className="text-blue-800">{key.replace(/_/g, " ")}:</strong> {value || "N.D."}
                   </div>
-                )
+                )}
               }
             }
           })}

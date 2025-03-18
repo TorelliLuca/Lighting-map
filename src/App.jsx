@@ -16,29 +16,32 @@ const FaviconHandler = () => {
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const isDarkMode = mediaQuery.matches;
-    
+
     const link = document.querySelector("link[rel*='icon']") || document.createElement('link');
     link.type = 'image/png';
     link.rel = 'shortcut icon';
-    
+
+    const basePath = import.meta.env.VITE_PUBLIC_URL || "";
+
     if (isDarkMode) {
-      link.href = '/faviconWhite.png';
+      link.href = `${basePath}/faviconWhite.png`;
     } else {
-      link.href = '/faviconDark.png';
+      link.href = `${basePath}/faviconDark.png`;
     }
-    
+
     document.getElementsByTagName('head')[0].appendChild(link);
-    
+
     const handleChange = (e) => {
-      link.href = e.matches ? '/faviconWhite.png' : '/faviconDark.png';
+      link.href = e.matches ? `${basePath}/faviconWhite.png` : `${basePath}/faviconDark.png`;
     };
-    
+
     mediaQuery.addEventListener('change', handleChange);
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, []);
-  
+
   return null;
 };
+
 
 // Definizione del tema basata sulla preferenza del sistema
 const useSystemTheme = () => {
@@ -75,7 +78,7 @@ function App() {
   }, [])
 
   return (
-    <BrowserRouter>
+    <BrowserRouter  basename="/LIGHTING-MAP">
     <UserProvider>
       <ThemeProvider theme={theme}>
         <FaviconHandler />

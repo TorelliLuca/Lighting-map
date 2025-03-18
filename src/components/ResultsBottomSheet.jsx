@@ -236,9 +236,17 @@ function ResultsBottomSheet({
                         </div>
                       )}
                       {searchFilter !== "NumeroPalo" && marker.data.numero_palo && (
-                        <div>
-                          <strong>Numero palo:</strong> {marker.data.numero_palo}
-                        </div>
+                        <>
+                          {marker.data.marker === 'QE' ? (
+                            <div>
+                              <strong>Numero quadro:</strong> {marker.data.numero_palo}
+                            </div>
+                          ) : (
+                            <div>
+                              <strong>Numero palo:</strong> {marker.data.numero_palo}
+                            </div>
+                          )}
+                        </>
                       )}
                       {marker.data.proprieta && (
                         <div>
