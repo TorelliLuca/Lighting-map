@@ -68,7 +68,7 @@ export default function SignIn() {
         email: formData.email,
         password: formData.password,
       }
-      const response = await axios.post(`${import.meta.env.VITE_SERVER_URL}/users/addPendingUser`, dataToSend)
+      const response = await axios.post(`${import.meta.env.VITE_SERVER_URL}/addPendingUser`, dataToSend)
       await sendMailToAdmin(formData.name, formData.surname)
       setIsSuccess(true)
     } catch (error) {

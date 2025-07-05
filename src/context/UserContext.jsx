@@ -251,6 +251,16 @@ export const UserProvider = ({ children }) => {
     
   }
 
+  const updateLightPoint = async (lightPointId, data) => {
+    try {
+      const response = await api.patch(`/townHalls/lightPoints/update/${lightPointId}`, data)
+      return response
+    } catch (error) {
+      console.error(error)
+      return
+    }
+  }
+
   return (
     <UserContext.Provider 
       value={{ 
@@ -268,6 +278,7 @@ export const UserProvider = ({ children }) => {
         loadSelectedTownhalls,
         downloadReport,
         getActiveReports,
+        updateLightPoint,
         isAuthenticated: !!token
       }}
     >

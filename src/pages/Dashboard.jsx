@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useContext, useRef } from "react"
+import { useState, useEffect, useContext, useRef, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
 import { UserContext } from "../context/UserContext"
 import Header from "../components/Header"
@@ -9,17 +9,28 @@ import InfoPanel from "../components/InfoPanel"
 import MapButton from "../components/MapButton"
 import { Info, Download, HelpCircle, LocateFixed } from "lucide-react"
 import ResultsBottomSheet from "../components/ResultsBottomSheet"
-// Import the MapLoader component at the top of the file
 import { MapLoader } from "../components/MapLoader"
+import EditLightPointModal from "../components/EditLightPointModal"
 
 import { translateString, transformDateToIT } from "../utils/utils"
-import createMarkers from "../utils/createMarkers"
+import { createMarkers, setupMarkerClustering, filterMarkers, cleanupMapResources, updateMarkerColors } from "../utils/createMarkers.jsx"
+
+import toast, { Toaster } from "react-hot-toast"
 
 const BASE_URL = import.meta.env.VITE_SERVER_URL
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API
 
+const STORAGE_KEY_PREFIX = "lighting-map-"
+const STORAGE_KEYS = {
+  SELECTED_CITY: `${STORAGE_KEY_PREFIX}selected-city`,
+  HIGHLIGHT_OPTION: `${STORAGE_KEY_PREFIX}highlight-option`,
+  FILTER_OPTION: `${STORAGE_KEY_PREFIX}filter-option`,
+  MAP_CENTER: `${STORAGE_KEY_PREFIX}map-center`,
+  MAP_ZOOM: `${STORAGE_KEY_PREFIX}map-zoom`,
+}
+
 function Dashboard() {
-  const { userData, loadSelectedTownhalls, downloadReport } = useContext(UserContext)
+  const { userData, loadSelectedTownhalls, downloadReport, updateLightPoint } = useContext(UserContext)
   const navigate = useNavigate()
   const mapRef = useRef(null)
   const infoWindowRef = useRef(null)
@@ -45,6 +56,64 @@ function Dashboard() {
   const mapContainerRef = useRef(null)
   // Add a new state for tracking map loading status
   const [isMapLoading, setIsMapLoading] = useState(true)
+  // Add a new state to store all markers before filtering
+  const [allMarkersData, setAllMarkersData] = useState([])
+  // Add state to track the current city's data loading status
+  const [cityDataLoaded, setCityDataLoaded] = useState(false)
+
+  // Stati per la modalità di modifica
+  const [editingMarker, setEditingMarker] = useState(null)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const [editingMarkerId, setEditingMarkerId] = useState(null)
+  const [originalData, setOriginalData] = useState(null)
+  
+  // Ref per mantenere il valore corrente di editingMarker nei listener
+  const editingMarkerRef = useRef(null)
+  const originalDataRef = useRef(null)
+  const isDraggingRef = useRef(false)
+
+  // Add this function to save state to localStorage
+  const saveStateToStorage = useCallback(() => {
+    if (selectedCity) {
+      localStorage.setItem(STORAGE_KEYS.SELECTED_CITY, selectedCity)
+    }
+    localStorage.setItem(STORAGE_KEYS.HIGHLIGHT_OPTION, highlightOption)
+    localStorage.setItem(STORAGE_KEYS.FILTER_OPTION, filterOption)
+
+    // Save map position if available
+    if (map) {
+      const center = map.getCenter()
+      if (center) {
+        localStorage.setItem(STORAGE_KEYS.MAP_CENTER, JSON.stringify({ lat: center.lat(), lng: center.lng() }))
+      }
+      localStorage.setItem(STORAGE_KEYS.MAP_ZOOM, map.getZoom().toString())
+    }
+  }, [selectedCity, highlightOption, filterOption, map])
+
+
+  // Add this function to restore state from localStorage
+  const restoreStateFromStorage = useCallback(() => {
+    const storedCity = localStorage.getItem(STORAGE_KEYS.SELECTED_CITY)
+    const storedHighlight = localStorage.getItem(STORAGE_KEYS.HIGHLIGHT_OPTION)
+    const storedFilter = localStorage.getItem(STORAGE_KEYS.FILTER_OPTION)
+
+    // Only restore city if it's in the user's allowed cities
+    if (storedCity && userData?.town_halls_list?.some((city) => city.name === storedCity)) {
+      setSelectedCity(storedCity)
+    } else if (userData?.town_halls_list?.length > 0) {
+      // Fall back to first city if stored city is not available
+      setSelectedCity(userData.town_halls_list[0].name)
+    }
+
+    if (storedHighlight) {
+      setHighlightOption(storedHighlight)
+    }
+
+    if (storedFilter) {
+      setFilterOption(storedFilter)
+    }
+  }, [userData])
 
   useEffect(() => {
     if (!userData) {
@@ -56,6 +125,14 @@ function Dashboard() {
       setSelectedCity(userData.town_halls_list[0].name)
     }
   }, [userData, navigate])
+
+  // Add a new useEffect to restore state when the component mounts
+  // Add this after the useEffect that initializes userData
+  useEffect(() => {
+    if (userData) {
+      restoreStateFromStorage()
+    }
+  }, [userData, restoreStateFromStorage])
 
   // Effetto separato per l'inizializzazione della mappa (eseguito solo una volta)
   useEffect(() => {
@@ -84,6 +161,22 @@ function Dashboard() {
       })
 
       setMap(mapInstance)
+
+      // Add this to the initMap function in the useEffect that initializes the map
+      // Inside the initMap function, after setMap(mapInstance), add:
+      const storedCenter = localStorage.getItem(STORAGE_KEYS.MAP_CENTER)
+      const storedZoom = localStorage.getItem(STORAGE_KEYS.MAP_ZOOM)
+
+      if (storedCenter && storedZoom) {
+        try {
+          const center = JSON.parse(storedCenter)
+          mapInstance.setCenter(new window.google.maps.LatLng(center.lat, center.lng))
+          mapInstance.setZoom(Number.parseInt(storedZoom, 10))
+        } catch (error) {
+          console.error("Error restoring map position:", error)
+        }
+      }
+
       initializeStreetViewFunctionality(mapInstance)
     }
 
@@ -120,24 +213,91 @@ function Dashboard() {
     script.defer = true
     document.head.appendChild(script)
 
+    // Load MarkerClusterer script
+    const markerClustererScript = document.createElement("script")
+    markerClustererScript.src = "https://unpkg.com/@googlemaps/markerclusterer/dist/index.min.js"
+    markerClustererScript.async = true
+    document.head.appendChild(markerClustererScript)
+
     // Cleanup
     return () => {
       // Rimuovi la callback globale quando il componente viene smontato
       window.initGoogleMaps = null
+
+      // Clean up all map resources
+      cleanupMapResources()
     }
   }, [])
 
-  // Also update the useEffect that initializes the map to set loading state
+  // Effect to load map data when map is ready and city is selected
   useEffect(() => {
     if (map && selectedCity) {
-      loadMapData()
+      // Reset city data loaded flag
+      setCityDataLoaded(false)
+
+      // Clean up previous data and load new data
+      cleanupAndLoadMapData()
     }
   }, [map, selectedCity])
+
+  // Ricrea i marker solo quando cambiano i dati base (città, caricamento dati)
+  useEffect(() => {
+    if (allMarkersData.length > 0 && map && cityDataLoaded) {
+      
+      // Applica solo i filtri, non ricreare i marker
+      const filteredMarkers = filterMarkers(allMarkersData, filterOption, map)
+      setActiveMarkers(filteredMarkers)
+    }
+  }, [filterOption, highlightOption, cityDataLoaded, allMarkersData, map])
+
+  useEffect(() => {
+    if (allMarkersData.length > 0) {
+      updateMarkerColors(allMarkersData, highlightOption, editingMarkerId)
+    }
+  }, [highlightOption, editingMarkerId, allMarkersData])
+
+  
+
+
+  // Monitora i cambiamenti di editingMarker
+  useEffect(() => {
+    editingMarkerRef.current = editingMarker
+  }, [editingMarker])
+
+  // Monitora i cambiamenti di originalData
+  useEffect(() => {
+    originalDataRef.current = originalData
+  }, [originalData])
+
+  // Monitora i cambiamenti di isDragging
+  useEffect(() => {
+    isDraggingRef.current = isDragging
+  }, [isDragging])
+
+  // Gestisco il draggable e l'evidenziazione solo sul marker in editing
+  useEffect(() => {
+    if (!map || !allMarkersData.length) return;
+    // Trova il marker in editing
+    const markerObj = allMarkersData.find(m => m.data._id === editingMarkerId);
+    // Rimuovi evidenziazione e draggable da tutti
+    allMarkersData.forEach(m => {
+      if (m.ref) {
+        m.ref.gmpDraggable = false;
+        if (m.ref.content?.classList) m.ref.content.classList.remove('editing-marker', 'editing-marker-glow');
+      }
+    });
+    // Applica solo se editing attivo
+    if (markerObj && markerObj.ref && editingMarkerId) {
+      markerObj.ref.gmpDraggable = true;
+      if (markerObj.ref.content?.classList) markerObj.ref.content.classList.add('editing-marker', 'editing-marker-glow');
+    }
+  }, [editingMarkerId, allMarkersData, map]);
 
   // Add another useEffect to set loading state to false when component unmounts
   useEffect(() => {
     return () => {
       setIsMapLoading(false)
+      cleanupMapResources()
     }
   }, [])
 
@@ -171,29 +331,58 @@ function Dashboard() {
     return () => window.removeEventListener("resize", handleResize)
   }, [])
 
-  // Update the loadMapData function to show loading state
-  const loadMapData = async () => {
+  // Add a useEffect to save state when relevant state changes
+  useEffect(() => {
+    if (userData && selectedCity) {
+      saveStateToStorage()
+    }
+  }, [selectedCity, highlightOption, filterOption, map, saveStateToStorage, userData])
+
+  // Function to clean up previous data and load new data
+  const cleanupAndLoadMapData = async () => {
     try {
       if (!selectedCity) return
 
       // Set loading state to true when starting to load data
       setIsMapLoading(true)
 
-      // Clear previous markers first
-      removeMarkers()
+      // Clear previous markers and data
+      cleanupPreviousData()
 
       const response = await loadSelectedTownhalls(selectedCity)
       const data = await response.data
-      const markers = data.punti_luce.map((point) => ({
-        ...point,
-        lat: point.lat.replace(",", "."),
-        lng: point.lng.replace(",", "."),
-      }))
+
+      // Implement progressive loading for large datasets
+      const processMarkers = async () => {
+        // Process markers in smaller chunks to prevent UI freezing
+        const chunkSize = 1000
+        const allMarkers = []
+
+        for (let i = 0; i < data.punti_luce.length; i += chunkSize) {
+          // Process a chunk of markers
+          const chunk = data.punti_luce.slice(i, i + chunkSize).map((point) => ({
+            ...point,
+            lat: point.lat.replace(",", "."),
+            lng: point.lng.replace(",", "."),
+          }))
+
+          // Allow UI to update between chunks
+          if (i > 0) {
+            await new Promise((resolve) => setTimeout(resolve, 0))
+          }
+
+          allMarkers.push(...chunk)
+        }
+
+        return allMarkers
+      }
+
+      const markers = await processMarkers()
 
       setJsonResponseForDownload(createReportJSON(data))
 
       // Store all markers in state
-      const allMarkers = await createMarkers(
+      const allMarkers = await setupMarkerClustering(
         markers,
         selectedCity,
         map,
@@ -202,9 +391,17 @@ function Dashboard() {
         userData,
         infoWindowRef,
         setCurrentInfoWindow,
+        handleEditClick,
+        editingMarkerId,
+        handleMarkerDragEnd,
       )
-      applyFilters(allMarkers)
-      setActiveMarkers(allMarkers)
+
+      // Store all markers before filtering
+      setAllMarkersData(allMarkers)
+
+      // Then apply filters
+      const filteredMarkers = filterMarkers(allMarkers, filterOption, map)
+      setActiveMarkers(filteredMarkers)
 
       if (markers.length > 0) {
         map.setCenter(
@@ -214,13 +411,50 @@ function Dashboard() {
 
       startGeolocation()
 
+      // Set city data loaded flag to true
+      setCityDataLoaded(true)
+
       // Set loading state to false when data is loaded
       setIsMapLoading(false)
     } catch (error) {
       console.error("Error loading map data:", error)
       // Make sure to set loading to false even if there's an error
       setIsMapLoading(false)
+      setCityDataLoaded(false)
     }
+  }
+
+  // Function to clean up previous data
+  const cleanupPreviousData = () => {
+    // Clear search results
+    setFoundMarkers([])
+    setMarkerIndex(0)
+    setCurrentMarkerIndex(0)
+    setSearchQuery("")
+    setShowSuggestions(false)
+    setFilteredSuggestions([])
+
+    // Clear markers
+    removeMarkers()
+
+    // Clear all markers data
+    setAllMarkersData([])
+
+    // Close any open info windows
+    if (infoWindowRef.current) {
+      infoWindowRef.current.close()
+    }
+    setCurrentInfoWindow(null)
+
+    // Clean up map resources
+    cleanupMapResources()
+
+    // Reset editing state
+    setEditingMarker(null)
+    setOriginalData(null)
+    setEditingMarkerId(null)
+    setIsEditModalOpen(false)
+    setIsDragging(false)
   }
 
   const removeMarkers = () => {
@@ -289,31 +523,6 @@ function Dashboard() {
     })
 
     return jsonToSend
-  }
-
-  const filterMarkers = (markers, filterType) => {
-    switch (filterType) {
-      case "REPORTED":
-        return markers.filter((marker) => marker.data.segnalazioni_in_corso.length > 0)
-      case "MARKER":
-        return markers.filter((marker) => marker.data.marker === "QE")
-      default:
-        return markers
-    }
-  }
-
-  const applyFilters = (markers) => {
-    // Hide all markers first
-    markers.forEach((marker) => marker.ref.setMap(null))
-
-    // Apply filters
-    let filteredMarkers = [...markers]
-    if (filterOption !== "SELECT") {
-      filteredMarkers = filterMarkers(markers, filterOption)
-    }
-
-    // Show filtered markers
-    filteredMarkers.forEach((marker) => marker.ref.setMap(map))
   }
 
   const startGeolocation = () => {
@@ -451,7 +660,6 @@ function Dashboard() {
 
     try {
       const response = await downloadReport(jsonResponseForDownload)
-      console.log(response)
       const blob = response.data
 
       if (blob && blob.size > 0) {
@@ -653,32 +861,272 @@ function Dashboard() {
     )
   }
 
-  // Also update the effect that handles filter and highlight changes
-  useEffect(() => {
-    if (activeMarkers.length > 0 && map) {
-      // Set loading state to true when reapplying filters
-      setIsMapLoading(true)
+  // Add this function to the Dashboard component to handle viewport changes
+  const setupMapViewportListeners = () => {
+    if (!map) return
 
-      // Remove existing markers
-      removeMarkers()
-      // Recreate markers with new highlighting
-      createMarkers(
-        activeMarkers.map((marker) => marker.data),
-        selectedCity,
-        map,
-        highlightOption,
-        currentInfoWindow,
-        userData,
-        infoWindowRef,
-        setCurrentInfoWindow,
-      ).then((newMarkers) => {
-        setActiveMarkers(newMarkers)
-        applyFilters(newMarkers)
-        // Set loading state to false when done
-        setIsMapLoading(false)
-      })
+    // Add listener for when the map becomes idle after panning/zooming
+    map.addListener("idle", () => {
+      // Only process if we have markers and we're not currently loading
+      if (allMarkersData.length > 0 && !isMapLoading) {
+        const bounds = map.getBounds()
+        const zoom = map.getZoom()
+
+        // At high zoom levels, ensure all markers in view are visible
+        if (zoom >= 15) {
+          // Get current viewport bounds
+          if (bounds) {
+            // Filter markers to only those in the current viewport
+            const markersInView = allMarkersData.filter((marker) => {
+              if (!marker.ref || !marker.ref.position) return false
+              return bounds.contains(marker.ref.position)
+            })
+
+            // If we have a reasonable number of markers in view, ensure they're all visible
+            if (markersInView.length > 0 && markersInView.length < 200) {
+              // Make sure these markers are on the map
+              markersInView.forEach((marker) => {
+                if (marker.ref) {
+                  marker.ref.map = map
+                }
+              })
+            }
+          }
+        }
+      }
+    })
+  }
+
+  // Add this to the useEffect that initializes the map
+  useEffect(() => {
+    if (map) {
+      setupMapViewportListeners()
     }
-  }, [filterOption, highlightOption])
+  }, [map])
+
+  // Funzioni per la modalità di modifica
+  const handleEditClick = (marker) => {
+    if (userData?.user_type === "SUPER_ADMIN") {
+
+      
+      // Se c'è già un marker in modifica, chiedi conferma
+      if (editingMarkerRef.current && editingMarkerRef.current._id !== marker._id) {
+        if (hasChangesInCurrentMarker()) {
+          const shouldSave = window.confirm('Ci sono modifiche non salvate. Vuoi salvare prima di modificare un altro punto?')
+          if (shouldSave) {
+            // Salva le modifiche correnti
+            handleSaveCurrentMarker().then(() => {
+              // Dopo il salvataggio, apri il nuovo marker
+              openMarkerForEditing(marker)
+            })
+          } else {
+            console.log("risposto no")
+            // Chiudi senza salvare e apri il nuovo marker
+            handleCloseEditModal()
+            setTimeout(() => {
+              openMarkerForEditing(marker)
+            }, 100)
+          }
+        } else {
+          // Nessuna modifica, apri direttamente il nuovo marker
+          openMarkerForEditing(marker)
+        }
+      } else {
+        // Nessun marker in modifica, apri direttamente
+        openMarkerForEditing(marker)
+      }
+    }
+  }
+
+  const openMarkerForEditing = (marker) => {
+    setEditingMarker(marker)
+
+    // Fai una deep copy per evitare che i riferimenti si influenzino
+    const originalCopy = JSON.parse(JSON.stringify(marker))
+    setOriginalData(originalCopy)
+    setEditingMarkerId(marker._id)
+    setIsEditModalOpen(true)
+    setIsDragging(true)
+    
+    // Chiudi l'InfoWindow se aperto
+    if (currentInfoWindow) {
+      currentInfoWindow.close()
+      setCurrentInfoWindow(null)
+    }
+  }
+
+  const hasChangesInCurrentMarker = () => {
+    
+    if (!editingMarkerRef.current || !originalDataRef.current) {
+      return false
+    }
+    
+    const editingString = JSON.stringify(editingMarkerRef.current)
+    const originalString = JSON.stringify(originalDataRef.current)
+    const hasDataChanges = editingString !== originalString
+
+    
+    return hasDataChanges || isDraggingRef.current
+  }
+
+  const handleSaveCurrentMarker = async () => {
+    if (!editingMarkerRef.current) return
+    
+    try {
+      // Prepara i dati per l'invio al server
+      const dataToSend = {
+        ...editingMarkerRef.current
+      }
+
+      await updateLightPoint(dataToSend._id, dataToSend)
+      // Aggiorna i dati locali
+      setAllMarkersData(prevMarkers => 
+        prevMarkers.map(marker => {
+          if (marker.data._id === editingMarkerRef.current._id) {
+            return {
+              ...marker,
+              data: editingMarkerRef.current
+            }
+          }
+          return marker
+        })
+      )
+      toast.success("Marker aggiornato con successo")
+      return true
+    } catch (error) {
+      console.error('Errore durante il salvataggio del marker:', error)
+      toast.error("Errore durante il salvataggio del marker")
+      return false
+    }
+  }
+
+  const handleMarkerDragEnd = (markerId, newLat, newLng, isLive = false) => {
+    // Aggiorna la posizione del marker nei dati
+    setAllMarkersData(prevMarkers => 
+      prevMarkers.map(marker => {
+        if (marker.data._id === markerId) {
+          return {
+            ...marker,
+            data: {
+              ...marker.data,
+              lat: newLat.toString(),
+              lng: newLng.toString()
+            }
+          }
+        }
+        return marker
+      })
+    )
+
+    // Aggiorna anche il marker in editing
+    if (editingMarker && editingMarker._id === markerId) {
+      setEditingMarker(prev => ({
+        ...prev,
+        lat: newLat.toString(),
+        lng: newLng.toString()
+      }))
+    }
+  }
+
+  const handlePositionChange = (lat, lng) => {
+    if (editingMarkerId) {
+      handleMarkerDragEnd(editingMarkerId, lat, lng)
+    }
+  }
+
+  const handleSaveMarker = async (updatedMarker) => {
+    try {
+      // Prepara i dati per l'invio al server
+      const dataToSend = {
+        ...updatedMarker,
+      }
+      
+      await updateLightPoint(dataToSend._id, dataToSend)
+
+      setAllMarkersData(prevMarkers =>
+        prevMarkers.map(marker => {
+          if (marker.data._id === updatedMarker._id) {
+            return {
+              ...marker,
+              data: updatedMarker
+            }
+          }
+          return marker
+        })
+      )
+      setIsEditModalOpen(false)
+      setEditingMarker(null)
+      setOriginalData(null)
+      toast.success("Marker aggiornato con successo")
+
+      // Non ricaricare tutti i dati, aggiorna solo il marker specifico
+      await cleanupAndLoadMapData()
+    } catch (error) {
+      console.error('Errore durante il salvataggio del marker:', error)
+      toast.error("Errore durante il salvataggio del marker")
+    }
+  }
+
+  // Ripristina la posizione originale del marker sulla mappa e nello stato
+  const restoreMarkerPosition = () => {
+    if (!editingMarker || !originalData) return;
+    setAllMarkersData(prevMarkers =>
+      prevMarkers.map(marker => {
+        if (marker.data._id === editingMarker._id) {
+          // Aggiorna anche la posizione del marker sulla mappa
+          if (marker.ref) {
+            marker.ref.position = new window.google.maps.LatLng(originalData.lat, originalData.lng);
+          }
+          return {
+            ...marker,
+            data: {
+              ...marker.data,
+              lat: originalData.lat,
+              lng: originalData.lng
+            }
+          }
+        }
+        return marker;
+      })
+    );
+  };
+
+  const handleCloseEditModal = () => {
+    // Se ci sono modifiche non salvate sulla posizione, ripristina
+    if (
+      editingMarker && originalData &&
+      (editingMarker.lat !== originalData.lat || editingMarker.lng !== originalData.lng)
+    ) {
+      restoreMarkerPosition();
+    }
+    setEditingMarker(null);
+    setOriginalData(null);
+    setEditingMarkerId(null);
+    setIsEditModalOpen(false);
+    setIsDragging(false);
+  };
+
+  const handleCenterMapOnMarker = (lat, lng) => {
+    if (map) {
+      const latNum = parseFloat(lat)
+      const lngNum = parseFloat(lng)
+      if (!isNaN(latNum) && !isNaN(lngNum)) {
+        map.setCenter(new window.google.maps.LatLng(latNum, lngNum))
+        map.setZoom(18) // Zoom più vicino per facilitare il drag
+      }
+    }
+  }
+
+  const handleCenterMapOnCurrentMarker = () => {
+    if (editingMarker && map) {
+      const latNum = parseFloat(editingMarker.lat)
+      const lngNum = parseFloat(editingMarker.lng)
+      if (!isNaN(latNum) && !isNaN(lngNum)) {
+        map.setCenter(new window.google.maps.LatLng(latNum, lngNum))
+        map.setZoom(18) // Zoom più vicino per facilitare il drag
+      }
+    }
+  }
 
   return (
     <div className="flex flex-col h-[100vh] max-h-[100vh] overflow-hidden bg-gradient-to-br from-black via-blue-950 to-black">
@@ -736,17 +1184,27 @@ function Dashboard() {
             {showInfoPanel && <InfoPanel activeMarkers={activeMarkers} onClose={() => setShowInfoPanel(false)} />}
           </>
         )}
+        <Toaster position="top-right" />
+
       </div>
 
       <MapControls
         selectedCity={selectedCity}
-        setSelectedCity={setSelectedCity}
+        setSelectedCity={(city) => {
+          setSelectedCity(city)
+          // Don't need to call saveStateToStorage here as it will be triggered by the useEffect
+        }}
         highlightOption={highlightOption}
-        setHighlightOption={setHighlightOption}
+        setHighlightOption={(option) => {
+          setHighlightOption(option)
+          // Don't need to call saveStateToStorage here as it will be triggered by the useEffect
+        }}
         filterOption={filterOption}
-        setFilterOption={setFilterOption}
+        setFilterOption={(option) => {
+          setFilterOption(option)
+          // Don't need to call saveStateToStorage here as it will be triggered by the useEffect
+        }}
         cities={userData?.town_halls_list || []}
-        /*className="map-controls"*/
       />
       <ResultsBottomSheet
         foundMarkers={foundMarkers}
@@ -760,6 +1218,14 @@ function Dashboard() {
         cityChanged={selectedCity}
         highlightOption={highlightOption}
         filterOption={filterOption}
+      />
+      <EditLightPointModal
+        isOpen={isEditModalOpen}
+        marker={editingMarker}
+        onClose={handleCloseEditModal}
+        onSave={handleSaveMarker}
+        map={map}
+        allMarkersData={allMarkersData}
       />
       <style jsx="true">{`
         :root {
@@ -871,10 +1337,100 @@ function Dashboard() {
             padding: 0.25rem;
           }
         }
+
+        /* Google Maps InfoWindow styling improvements */
+        .gm-style .gm-style-iw-c {
+          background-color: transparent !important;
+          padding: 0 !important;
+          border-radius: 12px !important;
+          box-shadow: none !important;
+          max-width: 90vw !important; /* Limit width on mobile */
+        }
+
+        .gm-style .gm-style-iw-d {
+          overflow: hidden !important;
+          padding: 0 !important;
+          max-width: 90vw !important; /* Limit width on mobile */
+        }
+
+        /* Responsive adjustments for InfoWindow */
+        @media (max-width: 640px) {
+          .gm-style .gm-style-iw-c {
+            max-width: 85vw !important;
+          }
+          
+          .gm-style .gm-style-iw-d {
+            max-width: 85vw !important;
+          }
+        }
+
+        /* Ensure InfoWindow content is readable */
+        .gm-style .gm-style-iw-c .content-container {
+          font-size: 14px;
+        }
+
+        @media (max-width: 480px) {
+          .gm-style .gm-style-iw-c .content-container {
+            font-size: 13px;
+          }
+        }
+
+        /* Additional InfoWindow styling improvements */
+        .gm-style .gm-style-iw-c {
+          min-width: 300px !important;
+        }
+        
+        .gm-style .gm-style-iw-d {
+          min-width: 300px !important;
+        }
+        
+        /* Reduce line height in InfoWindow */
+        .gm-style .gm-style-iw-c .content-container {
+          line-height: 1.3;
+        }
+        
+        /* Ensure buttons at bottom are properly sized */
+        .gm-style .gm-style-iw-c .content-container + div {
+          padding: 8px;
+        }
+        
+        /* Adjust spacing for mobile */
+        @media (max-width: 480px) {
+          .gm-style .gm-style-iw-c {
+            min-width: 280px !important;
+          }
+          
+          .gm-style .gm-style-iw-c .content-container {
+            line-height: 1.2;
+            font-size: 12px;
+          }
+        }
+        .editing-marker {
+          filter: drop-shadow(0 0 32px #000000) brightness(1.3) contrast(1.2) !important;
+          border: none !important;
+          border-radius: 50% !important;
+          box-shadow: 0 0 32px 8px #000000 !important;
+          z-index: 2000 !important;
+          transition: filter 0.2s, box-shadow 0.2s;
+        }
+
+        .editing-marker-glow {
+          animation: editing-marker-glow 1s infinite alternate !important;
+        }
+
+        @keyframes editing-marker-glow {
+          0% {
+            box-shadow: 0 0 32px 8px #000000;
+            filter: brightness(1.3) contrast(1.2) drop-shadow(0 0 32px #000000);
+          }
+          100% {
+            box-shadow: 0 0 48px 16px #000000;
+            filter: brightness(1.5) contrast(1.4) drop-shadow(0 0 48px #000000);
+          }
+        }
       `}</style>
     </div>
   )
 }
 
 export default Dashboard
-

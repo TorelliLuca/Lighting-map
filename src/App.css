@@ -42,3 +42,14 @@
 .read-the-docs {
   color: #888;
 }
+
+
+
+@keyframes editing-marker-glow {
+  from {
+    filter: drop-shadow(0 0 8px #38bdf8) brightness(1.2);
+  }
+  to {
+    filter: drop-shadow(0 0 18px #0ea5e9) brightness(1.4);
+  }
+}
