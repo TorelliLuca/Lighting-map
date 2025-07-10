@@ -7,13 +7,16 @@ import Header from "../components/Header"
 import MapControls from "../components/MapControls"
 import InfoPanel from "../components/InfoPanel"
 import MapButton from "../components/MapButton"
-import { Info, Download, HelpCircle, LocateFixed } from "lucide-react"
+import { Info, Download, HelpCircle, LocateFixed, Plus } from "lucide-react"
 import ResultsBottomSheet from "../components/ResultsBottomSheet"
 import { MapLoader } from "../components/MapLoader"
 import EditLightPointModal from "../components/EditLightPointModal"
+import AddLightPointModal from "../components/AddLightPointModal"
+import AddElectricPanelForm from "../components/AddElectricPanelForm"
+import LegendGlass from "../components/LegendGlass"
 
 import { translateString, transformDateToIT } from "../utils/utils"
-import { createMarkers, setupMarkerClustering, filterMarkers, cleanupMapResources, updateMarkerColors } from "../utils/createMarkers.jsx"
+import { createMarkers, setupMarkerClustering, filterMarkers, cleanupMapResources, updateMarkerColors, currentClusterer, generateLegendColorMap } from "../utils/createMarkers.jsx"
 
 import toast, { Toaster } from "react-hot-toast"
 
@@ -30,7 +33,7 @@ const STORAGE_KEYS = {
 }
 
 function Dashboard() {
-  const { userData, loadSelectedTownhalls, downloadReport, updateLightPoint } = useContext(UserContext)
+  const { userData, loadSelectedTownhalls, downloadReport, updateLightPoint, addLightPoint, deleteLightPoint } = useContext(UserContext)
   const navigate = useNavigate()
   const mapRef = useRef(null)
   const infoWindowRef = useRef(null)
@@ -42,7 +45,6 @@ function Dashboard() {
   const [highlightOption, setHighlightOption] = useState("")
   const [filterOption, setFilterOption] = useState("SELECT")
   const [showInfoPanel, setShowInfoPanel] = useState(false)
-  const [showStreetView, setShowStreetView] = useState(false)
   const [jsonResponseForDownload, setJsonResponseForDownload] = useState(null)
   const [currentInfoWindow, setCurrentInfoWindow] = useState(null)
   const [searchQuery, setSearchQuery] = useState("")
@@ -60,6 +62,8 @@ function Dashboard() {
   const [allMarkersData, setAllMarkersData] = useState([])
   // Add state to track the current city's data loading status
   const [cityDataLoaded, setCityDataLoaded] = useState(false)
+  // Stato per la mappa colori della legenda
+  const [legendColorMap, setLegendColorMap] = useState({ proprieta: {}, quadro: {}, lotto: {} })
 
   // Stati per la modalità di modifica
   const [editingMarker, setEditingMarker] = useState(null)
@@ -67,6 +71,9 @@ function Dashboard() {
   const [isDragging, setIsDragging] = useState(false)
   const [editingMarkerId, setEditingMarkerId] = useState(null)
   const [originalData, setOriginalData] = useState(null)
+  
+  // Stati per l'aggiunta di nuovi elementi
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   
   // Ref per mantenere il valore corrente di editingMarker nei listener
   const editingMarkerRef = useRef(null)
@@ -350,7 +357,9 @@ function Dashboard() {
       cleanupPreviousData()
 
       const response = await loadSelectedTownhalls(selectedCity)
+      
       const data = await response.data
+
 
       // Implement progressive loading for large datasets
       const processMarkers = async () => {
@@ -381,8 +390,8 @@ function Dashboard() {
 
       setJsonResponseForDownload(createReportJSON(data))
 
-      // Store all markers in state
-      const allMarkers = await setupMarkerClustering(
+      // Store all markers in state e la mappa colori
+      const { markers: allMarkers } = await setupMarkerClustering(
         markers,
         selectedCity,
         map,
@@ -394,14 +403,16 @@ function Dashboard() {
         handleEditClick,
         editingMarkerId,
         handleMarkerDragEnd,
+        handleDeleteMarker,
       )
 
-      // Store all markers before filtering
       setAllMarkersData(allMarkers)
-
       // Then apply filters
       const filteredMarkers = filterMarkers(allMarkers, filterOption, map)
       setActiveMarkers(filteredMarkers)
+
+      const legendColorMap = generateLegendColorMap(filteredMarkers.map(m => m.data), highlightOption)
+      setLegendColorMap(legendColorMap)
 
       if (markers.length > 0) {
         map.setCenter(
@@ -455,6 +466,9 @@ function Dashboard() {
     setEditingMarkerId(null)
     setIsEditModalOpen(false)
     setIsDragging(false)
+    
+    // Reset add modal state
+    setIsAddModalOpen(false)
   }
 
   const removeMarkers = () => {
@@ -920,7 +934,6 @@ function Dashboard() {
               openMarkerForEditing(marker)
             })
           } else {
-            console.log("risposto no")
             // Chiudi senza salvare e apri il nuovo marker
             handleCloseEditModal()
             setTimeout(() => {
@@ -1128,6 +1141,88 @@ function Dashboard() {
     }
   }
 
+  // Funzioni per l'aggiunta di nuovi elementi
+  const handleAddNewElement = () => {
+    if (userData?.user_type === "SUPER_ADMIN") {
+      setIsAddModalOpen(true)
+    }
+  }
+
+  const handleSaveNewElement = async (formData) => {
+    try {
+      // Prepara i dati per l'invio al server
+      const dataToSend = {
+        light_point: {...formData},
+        town_hall: selectedCity
+      }
+      
+      const response = await addLightPoint(dataToSend)
+      if (response.status === 201) {
+        toast.success(response.data)
+        
+        // Ricarica i dati della mappa per mostrare il nuovo elemento
+        await cleanupAndLoadMapData()
+      }
+    } catch (error) {
+      console.error('Errore durante l\'aggiunta dell\'elemento:', error)
+      toast.error('Errore durante l\'aggiunta dell\'elemento')
+    }
+  }
+
+  const handleCloseAddModal = () => {
+    setIsAddModalOpen(false)
+  }
+
+  // Funzione per gestire l'eliminazione di un marker
+  const handleDeleteMarker = async (marker) => {
+    // Mostra un popup di conferma
+    const isConfirmed = window.confirm(
+      `Sei sicuro di voler eliminare il ${marker.marker === "QE" ? "quadro elettrico" : "punto luce"} "${marker.numero_palo}"?\n\nQuesta azione non può essere annullata.`
+    )
+
+    if (!isConfirmed) {
+      return
+    }
+
+    try {
+      // Chiama l'API per eliminare il marker
+
+      const response = await deleteLightPoint(marker._id)
+      
+      if (response.status === 200) {
+        toast.success(response.data)
+        
+        // Rimuovi il marker dai dati locali
+        setAllMarkersData(prevMarkers => {
+          // Trova il marker da eliminare e rimuovilo dalla mappa
+          const markerToRemove = prevMarkers.find(m => m.data._id === marker._id)
+          if (markerToRemove && markerToRemove.ref) {
+            markerToRemove.ref.setMap(null)
+          }
+          if (currentClusterer) {
+            currentClusterer.removeMarker(markerToRemove.ref)
+          }
+          // Aggiorna lo stato rimuovendo il marker
+          return prevMarkers.filter(m => m.data._id !== marker._id)
+        })
+        
+        // Chiudi l'InfoWindow se aperto
+        if (infoWindowRef.current) {
+          infoWindowRef.current.close()
+          setCurrentInfoWindow(null)
+        }
+        window.location.reload()
+        // Ricarica i dati della mappa per aggiornare la visualizzazione
+        //await cleanupAndLoadMapData()
+      }else{
+        toast.error(response.data)
+      }
+    } catch (error) {
+      console.error('Errore durante l\'eliminazione del marker:', error)
+      toast.error("Errore durante l'eliminazione dell'elemento")
+    }
+  }
+
   return (
     <div className="flex flex-col h-[100vh] max-h-[100vh] overflow-hidden bg-gradient-to-br from-black via-blue-950 to-black">
       <Header
@@ -1162,12 +1257,18 @@ function Dashboard() {
           }}
         />
 
+        {/* Legenda glass in alto a destra */}
+        <LegendGlass highlightOption={highlightOption} activeMarkers={activeMarkers} legendColorMap={legendColorMap} />
+
         {/* Map controls - only visible when Street View is not active */}
         {!streetViewVisible && (
           <>
             <div className="absolute top-22 left-4 z-10 flex flex-col gap-2">
               <MapButton icon={Info} onClick={() => setShowInfoPanel(true)} title="Mostra Pannello Informazioni" />
               <MapButton icon={Download} onClick={handleDownloadReport} title="Scarica Report" />
+              {userData?.user_type === "SUPER_ADMIN" && (
+                <MapButton icon={Plus} onClick={handleAddNewElement} title="Aggiungi Nuovo Elemento" />
+              )}
               <a
                 href="https://www.torellistudio.com/studio/ufaq-category/utilizzo-lighting-map/"
                 target="_blank"
@@ -1181,7 +1282,7 @@ function Dashboard() {
               <MapButton icon={LocateFixed} onClick={goToUserLocation} title="Vai alla mia posizione" />
             </div>
 
-            {showInfoPanel && <InfoPanel activeMarkers={activeMarkers} onClose={() => setShowInfoPanel(false)} />}
+            {showInfoPanel && <InfoPanel activeMarkers={activeMarkers} onClose={() => setShowInfoPanel(false)} townhallName={selectedCity} />}
           </>
         )}
         <Toaster position="top-right" />
@@ -1226,6 +1327,14 @@ function Dashboard() {
         onSave={handleSaveMarker}
         map={map}
         allMarkersData={allMarkersData}
+      />
+      <AddLightPointModal
+        isOpen={isAddModalOpen}
+        onClose={handleCloseAddModal}
+        onSave={handleSaveNewElement}
+        map={map}
+        selectedCity={selectedCity}
+        userData={userData}
       />
       <style jsx="true">{`
         :root {

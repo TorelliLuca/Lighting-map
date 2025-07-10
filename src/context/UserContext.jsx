@@ -65,7 +65,6 @@ export const UserProvider = ({ children }) => {
             
             // Update token in state and localStorage
             updateToken(newToken)
-            console.log("token refreshed");
             // Retry the original request with new token
             originalRequest.headers["Authorization"] = `Bearer ${newToken}`
             return api(originalRequest)
@@ -173,7 +172,6 @@ export const UserProvider = ({ children }) => {
       
       // If token expires in less than 5 minutes (300000 ms), refresh it
       if (expirationTime - currentTime < 300000) {
-        console.log("you have to refresh");
         refreshToken()
         return true
       }
@@ -209,7 +207,6 @@ export const UserProvider = ({ children }) => {
     
     // Imposta un intervallo per controllare periodicamente il token
     const tokenCheckInterval = setInterval(() => {
-      console.log("Esecuzione controllo scadenza token");
       checkTokenExpiration();
     }, 60000); // Controlla ogni minuto
     
@@ -261,6 +258,36 @@ export const UserProvider = ({ children }) => {
     }
   }
 
+  const addLightPoint = async (data) => {
+    try {
+      const response = await api.post(`/townHalls/lightPoints/create`, data)
+      return response
+    } catch (error) {
+      console.error(error)
+      throw error
+    }
+  }
+
+  const deleteLightPoint = async (lightPointId) => {
+    try {
+      const response = await api.delete(`/townHalls/lightPoints/delete/${lightPointId}`)
+      return response
+    } catch (error) {
+      console.error(error)
+      throw error
+    }
+  }
+
+  const getAverageResponseTime = async (townhallName) => {
+    try {
+      const response = await api.get(`/api/avg-time-report-operation/${townhallName}`)
+      return response
+    } catch (error) {
+      console.error(error)
+      return
+    }
+  }
+
   return (
     <UserContext.Provider 
       value={{ 
@@ -279,6 +306,9 @@ export const UserProvider = ({ children }) => {
         downloadReport,
         getActiveReports,
         updateLightPoint,
+        addLightPoint,
+        deleteLightPoint,
+        getAverageResponseTime,
         isAuthenticated: !!token
       }}
     >

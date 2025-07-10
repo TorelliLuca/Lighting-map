@@ -7,15 +7,15 @@ export const colorsBackground = [
   "#ff00ff", // Magenta brillante
   "#ffff00", // Giallo vibrante
   "#00ffff", // Ciano vivace
-  "#ff3300", // Arancione fuoco
-  "#33cc33", // Verde lime
-  "#3300ff", // Blu indaco
-  "#ff0099", // Rosa shocking
-  "#ff9900", // Arancione brillante
-  "#9900ff", // Viola intenso
-  "#00cc99", // Turchese brillante
-  "#ff6600", // Arancione mandarino
-  "#cc00ff"  // Viola elettrico
+  // "#ff3300", // Arancione fuoco
+  // "#33cc33", // Verde lime
+  // "#3300ff", // Blu indaco
+  // "#ff0099", // Rosa shocking
+  // "#ff9900", // Arancione brillante
+  // "#9900ff", // Viola intenso
+  // "#00cc99", // Turchese brillante
+  // "#ff6600", // Arancione mandarino
+  // "#cc00ff"  // Viola elettrico
 ];
 
 export const colorsGliph = [
@@ -34,4 +34,17 @@ export const colorsGliph = [
 ]
 
 export const coloreGliphOn = "#80EB34"
+
+// Restituisce una lista di n colori unici, senza ripetizioni
+export function getColorList(n) {
+  const base = [...colorsBackground]
+  if (n <= base.length) return base.slice(0, n)
+  // Genera colori HSL equidistanti se servono più colori
+  const extra = []
+  for (let i = 0; i < n - base.length; i++) {
+    const hue = Math.round((360 * i) / (n - base.length))
+    extra.push(`hsl(${hue}, 90%, 55%)`)
+  }
+  return base.concat(extra)
+}
 

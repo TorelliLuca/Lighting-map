@@ -1,7 +1,7 @@
 import { createRoot } from "react-dom/client"
 import { MarkerClusterer, GridAlgorithm } from "@googlemaps/markerclusterer"
 import { IoPin } from "rocketicons/io5"
-import { colorsBackground, DEFAULT_COLOR } from "../utils/ColorGenerator"
+import { colorsBackground, DEFAULT_COLOR, getColorList } from "../utils/ColorGenerator"
 import InfoWindow from "../components/InfoWindow"
 import { MdReportProblem } from "rocketicons/md"
 import { PlugIcon as HousePlug } from "lucide-react"
@@ -113,14 +113,15 @@ const createCustomClusterRenderer = () => {
   return {
     render: ({ count, position }) => {
       const div = document.createElement("div")
-      div.className = "flex items-center justify-center rounded-full bg-blue-500 text-white font-bold shadow-lg"
-      div.style.width = `${Math.min(60, Math.max(40, 40 + Math.log10(count) * 10))}px`
-      div.style.height = `${Math.min(60, Math.max(40, 40 + Math.log10(count) * 10))}px`
-      div.style.padding = "8px"
-      div.style.cursor = "pointer"
-      div.style.transition = "all 0.3s ease"
-      div.style.border = "2px solid white"
-      div.innerHTML = `<div>${count}</div>`
+      div.className = `flex items-center justify-center rounded-full border border-white/60 bg-white/20 text-blue-500 font-bold shadow-xl backdrop-blur-md hover:bg-white/40 hover:shadow-2xl transition-all duration-300 cursor-pointer select-none`;
+      div.style.width = `${Math.min(60, Math.max(40, 40 + Math.log10(count) * 10))}px`;
+      div.style.height = `${Math.min(60, Math.max(40, 40 + Math.log10(count) * 10))}px`;
+      div.style.padding = "10px";
+      div.style.border = "2px solid rgba(255,255,255,0.6)";
+      div.style.backdropFilter = "blur(8px)";
+      div.style.WebkitBackdropFilter = "blur(8px)";
+      div.style.boxShadow = "0 6px 32px 0 rgba(59, 130, 246, 0.18)";
+      div.innerHTML = `<div class='text-sm font-bold text-blue-500 drop-shadow'>${count}</div>`;
 
       // Create a basic Google Maps marker
       return new window.google.maps.marker.AdvancedMarkerElement({
@@ -187,16 +188,13 @@ const createMarkers = async (
   onEditClick,
   editingMarkerId,
   onMarkerDragEnd,
+  onDeleteClick,
 ) => {
   if (!window.google || !map) return []
 
-  // Create a mapping of unique values to colors for consistent coloring
-  const colorMappings = {
-    quadro: {},
-    proprieta: {},
-    lotto: {},
-  }
-  const { AdvancedMarkerElement } = await window.google.maps.importLibrary("marker")
+  // Usa la mappa colori generata per evitare ripetizioni
+  const legendColorMap = generateLegendColorMap(markers, highlightOption)
+  const colorMappings = legendColorMap
   
   let NcolorToUse = colorsBackground.length - 1
   const newMarkers = []
@@ -231,8 +229,9 @@ const createMarkers = async (
     const content = { ...marker }
     delete content.lat
     delete content.lng
-
-    const position = new window.google.maps.LatLng(marker.lat, marker.lng)
+    const safeLat = Number.isFinite(Number(marker.lat)) ? Number(marker.lat) : 0
+    const safeLng = Number.isFinite(Number(marker.lng)) ? Number(marker.lng) : 0
+    const position = new window.google.maps.LatLng(safeLat, safeLng)
     const hasActiveNotifications = marker.segnalazioni_in_corso && marker.segnalazioni_in_corso.length > 0
     const isOutOfLaw =
       marker.segnalazioni_in_corso &&
@@ -245,31 +244,23 @@ const createMarkers = async (
 
     let markerColor = DEFAULT_COLOR
 
-    // Highlighting logic - prioritizza normal color coding when highlight option is set
     if (highlightOption === "") {
       markerColor = hasActiveNotifications ? "#FFCC00" : DEFAULT_COLOR
     } else if (highlightOption === "MARKER") {
-      if (marker.quadro) {
-        if (!colorMappings.quadro[marker.quadro]) {
-          if (NcolorToUse < 0) NcolorToUse = colorsBackground.length - 1
-          colorMappings.quadro[marker.quadro] = colorsBackground[NcolorToUse--]
-        }
+      if (marker.quadro && colorMappings.quadro[marker.quadro]) {
         markerColor = colorMappings.quadro[marker.quadro]
       }
     } else if (highlightOption === "PROPRIETA") {
-      if (marker.proprieta) {
-        if (!colorMappings.proprieta[marker.proprieta]) {
-          if (NcolorToUse < 0) NcolorToUse = colorsBackground.length - 1
-          colorMappings.proprieta[marker.proprieta] = colorsBackground[NcolorToUse--]
-        }
-        markerColor = colorMappings.proprieta[marker.proprieta]
+      const prop = marker.proprieta ? marker.proprieta.trim().toLowerCase() : ""
+      if (prop === "comune" || prop === "municipale") {
+        markerColor = "#3b82f6" // blu
+      } else if (prop === "enelsole") {
+        markerColor = "#ef4444" // rosso
+      } else {
+        markerColor = "#6b7280" // grigio
       }
     } else if (highlightOption === "LOTTO") {
-      if (marker.lotto) {
-        if (!colorMappings.lotto[marker.lotto]) {
-          if (NcolorToUse < 0) NcolorToUse = colorsBackground.length - 1
-          colorMappings.lotto[marker.lotto] = colorsBackground[NcolorToUse--]
-        }
+      if (marker.lotto && colorMappings.lotto[marker.lotto]) {
         markerColor = colorMappings.lotto[marker.lotto]
       }
     }
@@ -306,41 +297,44 @@ const createMarkers = async (
       customContainer.classList.add('editing-marker')
     }
 
-    const mapMarker = new AdvancedMarkerElement({
-      position,
-      content: markerElement,
-      // Don't add to map directly - MarkerClusterer will handle this
-    })
-
-    // Make marker draggable if it's being edited
-    if (isEditing) {
-      mapMarker.gmpDraggable = true
-      
-      // Add drag end listener
-      mapMarker.addListener("dragend", (event) => {
-        const newPosition = event.latLng
-        if (onMarkerDragEnd) {
-          onMarkerDragEnd(marker._id, newPosition.lat(), newPosition.lng())
-        }
+      const mapMarker = new window.google.maps.marker.AdvancedMarkerElement({
+        position,
+        content: markerElement,
+        // Don't add to map directly - MarkerClusterer will handle this
       })
-    }
 
-    // Add click event
-    mapMarker.addListener("click", () => {
-      if (currentInfoWindow) {
-        currentInfoWindow.close()
+
+      // Make marker draggable if it's being edited
+      if (isEditing) {
+        mapMarker.gmpDraggable = true
+        
+        // Add drag end listener
+        mapMarker.addListener("dragend", (event) => {
+          const newPosition = event.latLng
+          if (onMarkerDragEnd) {
+            onMarkerDragEnd(marker._id, newPosition.lat(), newPosition.lng())
+          }
+        })
       }
 
-      // Update the React root rendering
-      reactRoot.render(
-        <InfoWindow 
-          content={content} 
-          marker={marker} 
-          city={city} 
-          userData={userData} 
-          onEditClick={onEditClick}
-        />
-      )
+      // Add click event
+      mapMarker.addListener("click", () => {
+        if (currentInfoWindow) {
+          currentInfoWindow.close()
+        }
+
+        // Update the React root rendering
+        reactRoot.render(
+          <InfoWindow 
+            content={content} 
+            marker={marker} 
+            city={city} 
+            userData={userData} 
+            onEditClick={onEditClick}
+            onDeleteClick={onDeleteClick}
+          />
+        )
+    
 
       // Use the React container as InfoWindow content
       infoWindowRef.current.setContent(infoWindowContainer)
@@ -349,18 +343,22 @@ const createMarkers = async (
     })
 
     newMarkers.push({ data: marker, ref: mapMarker, reactRoot: customRoot, reactContainer: customContainer })
+
   }
 
+  console.log("color mapping dopo creazione marker", colorMappings)
   // Salva i marker creati globalmente per cleanup
   lastCreatedMarkers = newMarkers
 
   return newMarkers
+
 }
 
 // Funzione per aggiornare i colori dei marker esistenti tramite rerender React
 const updateMarkerColors = (markers, highlightOption, editingMarkerId) => {
-  const colorMappings = { quadro: {}, proprieta: {}, lotto: {} }
-  let NcolorToUse = colorsBackground.length - 1
+  // Usa la mappa colori generata per evitare ripetizioni
+  const legendColorMap = generateLegendColorMap(markers.map(m => m.data), highlightOption)
+  const colorMappings = legendColorMap
 
   markers.forEach(({ data, reactRoot, reactContainer }) => {
     // Safe: esci se il root non è valido o già smontato
@@ -380,27 +378,20 @@ const updateMarkerColors = (markers, highlightOption, editingMarkerId) => {
     if (highlightOption === "") {
       markerColor = hasActiveNotifications ? "#FFCC00" : DEFAULT_COLOR
     } else if (highlightOption === "MARKER") {
-      if (data.quadro) {
-        if (!colorMappings.quadro[data.quadro]) {
-          if (NcolorToUse < 0) NcolorToUse = colorsBackground.length - 1
-          colorMappings.quadro[data.quadro] = colorsBackground[NcolorToUse--]
-        }
+      if (data.quadro && colorMappings.quadro[data.quadro]) {
         markerColor = colorMappings.quadro[data.quadro]
       }
     } else if (highlightOption === "PROPRIETA") {
-      if (data.proprieta) {
-        if (!colorMappings.proprieta[data.proprieta]) {
-          if (NcolorToUse < 0) NcolorToUse = colorsBackground.length - 1
-          colorMappings.proprieta[data.proprieta] = colorsBackground[NcolorToUse--]
-        }
-        markerColor = colorMappings.proprieta[data.proprieta]
+      const prop = data.proprieta ? data.proprieta.trim().toLowerCase() : ""
+      if (prop === "comune" || prop === "municipale") {
+        markerColor = "#3b82f6" // blu
+      } else if (prop === "enelsole") {
+        markerColor = "#ef4444" // rosso
+      } else {
+        markerColor = "#6b7280" // grigio
       }
     } else if (highlightOption === "LOTTO") {
-      if (data.lotto) {
-        if (!colorMappings.lotto[data.lotto]) {
-          if (NcolorToUse < 0) NcolorToUse = colorsBackground.length - 1
-          colorMappings.lotto[data.lotto] = colorsBackground[NcolorToUse--]
-        }
+      if (data.lotto && colorMappings.lotto[data.lotto]) {
         markerColor = colorMappings.lotto[data.lotto]
       }
     }
@@ -448,6 +439,7 @@ const setupMarkerClustering = async (
   onEditClick,
   editingMarkerId,
   onMarkerDragEnd,
+  onDeleteClick,
 ) => {
   // Make sure Google Maps API is fully loaded
   if (!window.google || !window.google.maps || !map) {
@@ -488,12 +480,43 @@ const setupMarkerClustering = async (
       onEditClick,
       editingMarkerId,
       onMarkerDragEnd,
+      onDeleteClick,
     )
 
     allMarkers = [...allMarkers, ...batchResult]
   }
 
-  return allMarkers
+  // New: calcola la mappa colori coordinata
+  const legendColorMap = generateLegendColorMap(markers, highlightOption)
+
+  return { markers: allMarkers, legendColorMap }
+}
+
+// New: funzione per generare la mappa colori coordinata
+function generateLegendColorMap(markers, highlightOption) {
+  let colorMappings = { quadro: {}, proprieta: {}, lotto: {} }
+  let uniqueValues = []
+  if (highlightOption === "PROPRIETA") {
+    uniqueValues = Array.from(new Set(markers.map(marker => marker.proprieta).filter(Boolean)))
+    const colorList = getColorList(uniqueValues.length)
+    uniqueValues.forEach((val, idx) => {
+      colorMappings.proprieta[val] = colorList[idx]
+    })
+  } else if (highlightOption === "MARKER") {
+    uniqueValues = Array.from(new Set(markers.map(marker => marker.quadro).filter(Boolean)))
+    const colorList = getColorList(uniqueValues.length)
+    uniqueValues.forEach((val, idx) => {
+      colorMappings.quadro[val] = colorList[idx]
+    })
+  } else if (highlightOption === "LOTTO") {
+    uniqueValues = Array.from(new Set(markers.map(marker => marker.lotto).filter(Boolean)))
+    const colorList = getColorList(uniqueValues.length)
+    uniqueValues.forEach((val, idx) => {
+      colorMappings.lotto[val] = colorList[idx]
+    })
+  }
+  console.log(colorMappings)
+  return colorMappings
 }
 
 // Function to filter markers and update clustering
@@ -653,4 +676,4 @@ const filterMarkers = (markers, filterType, map) => {
   return filteredMarkers
 }
 
-export { createMarkers, setupMarkerClustering, filterMarkers, currentClusterer, cleanupMapResources, updateMarkerColors }
+export { createMarkers, setupMarkerClustering, filterMarkers, currentClusterer, cleanupMapResources, updateMarkerColors, generateLegendColorMap }

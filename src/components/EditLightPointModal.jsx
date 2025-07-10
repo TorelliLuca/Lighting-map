@@ -236,7 +236,6 @@ const EditLightPointModal = ({
         delete dataToSend.tipo_sostegno_altro
       }
 
-      //console.log(dataToSend)
       
       await onSave(dataToSend)
       //onClose()

@@ -72,7 +72,7 @@ export default function SignIn() {
       await sendMailToAdmin(formData.name, formData.surname)
       setIsSuccess(true)
     } catch (error) {
-      console.log(error)
+      console.error(error)
       setError(error.response.data || "Registration failed. Please try again.")
     } finally {
       setIsLoading(false)

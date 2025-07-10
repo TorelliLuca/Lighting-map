@@ -86,7 +86,6 @@ export default function Operation() {
           description: formData.description || "",
         },
       }
-      console.log(mailData);
       const response = await api.post("/send-email-to-user/reportSolved", mailData)
       return true
     } catch (error) {

@@ -78,7 +78,9 @@ function App() {
   }, [])
 
   return (
-    <BrowserRouter  basename="/LIGHTING-MAP">
+    
+    <BrowserRouter  basename="/LIGHTING-MAP"> 
+    {/* <BrowserRouter  > */}
     <UserProvider>
       <ThemeProvider theme={theme}>
         <FaviconHandler />
