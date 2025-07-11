@@ -263,6 +263,20 @@ const createMarkers = async (
       if (marker.lotto && colorMappings.lotto[marker.lotto]) {
         markerColor = colorMappings.lotto[marker.lotto]
       }
+    } else if (highlightOption === "TIPO_LAMPADA") {
+      if (marker.marker === "QE") {
+        markerColor = "#3b82f6"; // Colore fisso per i quadri
+      } else {
+        const tipoLampada = (marker.lampada_potenza || '').split(' ')[0];
+        if (tipoLampada && colorMappings.tipo_lampada && colorMappings.tipo_lampada[tipoLampada]) {
+          markerColor = colorMappings.tipo_lampada[tipoLampada];
+        }
+      }
+    } else if (highlightOption === "TIPO_APPARECCHIO") {
+      const tipoApparecchio = (marker.tipo_apparecchio || '').toLowerCase();
+      if (tipoApparecchio && colorMappings.tipo_apparecchio && colorMappings.tipo_apparecchio[tipoApparecchio]) {
+        markerColor = colorMappings.tipo_apparecchio[tipoApparecchio];
+      }
     }
 
     let markerElement
@@ -346,7 +360,6 @@ const createMarkers = async (
 
   }
 
-  console.log("color mapping dopo creazione marker", colorMappings)
   // Salva i marker creati globalmente per cleanup
   lastCreatedMarkers = newMarkers
 
@@ -393,6 +406,20 @@ const updateMarkerColors = (markers, highlightOption, editingMarkerId) => {
     } else if (highlightOption === "LOTTO") {
       if (data.lotto && colorMappings.lotto[data.lotto]) {
         markerColor = colorMappings.lotto[data.lotto]
+      }
+    } else if (highlightOption === "TIPO_LAMPADA") {
+      if (data.marker === "QE") {
+        markerColor = "#3b82f6"; // Colore fisso per i quadri
+      } else {
+        const tipoLampada = (data.lampada_potenza || '').split(' ')[0];
+        if (tipoLampada && colorMappings.tipo_lampada && colorMappings.tipo_lampada[tipoLampada]) {
+          markerColor = colorMappings.tipo_lampada[tipoLampada];
+        }
+      }
+    } else if (highlightOption === "TIPO_APPARECCHIO") {
+      const tipoApparecchio = (data.tipo_apparecchio || '').toLowerCase();
+      if (tipoApparecchio && colorMappings.tipo_apparecchio && colorMappings.tipo_apparecchio[tipoApparecchio]) {
+        markerColor = colorMappings.tipo_apparecchio[tipoApparecchio];
       }
     }
 
@@ -494,7 +521,7 @@ const setupMarkerClustering = async (
 
 // New: funzione per generare la mappa colori coordinata
 function generateLegendColorMap(markers, highlightOption) {
-  let colorMappings = { quadro: {}, proprieta: {}, lotto: {} }
+  let colorMappings = { quadro: {}, proprieta: {}, lotto: {}, tipo_lampada: {}, tipo_apparecchio: {} }
   let uniqueValues = []
   if (highlightOption === "PROPRIETA") {
     uniqueValues = Array.from(new Set(markers.map(marker => marker.proprieta).filter(Boolean)))
@@ -514,13 +541,25 @@ function generateLegendColorMap(markers, highlightOption) {
     uniqueValues.forEach((val, idx) => {
       colorMappings.lotto[val] = colorList[idx]
     })
+  } else if (highlightOption === "TIPO_LAMPADA") {
+    uniqueValues = Array.from(new Set(markers.map(marker => (marker.lampada_potenza || '').split(' ')[0]).filter(Boolean)))
+    const colorList = getColorList(uniqueValues.length)
+    uniqueValues.forEach((val, idx) => {
+      colorMappings.tipo_lampada[val] = colorList[idx]
+    })
+  } else if (highlightOption === "TIPO_APPARECCHIO") {
+    uniqueValues = Array.from(new Set(markers.map(marker => (marker.tipo_apparecchio || '').toLowerCase()).filter(Boolean)))
+    const colorList = getColorList(uniqueValues.length)
+    uniqueValues.forEach((val, idx) => {
+      colorMappings.tipo_apparecchio[val] = colorList[idx]
+    })
   }
-  console.log(colorMappings)
+
   return colorMappings
 }
 
 // Function to filter markers and update clustering
-const filterMarkers = (markers, filterType, map) => {
+const filterMarkers = (markers, filterType, map, selectedProprietaFilter) => {
   if (!markers || markers.length === 0) return []
 
   // First, ensure all markers are removed from the map
@@ -543,6 +582,23 @@ const filterMarkers = (markers, filterType, map) => {
       break
     case "MARKER":
       filteredMarkers = markers.filter((marker) => marker.data.marker === "QE")
+      break
+    case "PROPRIETA":
+      if (!selectedProprietaFilter) {
+        filteredMarkers = [];
+      } else {
+        const selectedProprieta = selectedProprietaFilter.toLowerCase();
+        filteredMarkers = markers.filter(marker => {
+          const prop = (marker.data.proprieta || "").toLowerCase();
+          if (selectedProprieta === "municipale") {
+            return prop === "comune" || prop === "municipale";
+          }
+          if (selectedProprieta === "enelsole") {
+            return prop === "enelsole";
+          }
+          return false;
+        });
+      }
       break
     case "SELECT":
     default:

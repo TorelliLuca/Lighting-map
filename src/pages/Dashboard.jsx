@@ -33,7 +33,7 @@ const STORAGE_KEYS = {
 }
 
 function Dashboard() {
-  const { userData, loadSelectedTownhalls, downloadReport, updateLightPoint, addLightPoint, deleteLightPoint } = useContext(UserContext)
+  const { userData, loadSelectedTownhalls, downloadReport, updateLightPoint, addLightPoint, deleteLightPoint, refreshToken } = useContext(UserContext)
   const navigate = useNavigate()
   const mapRef = useRef(null)
   const infoWindowRef = useRef(null)
@@ -74,6 +74,8 @@ function Dashboard() {
   
   // Stati per l'aggiunta di nuovi elementi
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+
+  const [selectedProprietaFilter, setSelectedProprietaFilter] = useState("Municipale")
   
   // Ref per mantenere il valore corrente di editingMarker nei listener
   const editingMarkerRef = useRef(null)
@@ -252,10 +254,10 @@ function Dashboard() {
     if (allMarkersData.length > 0 && map && cityDataLoaded) {
       
       // Applica solo i filtri, non ricreare i marker
-      const filteredMarkers = filterMarkers(allMarkersData, filterOption, map)
+      const filteredMarkers = filterMarkers(allMarkersData, filterOption, map, selectedProprietaFilter)
       setActiveMarkers(filteredMarkers)
     }
-  }, [filterOption, highlightOption, cityDataLoaded, allMarkersData, map])
+  }, [filterOption, highlightOption, cityDataLoaded, allMarkersData, map, selectedProprietaFilter])
 
   useEffect(() => {
     if (allMarkersData.length > 0) {
@@ -347,6 +349,8 @@ function Dashboard() {
 
   // Function to clean up previous data and load new data
   const cleanupAndLoadMapData = async () => {
+
+
     try {
       if (!selectedCity) return
 
@@ -408,7 +412,7 @@ function Dashboard() {
 
       setAllMarkersData(allMarkers)
       // Then apply filters
-      const filteredMarkers = filterMarkers(allMarkers, filterOption, map)
+      const filteredMarkers = filterMarkers(allMarkers, filterOption, map, selectedProprietaFilter)
       setActiveMarkers(filteredMarkers)
 
       const legendColorMap = generateLegendColorMap(filteredMarkers.map(m => m.data), highlightOption)
@@ -1074,6 +1078,15 @@ function Dashboard() {
 
       // Non ricaricare tutti i dati, aggiorna solo il marker specifico
       await cleanupAndLoadMapData()
+      // Dopo il cleanup, centra la mappa sul marker appena salvato
+      if (map && updatedMarker.lat && updatedMarker.lng) {
+        const latNum = parseFloat(updatedMarker.lat)
+        const lngNum = parseFloat(updatedMarker.lng)
+        if (!isNaN(latNum) && !isNaN(lngNum)) {
+          map.setCenter(new window.google.maps.LatLng(latNum, lngNum))
+          map.setZoom(18)
+        }
+      }
     } catch (error) {
       console.error('Errore durante il salvataggio del marker:', error)
       toast.error("Errore durante il salvataggio del marker")
@@ -1306,6 +1319,8 @@ function Dashboard() {
           // Don't need to call saveStateToStorage here as it will be triggered by the useEffect
         }}
         cities={userData?.town_halls_list || []}
+        selectedProprietaFilter={selectedProprietaFilter}
+        setSelectedProprietaFilter={setSelectedProprietaFilter}
       />
       <ResultsBottomSheet
         foundMarkers={foundMarkers}

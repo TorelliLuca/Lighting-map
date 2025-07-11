@@ -11,10 +11,13 @@ function MapControls({
   filterOption,
   setFilterOption,
   cities,
+  selectedProprietaFilter,
+  setSelectedProprietaFilter,
 }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const menuRef = useRef(null)
   const buttonRef = useRef(null)
+
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -111,6 +114,12 @@ function MapControls({
                 <option value="LOTTO" className="bg-blue-900 text-white">
                   Lotto
                 </option>
+                <option value="TIPO_LAMPADA" className="bg-blue-900 text-white">
+                  Tipo Lampada
+                </option>
+                <option value="TIPO_APPARECCHIO" className="bg-blue-900 text-white">
+                  Tipo Apparecchio
+                </option>
               </select>
               <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
                 <svg className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -143,6 +152,9 @@ function MapControls({
                 <option value="MARKER" className="bg-blue-900 text-white">
                   Quadro
                 </option>
+                <option value="PROPRIETA" className="bg-blue-900 text-white">
+                  Proprietà
+                </option>
               </select>
               <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
                 <svg className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -150,6 +162,36 @@ function MapControls({
                 </svg>
               </div>
             </div>
+            {/* Radio per Proprietà */}
+            {filterOption === "PROPRIETA" && (
+              <div className="flex flex-col gap-2 mt-2">
+                <span className="text-sm font-medium text-blue-200 mb-1">Proprietà</span>
+                <div className="flex gap-4">
+                  <label className="inline-flex items-center cursor-pointer">
+                    <input
+                      type="radio"
+                      name="proprieta-filter"
+                      value="Municipale"
+                      checked={selectedProprietaFilter === "Municipale"}
+                      onChange={() => setSelectedProprietaFilter("Municipale")}
+                      className="form-radio text-blue-500 focus:ring-blue-500"
+                    />
+                    <span className="ml-1 text-blue-100">Municipale</span>
+                  </label>
+                  <label className="inline-flex items-center cursor-pointer">
+                    <input
+                      type="radio"
+                      name="proprieta-filter"
+                      value="Enelsole"
+                      checked={selectedProprietaFilter === "Enelsole"}
+                      onChange={() => setSelectedProprietaFilter("Enelsole")}
+                      className="form-radio text-blue-500 focus:ring-blue-500"
+                    />
+                    <span className="ml-1 text-blue-100">Enelsole</span>
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

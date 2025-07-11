@@ -124,6 +124,44 @@ const EditLightPointModal = ({
     ]
   }
 
+  // Definizione dei campi da mostrare per QE e PL
+  const campiQE = [
+    "marker",
+    "numero_palo",
+    "indirizzo",
+    "lotto",
+    "quadro",
+    "proprieta",
+    "lat",
+    "lng",
+    "pod",
+    "numero_contatore",
+    "alimentazione",
+    "potenza_contratto",
+    "potenza",
+    "punti_luce"
+  ];
+  const campiPL = [
+    "marker",
+    "numero_palo",
+    "composizione_punto",
+    "indirizzo",
+    "lotto",
+    "quadro",
+    "proprieta",
+    "tipo_apparecchio",
+    "modello_armatura",
+    "numero_apparecchi",
+    "lampada_e_potenza",
+    "tipo_sostegno",
+    "tipo_linea",
+    "promiscuita",
+    "note",
+    "garanzia",
+    "lat",
+    "lng"
+  ];
+
   // Inizializza i dati quando cambia il marker o si apre il modal
   useEffect(() => {
     if (isOpen && marker) {
@@ -450,8 +488,8 @@ const EditLightPointModal = ({
               </div>
             ) : (
               <>
-                {/* Campo lampada e potenza - sempre presente se esiste lampada_potenza */}
-                {(formData.lampada_potenza || formData.lampada || formData.potenza) && (
+                {/* Campo lampada e potenza - solo se marker PL e se esiste lampada_potenza */}
+                {(marker.marker !== "QE" && (formData.lampada_potenza || formData.lampada || formData.potenza)) && (
                   <div className="space-y-2">
                     <label className="block text-sm font-medium text-blue-300">
                       Lampada e Potenza
@@ -479,9 +517,11 @@ const EditLightPointModal = ({
                     </div>
                   </div>
                 )}
-                
-                {/* Altri campi */}
-                {Object.entries(formData).map(([key, value]) => renderField(key, value))}
+                {/* Altri campi filtrati per QE o PL */}
+                {(marker.marker === "QE"
+                  ? campiQE.filter(key => key in formData).map(key => renderField(key, formData[key]))
+                  : campiPL.filter(key => key in formData).map(key => renderField(key, formData[key]))
+                )}
               </>
             )}
           </div>

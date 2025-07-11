@@ -52,6 +52,15 @@ function LegendGlass({ highlightOption, legendColorMap }) {
     legendItems = Object.entries(legendColorMap.quadro).map(([label, color]) => ({ label, color }))
   } else if (highlightOption === "LOTTO" && legendColorMap.lotto) {
     legendItems = Object.entries(legendColorMap.lotto).map(([label, color]) => ({ label, color }))
+  } else if (highlightOption === "TIPO_LAMPADA" && legendColorMap.tipo_lampada) {
+    legendItems = [
+      { label: "PC", color: "#3b82f6" },
+      ...Object.entries(legendColorMap.tipo_lampada)
+        .map(([label, color]) => ({ label: label.split(" ")[0], color }))
+        .filter(item => item.label !== "PC")
+    ]
+  } else if (highlightOption === "TIPO_APPARECCHIO" && legendColorMap.tipo_apparecchio) {
+    legendItems = Object.entries(legendColorMap.tipo_apparecchio).map(([label, color]) => ({ label, color }))
   } else {
     legendItems = [
       { label: "Segnalazione aperta", color: "#FFCC00" },
