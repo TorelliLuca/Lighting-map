@@ -14,6 +14,7 @@ import EditLightPointModal from "../components/EditLightPointModal"
 import AddLightPointModal from "../components/AddLightPointModal"
 import AddElectricPanelForm from "../components/AddElectricPanelForm"
 import LegendGlass from "../components/LegendGlass"
+import SettingsMenu from "../components/SettingsMenu"
 
 import { translateString, transformDateToIT } from "../utils/utils"
 import { createMarkers, setupMarkerClustering, filterMarkers, cleanupMapResources, updateMarkerColors, currentClusterer, generateLegendColorMap } from "../utils/createMarkers.jsx"
@@ -81,6 +82,12 @@ function Dashboard() {
   const editingMarkerRef = useRef(null)
   const originalDataRef = useRef(null)
   const isDraggingRef = useRef(false)
+  const [highlightedMarkerId, setHighlightedMarkerId] = useState(null)
+
+  // Stato per mostrare/nascondere il numero quadro sui marker
+  const [showPanelNumber, setShowPanelNumber] = useState(true)
+  // Stato per mostrare/nascondere il numero palo sui punti luce
+  const [showStreetLampNumber, setShowStreetLampNumber] = useState(false)
 
   // Add this function to save state to localStorage
   const saveStateToStorage = useCallback(() => {
@@ -89,7 +96,8 @@ function Dashboard() {
     }
     localStorage.setItem(STORAGE_KEYS.HIGHLIGHT_OPTION, highlightOption)
     localStorage.setItem(STORAGE_KEYS.FILTER_OPTION, filterOption)
-
+    localStorage.setItem("lighting-map-show-panel-number", JSON.stringify(showPanelNumber))
+    localStorage.setItem("lighting-map-show-streetlamp-number", JSON.stringify(showStreetLampNumber))
     // Save map position if available
     if (map) {
       const center = map.getCenter()
@@ -98,7 +106,7 @@ function Dashboard() {
       }
       localStorage.setItem(STORAGE_KEYS.MAP_ZOOM, map.getZoom().toString())
     }
-  }, [selectedCity, highlightOption, filterOption, map])
+  }, [selectedCity, highlightOption, filterOption, map, showPanelNumber, showStreetLampNumber])
 
 
   // Add this function to restore state from localStorage
@@ -106,6 +114,8 @@ function Dashboard() {
     const storedCity = localStorage.getItem(STORAGE_KEYS.SELECTED_CITY)
     const storedHighlight = localStorage.getItem(STORAGE_KEYS.HIGHLIGHT_OPTION)
     const storedFilter = localStorage.getItem(STORAGE_KEYS.FILTER_OPTION)
+    const storedShowPanelNumber = localStorage.getItem("lighting-map-show-panel-number")
+    const storedShowStreetLampNumber = localStorage.getItem("lighting-map-show-streetlamp-number")
 
     // Only restore city if it's in the user's allowed cities
     if (storedCity && userData?.town_halls_list?.some((city) => city.name === storedCity)) {
@@ -121,6 +131,12 @@ function Dashboard() {
 
     if (storedFilter) {
       setFilterOption(storedFilter)
+    }
+    if (storedShowPanelNumber !== null) {
+      setShowPanelNumber(JSON.parse(storedShowPanelNumber))
+    }
+    if (storedShowStreetLampNumber !== null) {
+      setShowStreetLampNumber(JSON.parse(storedShowStreetLampNumber))
     }
   }, [userData])
 
@@ -261,12 +277,18 @@ function Dashboard() {
 
   useEffect(() => {
     if (allMarkersData.length > 0) {
-      updateMarkerColors(allMarkersData, highlightOption, editingMarkerId)
+      updateMarkerColors(allMarkersData, highlightOption, editingMarkerId, showPanelNumber, showStreetLampNumber)
     }
-  }, [highlightOption, editingMarkerId, allMarkersData])
+  }, [highlightOption, editingMarkerId, allMarkersData, showPanelNumber, showStreetLampNumber])
 
-  
-
+  // Quando cambia showPanelNumber o showStreetLampNumber, forza il cleanup e il rerender dei marker
+  useEffect(() => {
+    if (map && selectedCity && cityDataLoaded) {
+      cleanupMapResources();
+      // Ricarica i marker con il nuovo stato showPanelNumber/showStreetLampNumber
+      cleanupAndLoadMapData();
+    }
+  }, [showPanelNumber, showStreetLampNumber]);
 
   // Monitora i cambiamenti di editingMarker
   useEffect(() => {
@@ -301,6 +323,36 @@ function Dashboard() {
       if (markerObj.ref.content?.classList) markerObj.ref.content.classList.add('editing-marker', 'editing-marker-glow');
     }
   }, [editingMarkerId, allMarkersData, map]);
+
+  // Evidenziazione marker trovato tramite ricerca
+  useEffect(() => {
+
+    if (!allMarkersData.length) return;
+    // Se c'è un marker in editing, non sovrascrivere la sua evidenziazione
+    if (editingMarkerId) return;
+    // Rimuovi la classe da tutti
+    allMarkersData.forEach(m => {
+      if (m.ref && m.ref.content?.classList) {
+        m.ref.content.classList.remove('editing-marker', 'editing-marker-glow');
+      }
+    });
+    // Applica la classe solo al marker selezionato dalla ricerca
+    if (highlightedMarkerId) {
+      const markerObj = allMarkersData.find(m => m.data._id === highlightedMarkerId);
+      if (markerObj && markerObj.ref && markerObj.ref.content?.classList) {
+        console.log("markerObj", markerObj)
+        console.log("cambio classe")
+        markerObj.ref.content.classList.add('editing-marker', 'editing-marker-glow');
+      }
+    }
+  }, [highlightedMarkerId, allMarkersData, editingMarkerId]);
+
+  // Quando chiudi la ricerca o cambi città, rimuovi evidenziazione
+  useEffect(() => {
+    if (foundMarkers.length === 0) {
+      setHighlightedMarkerId(null);
+    }
+  }, [foundMarkers]);
 
   // Add another useEffect to set loading state to false when component unmounts
   useEffect(() => {
@@ -408,6 +460,8 @@ function Dashboard() {
         editingMarkerId,
         handleMarkerDragEnd,
         handleDeleteMarker,
+        showPanelNumber,
+        showStreetLampNumber,
       )
 
       setAllMarkersData(allMarkers)
@@ -739,6 +793,7 @@ function Dashboard() {
     setFoundMarkers(results)
     setMarkerIndex(0)
     setCurrentMarkerIndex(0)
+    setHighlightedMarkerId(results[0].data._id) // Evidenzia il primo risultato
 
     // Center map on first result
     const firstResult = results[0]
@@ -820,6 +875,7 @@ function Dashboard() {
     const newIndex = (markerIndex + 1) % foundMarkers.length
     setMarkerIndex(newIndex)
     setCurrentMarkerIndex(newIndex)
+    setHighlightedMarkerId(foundMarkers[newIndex].data._id) // Evidenzia il nuovo marker
 
     const marker = foundMarkers[newIndex]
     map.setCenter(new window.google.maps.LatLng(Number.parseFloat(marker.data.lat), Number.parseFloat(marker.data.lng)))
@@ -841,6 +897,7 @@ function Dashboard() {
     const newIndex = (markerIndex - 1 + foundMarkers.length) % foundMarkers.length
     setMarkerIndex(newIndex)
     setCurrentMarkerIndex(newIndex)
+    setHighlightedMarkerId(foundMarkers[newIndex].data._id) // Evidenzia il nuovo marker
 
     const marker = foundMarkers[newIndex]
     map.setCenter(new window.google.maps.LatLng(Number.parseFloat(marker.data.lat), Number.parseFloat(marker.data.lng)))
@@ -1175,6 +1232,16 @@ function Dashboard() {
         
         // Ricarica i dati della mappa per mostrare il nuovo elemento
         await cleanupAndLoadMapData()
+
+        // Centra la mappa sul nuovo punto aggiunto
+        if (map && formData.lat && formData.lng) {
+          const latNum = parseFloat(formData.lat)
+          const lngNum = parseFloat(formData.lng)
+          if (!isNaN(latNum) && !isNaN(lngNum)) {
+            map.setCenter(new window.google.maps.LatLng(latNum, lngNum))
+            map.setZoom(18)
+          }
+        }
       }
     } catch (error) {
       console.error('Errore durante l\'aggiunta dell\'elemento:', error)
@@ -1271,26 +1338,14 @@ function Dashboard() {
         />
 
         {/* Legenda glass in alto a destra */}
-        <LegendGlass highlightOption={highlightOption} activeMarkers={activeMarkers} legendColorMap={legendColorMap} />
+        <div className="fixed left-6 bottom-60 z-3">
+          <LegendGlass highlightOption={highlightOption} activeMarkers={activeMarkers} legendColorMap={legendColorMap} />
+        </div>
 
         {/* Map controls - only visible when Street View is not active */}
         {!streetViewVisible && (
           <>
-            <div className="absolute top-22 left-4 z-10 flex flex-col gap-2">
-              <MapButton icon={Info} onClick={() => setShowInfoPanel(true)} title="Mostra Pannello Informazioni" />
-              <MapButton icon={Download} onClick={handleDownloadReport} title="Scarica Report" />
-              {userData?.user_type === "SUPER_ADMIN" && (
-                <MapButton icon={Plus} onClick={handleAddNewElement} title="Aggiungi Nuovo Elemento" />
-              )}
-              <a
-                href="https://www.torellistudio.com/studio/ufaq-category/utilizzo-lighting-map/"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <MapButton icon={HelpCircle} title="Aiuto" />
-              </a>
-            </div>
-
+            {/* Pulsanti principali spostati nel menu impostazioni */}
             <div className="absolute top-1/4 right-4 z-10 flex flex-col gap-2">
               <MapButton icon={LocateFixed} onClick={goToUserLocation} title="Vai alla mia posizione" />
             </div>
@@ -1321,6 +1376,26 @@ function Dashboard() {
         cities={userData?.town_halls_list || []}
         selectedProprietaFilter={selectedProprietaFilter}
         setSelectedProprietaFilter={setSelectedProprietaFilter}
+      />
+      {/* FAB per aggiunta punto, solo per SUPER_ADMIN */}
+      {userData?.user_type === "SUPER_ADMIN" && (
+        <button
+          onClick={handleAddNewElement}
+          className="fixed bottom-60 left-6 z-2 p-3 bg-black/70 hover:bg-blue-900/70 text-blue-200 border border-blue-500/40 rounded-full shadow-[0_0_15px_rgba(59,130,246,0.3)] backdrop-blur-xl transition-all duration-300 focus:outline-none flex items-center justify-center"
+          title="Aggiungi nuovo punto"
+        >
+          <Plus className="h-5 w-5" />
+        </button>
+      )}
+      <SettingsMenu
+        showPanelNumber={showPanelNumber}
+        onTogglePanelNumber={() => setShowPanelNumber((prev) => !prev)}
+        showStreetLampNumber={showStreetLampNumber}
+        onToggleStreetLampNumber={() => setShowStreetLampNumber((prev) => !prev)}
+        onShowStats={() => setShowInfoPanel(true)}
+        onDownloadReport={handleDownloadReport}
+        onShowFaq={() => window.open("https://www.torellistudio.com/studio/ufaq-category/utilizzo-lighting-map/", "_blank")}
+        onShowIlluminazionePubblica={() => window.open("https://www.torellistudio.com/studio/category/illuminazione-pubblica/", "_blank")}
       />
       <ResultsBottomSheet
         foundMarkers={foundMarkers}

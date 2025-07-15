@@ -15,7 +15,7 @@ let mapEventListeners = []
 let lastCreatedMarkers = []
 
 // Custom Electric Panel component with notification status indicator
-const ElectricPanelMarker = ({ color, hasActiveNotifications, isOutOfLaw }) => {
+const ElectricPanelMarker = ({ color, hasActiveNotifications, isOutOfLaw, nPanel, showPanelNumber }) => {
   return (
     <div
       className="flex flex-col items-center justify-center"
@@ -54,11 +54,16 @@ const ElectricPanelMarker = ({ color, hasActiveNotifications, isOutOfLaw }) => {
       ) : (
         <></>
       )}
+      {showPanelNumber && nPanel && (
+        <div className="text-xs text-white bg-black/50 rounded-full px-2 py-1">
+          {nPanel}
+        </div>
+      )}
     </div>
   )
 }
 
-const StreetLampMarker = ({ color, hasActiveNotifications, isOutOfLaw }) => {
+const StreetLampMarker = ({ color, hasActiveNotifications, isOutOfLaw, nPanel }) => {
   return (
     <div
       className="flex flex-col items-center justify-center"
@@ -103,6 +108,11 @@ const StreetLampMarker = ({ color, hasActiveNotifications, isOutOfLaw }) => {
         />
       ) : (
         <></>
+      )}
+      {nPanel && (
+        <div className="text-xs text-white bg-black/50 rounded-full px-2 py-1 mt-1">
+          {nPanel}
+        </div>
       )}
     </div>
   )
@@ -189,6 +199,8 @@ const createMarkers = async (
   editingMarkerId,
   onMarkerDragEnd,
   onDeleteClick,
+  showPanelNumber,
+  showStreetLampNumber,
 ) => {
   if (!window.google || !map) return []
 
@@ -292,7 +304,9 @@ const createMarkers = async (
           color={markerColor}
           hasActiveNotifications={hasActiveNotifications}
           isOutOfLaw={isOutOfLaw}
-        />,
+          nPanel={marker.numero_palo}
+          showPanelNumber={showPanelNumber}
+        />, 
       )
     } else {
       customRoot.render(
@@ -300,7 +314,8 @@ const createMarkers = async (
           color={markerColor}
           hasActiveNotifications={hasActiveNotifications}
           isOutOfLaw={isOutOfLaw}
-        />,
+          nPanel={showStreetLampNumber ? marker.numero_palo : undefined}
+        />, 
       )
     }
 
@@ -368,7 +383,7 @@ const createMarkers = async (
 }
 
 // Funzione per aggiornare i colori dei marker esistenti tramite rerender React
-const updateMarkerColors = (markers, highlightOption, editingMarkerId) => {
+const updateMarkerColors = (markers, highlightOption, editingMarkerId, showPanelNumber, showStreetLampNumber) => {
   // Usa la mappa colori generata per evitare ripetizioni
   const legendColorMap = generateLegendColorMap(markers.map(m => m.data), highlightOption)
   const colorMappings = legendColorMap
@@ -430,6 +445,8 @@ const updateMarkerColors = (markers, highlightOption, editingMarkerId) => {
           color={markerColor}
           hasActiveNotifications={hasActiveNotifications}
           isOutOfLaw={isOutOfLaw}
+          nPanel={data.numero_palo}
+          showPanelNumber={showPanelNumber}
         />
       )
     } else {
@@ -438,6 +455,7 @@ const updateMarkerColors = (markers, highlightOption, editingMarkerId) => {
           color={markerColor}
           hasActiveNotifications={hasActiveNotifications}
           isOutOfLaw={isOutOfLaw}
+          nPanel={showStreetLampNumber ? data.numero_palo : undefined}
         />
       )
     }
@@ -467,6 +485,8 @@ const setupMarkerClustering = async (
   editingMarkerId,
   onMarkerDragEnd,
   onDeleteClick,
+  showPanelNumber,
+  showStreetLampNumber,
 ) => {
   // Make sure Google Maps API is fully loaded
   if (!window.google || !window.google.maps || !map) {
@@ -508,6 +528,8 @@ const setupMarkerClustering = async (
       editingMarkerId,
       onMarkerDragEnd,
       onDeleteClick,
+      showPanelNumber,
+      showStreetLampNumber,
     )
 
     allMarkers = [...allMarkers, ...batchResult]

@@ -86,24 +86,29 @@ const AddLightPointModal = ({
     const container = document.createElement("div")
     container.className = "temp-marker"
     container.innerHTML = `
-      <div style="
-        width: 40px;
-        height: 40px;
-        background: rgba(59, 130, 246, 0.8);
-        border: 3px solid #3b82f6;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: move;
-        box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
-        animation: pulse 2s infinite;
-      ">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
-          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-        </svg>
-      </div>
-    `
+  <div style="
+    width: 44px;
+    height: 44px;
+    background: rgba(59, 130, 246, 0.15);
+    border: 3px dashed #3b82f6;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: move;
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+    animation: pulse 2s infinite;
+  ">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+      <ellipse cx="12" cy="10" rx="6" ry="7" fill="#fffde4" stroke="#facc15" stroke-width="2"/>
+      <rect x="9" y="16" width="6" height="3" rx="1.5" fill="#d1d5db" stroke="#3b82f6" stroke-width="1"/>
+      <rect x="10" y="19" width="4" height="2" rx="1" fill="#3b82f6" />
+      <line x1="12" y1="3" x2="12" y2="0.5" stroke="#facc15" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="7.5" y1="5" x2="5.5" y2="3.5" stroke="#facc15" stroke-width="1.5" stroke-linecap="round"/>
+      <line x1="16.5" y1="5" x2="18.5" y2="3.5" stroke="#facc15" stroke-width="1.5" stroke-linecap="round"/>
+    </svg>
+  </div>
+`
     return container
   }
 

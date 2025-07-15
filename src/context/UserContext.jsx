@@ -190,7 +190,6 @@ export const UserProvider = ({ children }) => {
     try {
       const response = await api.post("/users/refresh-token")
       const newToken = response.data.token
-      console.log(newToken)
       updateToken(newToken)
       return true
     } catch (error) {

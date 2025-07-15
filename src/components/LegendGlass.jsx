@@ -69,7 +69,7 @@ function LegendGlass({ highlightOption, legendColorMap }) {
   }
 
   return (
-    <div className="fixed top-40 right-4 z-30 select-none">
+    <div className="fixed bottom-42 left-6 z-2 select-none">
       {/* Bottone palette */}
       <button
         ref={buttonRef}
@@ -83,7 +83,7 @@ function LegendGlass({ highlightOption, legendColorMap }) {
       {/* Legenda espansa, ora scorribile e con scrollbar custom */}
       <div
         ref={legendRef}
-        className={`absolute right-0 mt-4 w-64 max-w-[90vw] bg-black/70 border border-blue-500/40 rounded-xl shadow-[0_0_25px_rgba(0,149,255,0.15)] backdrop-blur-xl p-5 transition-all duration-300 overflow-hidden ${open ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"} scrollbar-thin scrollbar-thumb-blue-700/70 scrollbar-track-blue-950/40`}
+        className={`fixed left-6 bottom-60 z-[9999] bg-black/70 backdrop-blur-xl border border-blue-500/40 rounded-xl shadow-[0_0_25px_rgba(0,149,255,0.15)] p-6 space-y-6 min-w-[260px] transition-all duration-300 overflow-hidden ${open ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"} scrollbar-thin scrollbar-thumb-blue-700/70 scrollbar-track-blue-950/40`}
         style={{
           backdropFilter: "blur(16px)",
           WebkitBackdropFilter: "blur(16px)",
