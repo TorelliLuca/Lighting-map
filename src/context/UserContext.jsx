@@ -288,6 +288,26 @@ export const UserProvider = ({ children }) => {
     }
   }
 
+  const getTownhallGeojson = async (selectedCity) => {
+    try {
+      const response = await api.get(`/townHalls/${selectedCity}/geojson`)
+      return response
+    } catch (error) {
+      console.error(error)
+      return
+    }
+  }
+
+  const getTownhallLightpointsCount = async () =>{
+    try {
+      const response = await api.get(`/townHalls/lightPoints/counts?userId=${userData.id}`)
+      return response
+    } catch (error) {
+      console.error(error)
+      return
+    }
+  }
+
   return (
     <UserContext.Provider 
       value={{ 
@@ -309,6 +329,8 @@ export const UserProvider = ({ children }) => {
         addLightPoint,
         deleteLightPoint,
         getAverageResponseTime,
+        getTownhallGeojson, // aggiunto qui
+        getTownhallLightpointsCount,
         isAuthenticated: !!token
       }}
     >

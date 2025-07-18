@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { Filter, X, MapPin, Building, Grid } from "lucide-react"
+import InfoTooltip from "./ui/InfoTooltip"
 
 function MapControls({
   selectedCity,
@@ -62,7 +63,10 @@ function MapControls({
             <label htmlFor="city" className="flex items-center gap-2 text-sm font-medium text-blue-200">
               <MapPin className="h-4 w-4" />
               Città
+              <InfoTooltip text="Seleziona la città di cui vuoi visualizzare punti luce sulla mappa. Cambiando città verranno caricati solo i dati relativi al comune scelto." className="top-0.5"/>
             </label>
+            
+
             <div className="relative">
               <select
                 id="city"
@@ -92,6 +96,7 @@ function MapControls({
             <label htmlFor="highlight" className="flex items-center gap-2 text-sm font-medium text-blue-200">
               <Building className="h-4 w-4" />
               Evidenzia Per
+              <InfoTooltip text="Scegli come evidenziare i punti luce sulla mappa: per quadro elettrico, proprietà (EnelSole, comunale, altro), lotto di appartenenza, tipo di lampada o apparecchio illuminante." className="top-0.5"/>
             </label>
             <div className="relative">
               <select
@@ -133,6 +138,8 @@ function MapControls({
             <label htmlFor="filter" className="flex items-center gap-2 text-sm font-medium text-blue-200">
               <Grid className="h-4 w-4" />
               Filtra Per
+              <InfoTooltip text="Filtra i punti luce e i quadri elettrici per categoria: visualizza solo quelli con segnalazioni aperte, solo i quadri, oppure seleziona per proprietà (EnelSole o comunali)." className="top-0.5"/>
+
             </label>
             <div className="relative">
               <select

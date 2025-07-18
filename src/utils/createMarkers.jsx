@@ -237,6 +237,7 @@ const createMarkers = async (
   `
   document.head.appendChild(style)
 
+
   for (const marker of markers) {
     const content = { ...marker }
     delete content.lat
@@ -700,7 +701,7 @@ const filterMarkers = (markers, filterType, map, selectedProprietaFilter) => {
         if (zoom < 10) {
           // Add a limited number of markers to the map for clustering
           // This prevents too many markers from being rendered at once
-          const maxMarkersAtLowZoom = 500
+          const maxMarkersAtLowZoom = 100
           const markersToShow = filteredMarkers.slice(0, maxMarkersAtLowZoom)
 
           markersToShow.forEach((marker) => {

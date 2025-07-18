@@ -7,17 +7,20 @@ import Header from "../components/Header"
 import MapControls from "../components/MapControls"
 import InfoPanel from "../components/InfoPanel"
 import MapButton from "../components/MapButton"
-import { Info, Download, HelpCircle, LocateFixed, Plus } from "lucide-react"
+import {  LocateFixed, Plus } from "lucide-react"
 import ResultsBottomSheet from "../components/ResultsBottomSheet"
 import { MapLoader } from "../components/MapLoader"
 import EditLightPointModal from "../components/EditLightPointModal"
 import AddLightPointModal from "../components/AddLightPointModal"
-import AddElectricPanelForm from "../components/AddElectricPanelForm"
+
 import LegendGlass from "../components/LegendGlass"
 import SettingsMenu from "../components/SettingsMenu"
+import MapLibreMap from "../components/MapLibreMap";
+import ErrorBoundary from "../components/ErrorBoundary.jsx"
 
 import { translateString, transformDateToIT } from "../utils/utils"
 import { createMarkers, setupMarkerClustering, filterMarkers, cleanupMapResources, updateMarkerColors, currentClusterer, generateLegendColorMap } from "../utils/createMarkers.jsx"
+import useFilteredMarkers from '../hooks/useFilteredMarkers.js';
 
 import toast, { Toaster } from "react-hot-toast"
 
@@ -34,7 +37,7 @@ const STORAGE_KEYS = {
 }
 
 function Dashboard() {
-  const { userData, loadSelectedTownhalls, downloadReport, updateLightPoint, addLightPoint, deleteLightPoint, refreshToken } = useContext(UserContext)
+  const { userData, loadSelectedTownhalls, downloadReport, updateLightPoint, addLightPoint, deleteLightPoint, refreshToken, getTownhallGeojson, getTownhallLightpointsCount } = useContext(UserContext)
   const navigate = useNavigate()
   const mapRef = useRef(null)
   const infoWindowRef = useRef(null)
@@ -89,6 +92,90 @@ function Dashboard() {
   // Stato per mostrare/nascondere il numero palo sui punti luce
   const [showStreetLampNumber, setShowStreetLampNumber] = useState(false)
 
+  // Stato per la modalità di visualizzazione ("semplice" o "complessa")
+  const [visualizationMode, setVisualizationMode] = useState("complessa")
+  const [isComplexAllowed, setIsComplexAllowed] = useState(true)
+
+  // Nuovo stato per markers semplici (modalità MapLibre)
+  const [simpleMarkers, setSimpleMarkers] = useState([]);
+  // Stato per il marker in editing (modalità semplice)
+  const [editingSimpleMarker, setEditingSimpleMarker] = useState(null);
+  const [isEditSimpleModalOpen, setIsEditSimpleModalOpen] = useState(false);
+  const [originalSimpleData, setOriginalSimpleData] = useState(null);
+  const [pendingReportParams, setPendingReportParams] = useState({});
+  const [cleanupTrigger, setCleanupTrigger] = useState(0);
+  const [shouldCleanupMap, setShouldCleanupMap] = useState(false);
+
+  // Carica i dati GeoJSON quando la modalità è semplice e cambia la città
+  useEffect(() => {
+    if (visualizationMode !== "semplice" || !selectedCity) {
+      setSimpleMarkers([]);
+      setActiveMarkers([]); // Svuota anche activeMarkers
+      return;
+    }
+    setIsMapLoading(true);
+    getTownhallGeojson(selectedCity)
+      .then(res => {
+        if (res?.data?.features) {
+          // Trasforma i marker per simpleMarkers
+          const simpleMarkers = res.data.features.map(f => ({
+            ...f.properties,
+            lat: f.geometry.coordinates[1],
+            lng: f.geometry.coordinates[0],
+            city: res.data.city 
+          }));
+          setSimpleMarkers(simpleMarkers);
+          // Trasforma i marker per activeMarkers (formato richiesto)
+          try{
+            
+          const activeMarkersFormat = simpleMarkers.map(m => {
+            // Controllo robusto su lat/lng
+            let lat = m.lat;
+            let lng = m.lng;
+            // Se sono stringhe numeriche, le converto in numero
+            if (typeof lat === "string") lat = parseFloat(lat.replace(",", "."));
+            if (typeof lng === "string") lng = parseFloat(lng.replace(",", "."));
+            // Se non sono numeri validi, fallback a ""
+            const latStr = (typeof lat === "number" && !isNaN(lat)) ? lat.toString() : "";
+            const lngStr = (typeof lng === "number" && !isNaN(lng)) ? lng.toString() : "";
+
+            return {
+              data: {
+                ...m,
+                lat: latStr,
+                lng: lngStr,
+              },
+              ref: ""
+            };
+          });
+          setActiveMarkers(activeMarkersFormat);          
+        }catch(e){setActiveMarkers([]);}
+        } else {
+          setSimpleMarkers([]);
+          setActiveMarkers([]);
+        }
+      })
+      .catch(() => {
+        setSimpleMarkers([]);
+        setActiveMarkers([]);
+      })
+      .finally(() => setIsMapLoading(false));
+  }, [visualizationMode, selectedCity, getTownhallGeojson]);
+
+
+
+  
+
+
+
+  // Applica i filtri lato client ai marker semplici (MapLibre)
+  const { geojsonData: simpleGeojsonData } = useFilteredMarkers({
+    markers: simpleMarkers,
+    filterOption,
+    selectedProprietaFilter,
+    highlightOption,
+  });
+
   // Add this function to save state to localStorage
   const saveStateToStorage = useCallback(() => {
     if (selectedCity) {
@@ -98,6 +185,7 @@ function Dashboard() {
     localStorage.setItem(STORAGE_KEYS.FILTER_OPTION, filterOption)
     localStorage.setItem("lighting-map-show-panel-number", JSON.stringify(showPanelNumber))
     localStorage.setItem("lighting-map-show-streetlamp-number", JSON.stringify(showStreetLampNumber))
+    localStorage.setItem("lighting-map-visualization-mode", visualizationMode)
     // Save map position if available
     if (map) {
       const center = map.getCenter()
@@ -106,7 +194,7 @@ function Dashboard() {
       }
       localStorage.setItem(STORAGE_KEYS.MAP_ZOOM, map.getZoom().toString())
     }
-  }, [selectedCity, highlightOption, filterOption, map, showPanelNumber, showStreetLampNumber])
+  }, [selectedCity, highlightOption, filterOption, map, showPanelNumber, showStreetLampNumber, visualizationMode])
 
 
   // Add this function to restore state from localStorage
@@ -116,6 +204,7 @@ function Dashboard() {
     const storedFilter = localStorage.getItem(STORAGE_KEYS.FILTER_OPTION)
     const storedShowPanelNumber = localStorage.getItem("lighting-map-show-panel-number")
     const storedShowStreetLampNumber = localStorage.getItem("lighting-map-show-streetlamp-number")
+    const storedVisualizationMode = localStorage.getItem("lighting-map-visualization-mode")
 
     // Only restore city if it's in the user's allowed cities
     if (storedCity && userData?.town_halls_list?.some((city) => city.name === storedCity)) {
@@ -137,6 +226,9 @@ function Dashboard() {
     }
     if (storedShowStreetLampNumber !== null) {
       setShowStreetLampNumber(JSON.parse(storedShowStreetLampNumber))
+    }
+    if (storedVisualizationMode) {
+      setVisualizationMode(storedVisualizationMode)
     }
   }, [userData])
 
@@ -161,11 +253,19 @@ function Dashboard() {
 
   // Effetto separato per l'inizializzazione della mappa (eseguito solo una volta)
   useEffect(() => {
+    if (visualizationMode !== "complessa") {
+      setMap(null); // azzera lo stato mappa quando si esce dalla modalità complessa
+      return;
+    }
+
     const scriptId = "google-maps-script"
 
     // Funzione di inizializzazione della mappa
     const initMap = () => {
       if (!mapRef.current) return
+
+      // Svuota il div prima di reinizializzare
+      mapRef.current.innerHTML = "";
 
       const mapInstance = new window.google.maps.Map(mapRef.current, {
         zoom: 15,
@@ -251,8 +351,9 @@ function Dashboard() {
 
       // Clean up all map resources
       cleanupMapResources()
+      setMap(null) // azzera lo stato mappa quando il componente viene smontato
     }
-  }, [])
+  }, [visualizationMode])
 
   // Effect to load map data when map is ready and city is selected
   useEffect(() => {
@@ -340,8 +441,7 @@ function Dashboard() {
     if (highlightedMarkerId) {
       const markerObj = allMarkersData.find(m => m.data._id === highlightedMarkerId);
       if (markerObj && markerObj.ref && markerObj.ref.content?.classList) {
-        console.log("markerObj", markerObj)
-        console.log("cambio classe")
+
         markerObj.ref.content.classList.add('editing-marker', 'editing-marker-glow');
       }
     }
@@ -399,6 +499,50 @@ function Dashboard() {
     }
   }, [selectedCity, highlightOption, filterOption, map, saveStateToStorage, userData])
 
+  // Aggiorna la soglia ogni volta che cambia allMarkersData
+  useEffect(() => {
+    const MAX_MARKERS_COMPLEX = 1000;
+    if (allMarkersData.length > MAX_MARKERS_COMPLEX) {
+      setVisualizationMode("semplice")
+      setIsComplexAllowed(false)
+    } else {
+      setIsComplexAllowed(true)
+    }
+  }, [allMarkersData])
+
+  // Stato per la mappa città -> numero punti luce
+  const [cityLightPointsMap, setCityLightPointsMap] = useState({});
+  const [isLoadingCityLightPoints, setIsLoadingCityLightPoints] = useState(false);
+
+  // Ogni volta che cambia selectedCity, aggiorna la mappa e lo stato
+  useEffect(() => {
+    async function fetchCityLightPoints() {
+      if (!userData?.id || !selectedCity) return;
+      setIsLoadingCityLightPoints(true);
+      try {
+        const res = await getTownhallLightpointsCount(); 
+
+        setCityLightPointsMap(prev => ({ ...prev, [selectedCity]: res.data[selectedCity] }));
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setIsLoadingCityLightPoints(false);
+      }
+    }
+    fetchCityLightPoints();
+  }, [userData?._id, selectedCity]);
+
+  // Aggiorna isComplexAllowed ogni volta che cambia la città o la mappa
+  useEffect(() => {
+    if (selectedCity && cityLightPointsMap[selectedCity] !== undefined) {
+      setIsComplexAllowed(cityLightPointsMap[selectedCity] <= 2000);
+      // Se la modalità attuale è complessa ma non permessa, forzo la semplice
+      if (visualizationMode === "complessa" && cityLightPointsMap[selectedCity] > 2000) {
+        setVisualizationMode("semplice");
+      }
+    }
+  }, [selectedCity, cityLightPointsMap]);
+
   // Function to clean up previous data and load new data
   const cleanupAndLoadMapData = async () => {
 
@@ -444,8 +588,7 @@ function Dashboard() {
 
       const markers = await processMarkers()
 
-      setJsonResponseForDownload(createReportJSON(data))
-
+      
       // Store all markers in state e la mappa colori
       const { markers: allMarkers } = await setupMarkerClustering(
         markers,
@@ -540,61 +683,8 @@ function Dashboard() {
     }
   }
 
-  const createReportJSON = (th) => {
-    const jsonToSend = {
-      segnalazioni_in_corso: [],
-      segnalazioni_risolte: [],
-      operazioni_effettuate: [],
-    }
-
-    th.punti_luce.forEach((pl) => {
-      if (pl.segnalazioni_in_corso && pl.segnalazioni_in_corso.length > 0) {
-        pl.segnalazioni_in_corso.forEach((report) => {
-          const objToInsert = {
-            COMUNE: selectedCity,
-            NUMERO_PALO: pl.numero_palo,
-            INDIRIZZO: pl.indirizzo,
-            DATA_SEGNALAZIONE: transformDateToIT(report.report_date),
-            TIPO_DI_SEGNALAZIONE: translateString(report.report_type),
-            DESCRIZIONE: report.description,
-          }
-          jsonToSend.segnalazioni_in_corso.push(objToInsert)
-        })
-      }
-
-      if (pl.segnalazioni_risolte && pl.segnalazioni_risolte.length > 0) {
-        pl.segnalazioni_risolte.forEach((report) => {
-          const objToInsert = {
-            COMUNE: selectedCity,
-            NUMERO_PALO: pl.numero_palo,
-            INDIRIZZO: pl.indirizzo,
-            DATA_SEGNALAZIONE: transformDateToIT(report.report_date),
-            TIPO_DI_SEGNALAZIONE: translateString(report.report_type),
-            DESCRIZIONE: report.description,
-          }
-          jsonToSend.segnalazioni_risolte.push(objToInsert)
-        })
-      }
-
-      if (pl.operazioni_effettuate && pl.operazioni_effettuate.length > 0) {
-        pl.operazioni_effettuate.forEach((operation) => {
-          const objToInsert = {
-            COMUNE: selectedCity,
-            NUMERO_PALO: pl.numero_palo,
-            INDIRIZZO: pl.indirizzo,
-            DATA_OPERAZIONE: transformDateToIT(operation.operation_date),
-            TIPO_DI_OPERAZIONE: translateString(operation.operation_type),
-            DESCRIZIONE: operation.note,
-            RESPONSABILE_OPERAZIONE: operation.operation_responsible
-              ? operation.operation_responsible.name + "_" + operation.operation_responsible.surname
-              : "",
-          }
-          jsonToSend.operazioni_effettuate.push(objToInsert)
-        })
-      }
-    })
-
-    return jsonToSend
+  const createReportJSON = async () => {
+    
   }
 
   const startGeolocation = () => {
@@ -728,10 +818,70 @@ function Dashboard() {
   }
 
   const handleDownloadReport = async () => {
-    if (!jsonResponseForDownload) return
+
+    if(!selectedCity) return
+
+    const response = await loadSelectedTownhalls(selectedCity)
+      
+    const th = await response.data
+
+    const jsonToSend = {
+      segnalazioni_in_corso: [],
+      segnalazioni_risolte: [],
+      operazioni_effettuate: [],
+    }
+
+    th.punti_luce.forEach((pl) => {
+      if (pl.segnalazioni_in_corso && pl.segnalazioni_in_corso.length > 0) {
+        pl.segnalazioni_in_corso.forEach((report) => {
+          const objToInsert = {
+            COMUNE: selectedCity,
+            NUMERO_PALO: pl.numero_palo,
+            INDIRIZZO: pl.indirizzo,
+            DATA_SEGNALAZIONE: transformDateToIT(report.report_date),
+            TIPO_DI_SEGNALAZIONE: translateString(report.report_type),
+            DESCRIZIONE: report.description,
+          }
+          jsonToSend.segnalazioni_in_corso.push(objToInsert)
+        })
+      }
+
+      if (pl.segnalazioni_risolte && pl.segnalazioni_risolte.length > 0) {
+        pl.segnalazioni_risolte.forEach((report) => {
+          const objToInsert = {
+            COMUNE: selectedCity,
+            NUMERO_PALO: pl.numero_palo,
+            INDIRIZZO: pl.indirizzo,
+            DATA_SEGNALAZIONE: transformDateToIT(report.report_date),
+            TIPO_DI_SEGNALAZIONE: translateString(report.report_type),
+            DESCRIZIONE: report.description,
+          }
+          jsonToSend.segnalazioni_risolte.push(objToInsert)
+        })
+      }
+
+      if (pl.operazioni_effettuate && pl.operazioni_effettuate.length > 0) {
+        pl.operazioni_effettuate.forEach((operation) => {
+          const objToInsert = {
+            COMUNE: selectedCity,
+            NUMERO_PALO: pl.numero_palo,
+            INDIRIZZO: pl.indirizzo,
+            DATA_OPERAZIONE: transformDateToIT(operation.operation_date),
+            TIPO_DI_OPERAZIONE: translateString(operation.operation_type),
+            DESCRIZIONE: operation.note,
+            RESPONSABILE_OPERAZIONE: operation.operation_responsible
+              ? operation.operation_responsible.name + "_" + operation.operation_responsible.surname
+              : "",
+          }
+          jsonToSend.operazioni_effettuate.push(objToInsert)
+        })
+      }
+    })
+
+    if (!jsonToSend) return
 
     try {
-      const response = await downloadReport(jsonResponseForDownload)
+      const response = await downloadReport(jsonToSend)
       const blob = response.data
 
       if (blob && blob.size > 0) {
@@ -1303,6 +1453,81 @@ function Dashboard() {
     }
   }
 
+  // Funzione per cambiare la modalità di visualizzazione
+  const handleToggleVisualizationMode = () => {
+    if (isComplexAllowed) {
+      setVisualizationMode((prev) => (prev === "complessa" ? "semplice" : "complessa"));
+    }
+  };
+
+  // Funzione per gestire l'edit in modalità semplice (MapLibre)
+  const handleEditSimpleClick = (marker) => {
+    setEditingSimpleMarker(marker);
+    setOriginalSimpleData({ ...marker });
+    setIsEditSimpleModalOpen(true);
+  };
+
+  // Funzione per gestire il salvataggio in modalità semplice (MapLibre)
+  const handleSaveSimpleMarker = async (updatedMarker) => {
+    try {
+      // Chiamata API
+      await updateLightPoint(updatedMarker._id, updatedMarker);
+      // Aggiorna lo stato locale
+      setSimpleMarkers(prevMarkers => prevMarkers.map(m => m._id === updatedMarker._id ? { ...updatedMarker } : m));
+      setIsEditSimpleModalOpen(false);
+      setEditingSimpleMarker(null);
+      setOriginalSimpleData(null);
+      toast.success("Marker aggiornato con successo");
+    } catch (error) {
+      console.error('Errore durante il salvataggio del marker:', error);
+      toast.error("Errore durante il salvataggio del marker");
+    }
+  };
+
+  // Funzione per gestire l'eliminazione in modalità semplice (MapLibre)
+  const handleDeleteSimpleMarker = async (marker) => {
+    const isConfirmed = window.confirm(
+      `Sei sicuro di voler eliminare il ${marker.marker === "QE" ? "quadro elettrico" : "punto luce"} "${marker.numero_palo}"?\n\nQuesta azione non può essere annullata.`
+    );
+    if (!isConfirmed) return;
+    try {
+      await deleteLightPoint(marker._id);
+      setSimpleMarkers(prevMarkers => prevMarkers.filter(m => m._id !== marker._id));
+      toast.success("Elemento eliminato con successo");
+      setIsEditSimpleModalOpen(false);
+      setEditingSimpleMarker(null);
+      setOriginalSimpleData(null);
+    } catch (error) {
+      console.error('Errore durante l\'eliminazione del marker:', error);
+      toast.error("Errore durante l'eliminazione dell'elemento");
+    }
+  };
+
+  // Funzione per aggiornare la posizione del marker durante il drag (MapLibre)
+  const handleSimpleMarkerPositionChange = (markerId, newLat, newLng) => {
+    setSimpleMarkers(prevMarkers => prevMarkers.map(m => m._id === markerId ? { ...m, lat: newLat, lng: newLng } : m));
+    if (editingSimpleMarker && editingSimpleMarker._id === markerId) {
+      setEditingSimpleMarker(prev => ({ ...prev, lat: newLat, lng: newLng }));
+    }
+  };
+
+  // Funzione da passare a InfoWindow per triggerare il cleanup e la navigazione
+  const handleBeforeReport = (params) => {
+    setPendingReportParams(params);
+    setCleanupTrigger(t => t + 1); // Cambia il trigger per attivare il cleanup
+  };
+
+  // Callback da passare a MapLibreMap: naviga solo dopo il cleanup
+  const handleAfterCleanup = () => {
+    if (pendingReportParams) {
+      navigate(
+        `/report?comune=${encodeURIComponent(pendingReportParams.city)}&numeroPalo=${encodeURIComponent(pendingReportParams.numeroPalo)}&lat=${encodeURIComponent(pendingReportParams.lat)}&lng=${encodeURIComponent(pendingReportParams.lng)}&adr=${encodeURIComponent(pendingReportParams.addr)}`
+      );
+      setPendingReportParams(null);
+    }
+  };
+
+
   return (
     <div className="flex flex-col h-[100vh] max-h-[100vh] overflow-hidden bg-gradient-to-br from-black via-blue-950 to-black">
       <Header
@@ -1327,21 +1552,40 @@ function Dashboard() {
 
       <div className="relative flex-grow" ref={mapContainerRef} id="map-container">
         {/* Main map container - always present */}
-        <div
-          ref={mapRef}
-          className="w-full flex-grow"
-          style={{
-            position: "relative",
-            zIndex: streetViewVisible ? 0 : 1,
-            height: "calc(100vh - var(--header-height))",
-          }}
-        />
-
+        {visualizationMode === "semplice" ? (
+          simpleGeojsonData  ? (
+            <ErrorBoundary>
+              <MapLibreMap
+                geojsonData={simpleGeojsonData}
+                showStreetLampNumber={showStreetLampNumber}
+                showPanelNumber={showPanelNumber}
+                onEditClick={handleEditSimpleClick}
+                onDeleteClick={handleDeleteSimpleMarker}
+                editingMarkerId={editingSimpleMarker ? editingSimpleMarker._id : null}
+                onMarkerPositionChange={handleSimpleMarkerPositionChange}
+                selectedCity={selectedCity}
+                onBeforeReport={handleBeforeReport}
+                onBeforeReportCleanupTrigger={cleanupTrigger}
+                onAfterCleanup={handleAfterCleanup}
+              />
+            </ErrorBoundary>
+          ) : <MapLoader />
+        ) : (
+          <div
+            key={visualizationMode}
+            ref={mapRef}
+            className="w-full flex-grow"
+            style={{
+              position: "relative",
+              zIndex: streetViewVisible ? 0 : 1,
+              height: "calc(100vh - var(--header-height))",
+            }}
+          />
+        )}
         {/* Legenda glass in alto a destra */}
         <div className="fixed left-6 bottom-60 z-3">
           <LegendGlass highlightOption={highlightOption} activeMarkers={activeMarkers} legendColorMap={legendColorMap} />
         </div>
-
         {/* Map controls - only visible when Street View is not active */}
         {!streetViewVisible && (
           <>
@@ -1349,12 +1593,10 @@ function Dashboard() {
             <div className="absolute top-1/4 right-4 z-10 flex flex-col gap-2">
               <MapButton icon={LocateFixed} onClick={goToUserLocation} title="Vai alla mia posizione" />
             </div>
-
             {showInfoPanel && <InfoPanel activeMarkers={activeMarkers} onClose={() => setShowInfoPanel(false)} townhallName={selectedCity} />}
           </>
         )}
         <Toaster position="top-right" />
-
       </div>
 
       <MapControls
@@ -1394,8 +1636,14 @@ function Dashboard() {
         onToggleStreetLampNumber={() => setShowStreetLampNumber((prev) => !prev)}
         onShowStats={() => setShowInfoPanel(true)}
         onDownloadReport={handleDownloadReport}
+        onAddPoint={handleAddNewElement}
         onShowFaq={() => window.open("https://www.torellistudio.com/studio/ufaq-category/utilizzo-lighting-map/", "_blank")}
         onShowIlluminazionePubblica={() => window.open("https://www.torellistudio.com/studio/category/illuminazione-pubblica/", "_blank")}
+        isSuperAdmin={userData?.role === "superadmin"}
+        visualizationMode={visualizationMode}
+        onToggleVisualizationMode={handleToggleVisualizationMode}
+        isComplexAllowed={isComplexAllowed}
+        isLoadingCityLightPoints={isLoadingCityLightPoints}
       />
       <ResultsBottomSheet
         foundMarkers={foundMarkers}
@@ -1425,6 +1673,18 @@ function Dashboard() {
         map={map}
         selectedCity={selectedCity}
         userData={userData}
+      />
+      <EditLightPointModal
+        isOpen={isEditSimpleModalOpen}
+        marker={editingSimpleMarker}
+        onClose={() => {
+          setIsEditSimpleModalOpen(false);
+          setEditingSimpleMarker(null);
+          setOriginalSimpleData(null);
+        }}
+        onSave={handleSaveSimpleMarker}
+        map={null} // non serve per MapLibre
+        allMarkersData={simpleMarkers}
       />
       <style jsx="true">{`
         :root {

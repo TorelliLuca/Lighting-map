@@ -37,6 +37,7 @@ export const clearBlanket = (str) => {
     "punti_luce",
     "tipo",
     "__v",
+    "city"
   ];
   
   export const listIgnoratedFieldsQE = [
@@ -55,6 +56,7 @@ export const clearBlanket = (str) => {
     "note",
     "garanzia",
     "__v",
+    "city"
   ];
   
   // Translation dictionary

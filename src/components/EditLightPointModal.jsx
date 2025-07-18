@@ -1,6 +1,7 @@
 "use client"
 import { useState, useEffect } from "react"
 import { X, Save, MapPin, RotateCcw, Crosshair } from "lucide-react"
+import toast from "react-hot-toast"
 
 const EditLightPointModal = ({
   marker,
@@ -16,6 +17,7 @@ const EditLightPointModal = ({
   const [originalData, setOriginalData] = useState({})
   const [hasChanges, setHasChanges] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isFetchingAddress, setIsFetchingAddress] = useState(false)
 
   // Opzioni per le select
   const selectOptions = {
@@ -190,31 +192,45 @@ const EditLightPointModal = ({
 
   // Gestione drag marker sulla mappa
   useEffect(() => {
-    if (!isOpen || !map || !marker) return;
-    const markerObj = allMarkersData.find(m => m.data._id === marker._id);
-    if (!markerObj || !markerObj.ref) return;
-    markerObj.ref.gmpDraggable = true;
-    // Listener per aggiornare la posizione temporanea durante il drag
-    
-    const dragListener = markerObj.ref.addListener("drag", (event) => {
-      setTempPosition({ lat: event.latLng.lat(), lng: event.latLng.lng() });
-    });
-    // Listener per aggiornare la posizione anche a fine drag (per sicurezza)
-    const dragEndListener = markerObj.ref.addListener("dragend", (event) => {
-      setTempPosition({ lat: event.latLng.lat(), lng: event.latLng.lng() });
-    });
-    // Evidenzia marker SOLO se il modal è aperto
-    if (markerObj.ref.content?.classList) {
-      markerObj.ref.content.classList.add('editing-marker', 'editing-marker-glow');
+    if (!isOpen || !marker) return;
+    // Se sono in modalità Google Maps
+    if (map && allMarkersData && allMarkersData.length > 0) {
+      const markerObj = allMarkersData.find(m => m.data._id === marker._id);
+      if (!markerObj || !markerObj.ref) return;
+      markerObj.ref.gmpDraggable = true;
+      // Listener per aggiornare la posizione temporanea durante il drag
+      const dragListener = markerObj.ref.addListener("drag", (event) => {
+        setTempPosition({ lat: event.latLng.lat(), lng: event.latLng.lng() });
+      });
+      // Listener per aggiornare la posizione anche a fine drag (per sicurezza)
+      const dragEndListener = markerObj.ref.addListener("dragend", (event) => {
+        setTempPosition({ lat: event.latLng.lat(), lng: event.latLng.lng() });
+      });
+      // Evidenzia marker SOLO se il modal è aperto
+      if (markerObj.ref.content?.classList) {
+        markerObj.ref.content.classList.add('editing-marker', 'editing-marker-glow');
+      }
+      // Pulizia
+      return () => {
+        markerObj.ref.gmpDraggable = false;
+        if (markerObj.ref.content?.classList) markerObj.ref.content.classList.remove('editing-marker', 'editing-marker-glow');
+        if (dragListener && dragListener.remove) dragListener.remove();
+        if (dragEndListener && dragEndListener.remove) dragEndListener.remove();
+      };
     }
-    // Pulizia
-    return () => {
-      markerObj.ref.gmpDraggable = false;
-      if (markerObj.ref.content?.classList) markerObj.ref.content.classList.remove('editing-marker', 'editing-marker-glow');
-      if (dragListener && dragListener.remove) dragListener.remove();
-      if (dragEndListener && dragEndListener.remove) dragEndListener.remove();
-    };
+    // In modalità MapLibre il drag è gestito dal parent tramite callback e marker HTML
   }, [isOpen, map, marker, allMarkersData]);
+
+  // In modalità MapLibre: aggiorna la posizione tramite callback se fornita
+  useEffect(() => {
+    if (!isOpen || !marker) return;
+    if (!map && typeof window !== 'undefined' && marker._id && tempPosition) {
+      // Se esiste una callback onMarkerPositionChange passata dal parent
+      if (typeof window.onMarkerPositionChange === 'function') {
+        window.onMarkerPositionChange(marker._id, tempPosition.lat, tempPosition.lng);
+      }
+    }
+  }, [tempPosition, isOpen, map, marker]);
 
   // Gestione cambiamenti nei campi
   useEffect(() => {
@@ -225,6 +241,7 @@ const EditLightPointModal = ({
       setHasChanges(false)
       return
     }
+
     if (
       JSON.stringify(formData) !== JSON.stringify(originalData) ||
       tempPosition.lat !== marker.lat ||
@@ -232,13 +249,41 @@ const EditLightPointModal = ({
     ) {
       setHasChanges(true)
     } else {
-      setHasChanges(false)
+      //setHasChanges(false)
     }
   }, [formData, originalData, tempPosition, marker])
 
   const handleInputChange = (key, value) => {
     setFormData(prev => ({ ...prev, [key]: value }))
   }
+
+  // Funzione per ottenere l'indirizzo da lat/lng tramite Google Maps Geocoding API
+  const fetchAddressFromLatLng = async () => {
+    if (!tempPosition?.lat || !tempPosition?.lng) return;
+    setIsFetchingAddress(true);
+    try {
+      const geocoder = new window.google.maps.Geocoder();
+      const latlng = { lat: Number(tempPosition.lat), lng: Number(tempPosition.lng) };
+      geocoder.geocode({ location: latlng }, (results, status) => {
+        if (status === "OK" && results && results[0]) {
+          const routeComponent = results[0].address_components.find(comp => comp.types.includes("route"));
+          const numberComponent = results[0].address_components.find(comp => comp.types.includes("street_number"));
+          const street = [
+            routeComponent ? routeComponent.long_name : "",
+            numberComponent ? numberComponent.long_name : ""
+          ].filter(Boolean).join(" ");
+          handleInputChange("indirizzo", street);
+        } else {
+          toast.error("Impossibile trovare l'indirizzo per queste coordinate.");
+        }
+        setIsFetchingAddress(false);
+      });
+    } catch (error) {
+      setIsFetchingAddress(false);
+      toast.error("Errore durante la ricerca dell'indirizzo.");
+    }
+  };
+
 
   const handleSave = async () => {
     if (!hasChanges) return
@@ -304,17 +349,24 @@ const EditLightPointModal = ({
   // Ripristina posizione originale
   const handleResetPosition = () => {
     setTempPosition({ lat: marker.lat, lng: marker.lng })
-    // Sposta il marker sulla mappa
-    const markerObj = allMarkersData.find(m => m.data._id  === marker._id)
-    if (markerObj && markerObj.ref) {
-      markerObj.ref.position = new window.google.maps.LatLng(marker.lat, marker.lng)
+    // Google Maps
+    if (map && allMarkersData && allMarkersData.length > 0) {
+      const markerObj = allMarkersData.find(m => m.data._id  === marker._id)
+      if (markerObj && markerObj.ref) {
+        markerObj.ref.position = new window.google.maps.LatLng(marker.lat, marker.lng)
+      }
+      if (map) {
+        map.setCenter(new window.google.maps.LatLng(marker.lat, marker.lng))
+        map.setZoom(18)
+      }
     }
-    // Centra la mappa
-    if (map) {
-      map.setCenter(new window.google.maps.LatLng(marker.lat, marker.lng))
-      map.setZoom(18)
+    // MapLibre: aggiorna la posizione tramite callback se fornita
+    if (!map && typeof window !== 'undefined' && marker._id) {
+      if (typeof window.onMarkerPositionChange === 'function') {
+        window.onMarkerPositionChange(marker._id, marker.lat, marker.lng);
+      }
     }
-  }
+  };
 
   // Centra la mappa sulla posizione temporanea
   const handleCenterMap = () => {
@@ -423,6 +475,39 @@ const EditLightPointModal = ({
     }
 
     // Input di testo per tutti gli altri campi
+    // Bottone accanto a indirizzo per calcolo automatico
+    if (key === "indirizzo") {
+      return (
+        <div key={key} className="space-y-2">
+          <label className="block text-sm font-medium text-blue-300">
+            {label}
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={value || ''}
+              onChange={(e) => handleInputChange(key, e.target.value)}
+              className="flex-1 px-3 py-2 bg-blue-900/40 text-white border border-blue-500/40 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-colors placeholder-blue-400/50"
+              placeholder={`Inserisci ${label.toLowerCase()}`}
+            />
+            <button
+              type="button"
+              onClick={fetchAddressFromLatLng}
+              disabled={isFetchingAddress}
+              className="px-3 py-2 bg-blue-900/40 border border-blue-500/40 text-blue-300 rounded-lg hover:bg-blue-800/60 hover:text-blue-100 backdrop-blur-md shadow-md disabled:bg-gray-700 disabled:text-blue-500 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
+              title="Calcola indirizzo da coordinate"
+            >
+              {isFetchingAddress ? (
+                <svg className="animate-spin h-4 w-4 text-blue-300" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+              ) : (
+                <MapPin className="h-4 w-4 text-blue-300" />
+              )}
+            </button>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div key={key} className="space-y-2">
         <label className="block text-sm font-medium text-blue-300">

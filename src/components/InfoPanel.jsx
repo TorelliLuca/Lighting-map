@@ -133,10 +133,9 @@ function InfoPanel({ activeMarkers, onClose, townhallName }) {
       setLoadingAvg(true)
       setErrorAvg(null)
       try {
-        // Sostituisci con il vero endpoint quando disponibile
         const res = await getAverageResponseTime(townhallName)
 
-        const data = res.data // se getAverageResponseTime restituisce già l'oggetto
+        const data = res.data 
         if (data && typeof data.count === 'number' && data.count > 0) {
           const hours = Number(data.avgTimeHours)
           let formatted = ''
@@ -305,10 +304,10 @@ function InfoPanel({ activeMarkers, onClose, townhallName }) {
   )
 
   return (
-    <div className="absolute inset-0 bg-gradient-to-br from-black/95 via-blue-950/95 to-black/95 backdrop-blur-xl z-20 overflow-auto p-4 md:p-8 scrollbar-thin scrollbar-thumb-blue-700/70 scrollbar-track-blue-950/40 scrollbar">
+    <div className="absolute inset-0 bg-gradient-to-br from-black/95 via-blue-950/95 to-black/95 backdrop-blur-xl z-[1000] overflow-auto p-4 md:p-8 scrollbar-thin scrollbar-thumb-blue-700/70 scrollbar-track-blue-950/40 scrollbar">
       <button
         onClick={onClose}
-        className="absolute top-4 right-4 p-2.5 bg-black/60 hover:bg-blue-900/60 text-blue-400 rounded-lg backdrop-blur-xl border border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.3)] transition-all duration-200"
+        className="sticky top-4 right-4 z-[1000] float-right p-2.5 bg-black/60 hover:bg-blue-900/60 text-blue-400 rounded-lg backdrop-blur-xl border border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.3)] transition-all duration-200"
         aria-label="Close panel"
       >
         <X className="h-5 w-5" />

@@ -132,6 +132,7 @@ export default function Report() {
         numero_palo: queryParams.numeroPalo,
         date: new Date(),
       }
+      
       const response = await api.post("/addReport", reportData)
       await sendMailOfReport()
       setIsSuccess(true)
