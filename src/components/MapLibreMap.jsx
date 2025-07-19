@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import process from "process";
@@ -24,7 +24,7 @@ const STORAGE_KEYS = {
   MAP_ZOOM: `${STORAGE_KEY_PREFIX}map-zoom`,
 }
 
-const MapLibreMap = ({
+const MapLibreMap = forwardRef(({
   center = DEFAULT_CENTER,
   zoom = DEFAULT_ZOOM,
   styleUrl = MAPTILER_STYLE,
@@ -40,7 +40,7 @@ const MapLibreMap = ({
   onBeforeReport,
   onBeforeReportCleanupTrigger,
   onAfterCleanup
-}) => {
+}, ref) => {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -981,6 +981,15 @@ const MapLibreMap = ({
   //   }
   // }, [mapLoaded]);
 
+  // Espone il metodo flyTo al padre
+  useImperativeHandle(ref, () => ({
+    flyTo: ({ center, zoom }) => {
+      if (mapRef.current) {
+        mapRef.current.flyTo({ center, zoom });
+      }
+    }
+  }));
+
 
   return (
     <div
@@ -989,6 +998,6 @@ const MapLibreMap = ({
       id="maplibre-map"
     />
   );
-};
+});
 
 export default MapLibreMap; 

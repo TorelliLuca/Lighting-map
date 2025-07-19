@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { ChevronLeft, ChevronRight, ChevronUp, AlertTriangle, X } from "lucide-react"
+import { ChevronLeft, ChevronRight, ChevronUp, AlertTriangle, X, CloudCog } from "lucide-react"
 
 function ResultsBottomSheet({
   foundMarkers,
@@ -15,6 +15,8 @@ function ResultsBottomSheet({
   onClose,
   cityChanged,
   filterOption,
+  visualizationMode, // nuova prop
+  mapLibreRef, // nuova prop
 }) {
   const [isExpanded, setIsExpanded] = useState(true)
   const [showSingleResultToast, setShowSingleResultToast] = useState(false)
@@ -103,6 +105,8 @@ function ResultsBottomSheet({
     ) : null
   }
 
+
+
   return (
     <div
       ref={bottomSheetRef}
@@ -181,7 +185,16 @@ function ResultsBottomSheet({
                 onClick={() => {
                   setCurrentMarkerIndex(index)
                   const marker = foundMarkers[index]
-                  if (map) {
+                  if (visualizationMode === "semplice") {
+                    // MapLibre
+                    if (mapLibreRef && mapLibreRef.current && mapLibreRef.current.flyTo && marker.data.lat && marker.data.lng) {
+                      mapLibreRef.current.flyTo({
+                        center: [parseFloat(marker.data.lng), parseFloat(marker.data.lat)],
+                        zoom: 30
+                      })
+                    }
+                  } else if (map) {
+                    // Google Maps
                     map.setCenter(
                       new window.google.maps.LatLng(
                         Number.parseFloat(marker.data.lat),

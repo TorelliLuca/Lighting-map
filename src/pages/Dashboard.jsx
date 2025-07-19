@@ -105,6 +105,7 @@ function Dashboard() {
   const [pendingReportParams, setPendingReportParams] = useState({});
   const [cleanupTrigger, setCleanupTrigger] = useState(0);
   const [shouldCleanupMap, setShouldCleanupMap] = useState(false);
+  const mapLibreRef = useRef(null)
 
   // Carica i dati GeoJSON quando la modalità è semplice e cambia la città
   useEffect(() => {
@@ -148,23 +149,25 @@ function Dashboard() {
               ref: ""
             };
           });
-          setActiveMarkers(activeMarkersFormat);          
+          setActiveMarkers(activeMarkersFormat);   
+          setAllMarkersData(activeMarkersFormat);
         }catch(e){setActiveMarkers([]);}
         } else {
           setSimpleMarkers([]);
           setActiveMarkers([]);
+          setAllMarkersData([]);
+
         }
       })
       .catch(() => {
         setSimpleMarkers([]);
         setActiveMarkers([]);
+        setAllMarkersData([]);
+
       })
       .finally(() => setIsMapLoading(false));
   }, [visualizationMode, selectedCity, getTownhallGeojson]);
 
-
-
-  
 
 
 
@@ -175,6 +178,20 @@ function Dashboard() {
     selectedProprietaFilter,
     highlightOption,
   });
+
+  useEffect(() => {
+    if (visualizationMode === "semplice" && simpleGeojsonData && simpleGeojsonData.features) {
+      const filteredMarkers = simpleGeojsonData.features.map(f => ({
+        data: {
+          ...f.properties,
+          lat: f.geometry.coordinates[1],
+          lng: f.geometry.coordinates[0]
+        },
+        ref: ""
+      }))
+      setActiveMarkers(filteredMarkers)
+    }
+  }, [visualizationMode, simpleGeojsonData])
 
   // Add this function to save state to localStorage
   const saveStateToStorage = useCallback(() => {
@@ -683,9 +700,7 @@ function Dashboard() {
     }
   }
 
-  const createReportJSON = async () => {
-    
-  }
+
 
   const startGeolocation = () => {
     if (navigator.geolocation) {
@@ -908,15 +923,69 @@ function Dashboard() {
       return
     }
 
-    let queryToSend
-    if (!query) {
-      queryToSend = searchQuery
-    } else {
-      queryToSend = query
-    }
+    let queryToSend = query || searchQuery
 
     let results = []
 
+    if (visualizationMode === "semplice") {
+      // Cerca tra le features del GeoJSON
+      if (!simpleGeojsonData || !simpleGeojsonData.features) {
+        alert("Nessun dato disponibile per la ricerca")
+        return
+      }
+      switch (searchFilter) {
+        case "NumeroPalo":
+          results = simpleGeojsonData.features.filter(
+            (f) => f.properties.numero_palo && String(f.properties.numero_palo).toLowerCase() === queryToSend.toLowerCase()
+          )
+          break
+        case "Quadro":
+          results = simpleGeojsonData.features.filter(
+            (f) => f.properties.quadro && String(f.properties.quadro).toLowerCase() === queryToSend.toLowerCase()
+          )
+          break
+        case "Lotto":
+          results = simpleGeojsonData.features.filter(
+            (f) => f.properties.lotto && String(f.properties.lotto).toLowerCase() === queryToSend.toLowerCase()
+          )
+          break
+        default:
+          break
+      }
+
+      if (results.length === 0) {
+        alert("No results found")
+        return
+      }
+
+      // Adatta i risultati al formato compatibile con ResultsBottomSheet
+      const adaptedResults = results.map(f => ({
+        data: {
+          ...f.properties,
+          lat: f.geometry.coordinates[1],
+          lng: f.geometry.coordinates[0]
+        },
+        ref: null,
+        geometry: f.geometry
+      }))
+
+      setFoundMarkers(adaptedResults)
+      setMarkerIndex(0)
+      setCurrentMarkerIndex(0)
+      // Centra la mappa su MapLibre
+      const firstResult = results[0]
+      if (mapLibreRef.current && mapLibreRef.current.flyTo && firstResult.geometry && firstResult.geometry.coordinates) {
+        mapLibreRef.current.flyTo({
+          center: [firstResult.geometry.coordinates[0], firstResult.geometry.coordinates[1]],
+          zoom: 30
+        })
+      }
+      setSearchQuery("")
+      setShowSuggestions(false)
+      return
+    }else{
+
+    // --- LOGICA ORIGINALE GOOGLE MAPS ---
     switch (searchFilter) {
       case "NumeroPalo":
         results = activeMarkers.filter(
@@ -955,6 +1024,7 @@ function Dashboard() {
     setSearchQuery("")
     setShowSuggestions(false)
   }
+  }
 
   const handleSearchInputChange = (e) => {
     const value = e.target.value
@@ -966,10 +1036,74 @@ function Dashboard() {
       return
     }
 
-    // Filter suggestions based on input
     let suggestions = []
     const lowerValue = value.toLowerCase()
 
+    if (visualizationMode === "semplice") {
+      // Modalità MapLibre: filtra su simpleGeojsonData.features
+      if (!simpleGeojsonData || !simpleGeojsonData.features) {
+        setFilteredSuggestions([])
+        setShowSuggestions(false)
+        return
+      }
+      switch (searchFilter) {
+        case "NumeroPalo":
+          suggestions = simpleGeojsonData.features.filter(
+            (f) => f.properties.numero_palo && String(f.properties.numero_palo).toLowerCase().startsWith(lowerValue)
+          )
+          break
+        case "Quadro":
+          suggestions = simpleGeojsonData.features.filter(
+            (f) => f.properties.quadro && String(f.properties.quadro).toLowerCase().startsWith(lowerValue)
+          )
+          break
+        case "Lotto":
+          suggestions = simpleGeojsonData.features.filter(
+            (f) => f.properties.lotto && String(f.properties.lotto).toLowerCase().startsWith(lowerValue)
+          )
+          break
+        default:
+          break
+      }
+      // Remove duplicates
+      const uniqueValues = new Set()
+      const uniqueSuggestions = suggestions.filter((f) => {
+        let value
+        switch (searchFilter) {
+          case "NumeroPalo":
+            value = f.properties.numero_palo
+            break
+          case "Quadro":
+            value = f.properties.quadro
+            break
+          case "Lotto":
+            value = f.properties.lotto
+            break
+          default:
+            value = ""
+        }
+        if (value && !uniqueValues.has(value.toLowerCase())) {
+          uniqueValues.add(value.toLowerCase())
+          return true
+        }
+        return false
+      })
+      // Adatta i suggerimenti
+      const adaptedSuggestions = uniqueSuggestions.map(f => ({
+        data: {
+          ...f.properties,
+          lat: f.geometry.coordinates[1],
+          lng: f.geometry.coordinates[0]
+        },
+        ref: null,
+        geometry: f.geometry
+      }))
+      setFilteredSuggestions(adaptedSuggestions)
+      setShowSuggestions(adaptedSuggestions.length > 0)
+      return
+    }
+
+    // Modalità Google Maps classica
     switch (searchFilter) {
       case "NumeroPalo":
         suggestions = activeMarkers.filter(
@@ -1028,16 +1162,24 @@ function Dashboard() {
     setHighlightedMarkerId(foundMarkers[newIndex].data._id) // Evidenzia il nuovo marker
 
     const marker = foundMarkers[newIndex]
-    map.setCenter(new window.google.maps.LatLng(Number.parseFloat(marker.data.lat), Number.parseFloat(marker.data.lng)))
-    // Highlight the marker by simulating a click
-    if (marker.ref) {
-      // Create a temporary InfoWindow if needed
-      if (!infoWindowRef.current) {
-        infoWindowRef.current = new window.google.maps.InfoWindow()
-      }
 
-      // Trigger the marker's click event
-      window.google.maps.event.trigger(marker.ref, "gmp-click")
+    if (visualizationMode === "semplice") {
+      // MapLibre
+      if (mapLibreRef.current && mapLibreRef.current.flyTo && marker.data.lat && marker.data.lng) {
+        mapLibreRef.current.flyTo({
+          center: [parseFloat(marker.data.lng), parseFloat(marker.data.lat)],
+          zoom: 30
+        })
+      }
+    } else {
+      // Google Maps
+      map.setCenter(new window.google.maps.LatLng(Number.parseFloat(marker.data.lat), Number.parseFloat(marker.data.lng)))
+      if (marker.ref) {
+        if (!infoWindowRef.current) {
+          infoWindowRef.current = new window.google.maps.InfoWindow()
+        }
+        window.google.maps.event.trigger(marker.ref, "gmp-click")
+      }
     }
   }
 
@@ -1050,15 +1192,24 @@ function Dashboard() {
     setHighlightedMarkerId(foundMarkers[newIndex].data._id) // Evidenzia il nuovo marker
 
     const marker = foundMarkers[newIndex]
-    map.setCenter(new window.google.maps.LatLng(Number.parseFloat(marker.data.lat), Number.parseFloat(marker.data.lng)))
-    if (marker.ref) {
-      // Create a temporary InfoWindow if needed
-      if (!infoWindowRef.current) {
-        infoWindowRef.current = new window.google.maps.InfoWindow()
-      }
 
-      // Trigger the marker's click event
-      window.google.maps.event.trigger(marker.ref, "gmp-click")
+    if (visualizationMode === "semplice") {
+      // MapLibre
+      if (mapLibreRef.current && mapLibreRef.current.flyTo && marker.data.lat && marker.data.lng) {
+        mapLibreRef.current.flyTo({
+          center: [parseFloat(marker.data.lng), parseFloat(marker.data.lat)],
+          zoom: 30
+        })
+      }
+    } else {
+      // Google Maps
+      map.setCenter(new window.google.maps.LatLng(Number.parseFloat(marker.data.lat), Number.parseFloat(marker.data.lng)))
+      if (marker.ref) {
+        if (!infoWindowRef.current) {
+          infoWindowRef.current = new window.google.maps.InfoWindow()
+        }
+        window.google.maps.event.trigger(marker.ref, "gmp-click")
+      }
     }
   }
 
@@ -1556,6 +1707,7 @@ function Dashboard() {
           simpleGeojsonData  ? (
             <ErrorBoundary>
               <MapLibreMap
+                ref={mapLibreRef}
                 geojsonData={simpleGeojsonData}
                 showStreetLampNumber={showStreetLampNumber}
                 showPanelNumber={showPanelNumber}
@@ -1587,15 +1739,16 @@ function Dashboard() {
           <LegendGlass highlightOption={highlightOption} activeMarkers={activeMarkers} legendColorMap={legendColorMap} />
         </div>
         {/* Map controls - only visible when Street View is not active */}
-        {!streetViewVisible && (
+        {!streetViewVisible && visualizationMode ==="complessa" && (
           <>
             {/* Pulsanti principali spostati nel menu impostazioni */}
             <div className="absolute top-1/4 right-4 z-10 flex flex-col gap-2">
               <MapButton icon={LocateFixed} onClick={goToUserLocation} title="Vai alla mia posizione" />
             </div>
-            {showInfoPanel && <InfoPanel activeMarkers={activeMarkers} onClose={() => setShowInfoPanel(false)} townhallName={selectedCity} />}
+            
           </>
         )}
+        {showInfoPanel && <InfoPanel activeMarkers={allMarkersData} onClose={() => setShowInfoPanel(false)} townhallName={selectedCity} />}
         <Toaster position="top-right" />
       </div>
 
@@ -1657,6 +1810,8 @@ function Dashboard() {
         cityChanged={selectedCity}
         highlightOption={highlightOption}
         filterOption={filterOption}
+        visualizationMode={visualizationMode}
+        mapLibreRef={mapLibreRef}
       />
       <EditLightPointModal
         isOpen={isEditModalOpen}
