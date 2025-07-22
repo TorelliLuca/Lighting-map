@@ -1,12 +1,14 @@
 "use client"
 import { useState } from "react"
 import { ChevronLeft, Save, MapPin } from "lucide-react"
+import toast from "react-hot-toast"
 
 const AddLightPointForm = ({
   onSave,
   onBack,
   tempPosition,
-  selectedCity
+  selectedCity,
+  electricPanels = []
 }) => {
   const [formData, setFormData] = useState({
     numero_palo: "",
@@ -22,10 +24,12 @@ const AddLightPointForm = ({
     tipo_linea: "",
     promiscuita: "",
     quadro: "",
+    quadro_altro: "",
     lotto: "",
     note: ""
   })
   const [isSaving, setIsSaving] = useState(false)
+  const [isFetchingAddress, setIsFetchingAddress] = useState(false)
 
   // Opzioni per le select
   const selectOptions = {
@@ -133,6 +137,33 @@ const AddLightPointForm = ({
     setFormData(prev => ({ ...prev, [key]: value }))
   }
 
+  const fetchAddressFromLatLng = async () => {
+    if (!tempPosition?.lat || !tempPosition?.lng) return
+    setIsFetchingAddress(true)
+    try {
+      const geocoder = new window.google.maps.Geocoder()
+      const latlng = { lat: Number(tempPosition.lat), lng: Number(tempPosition.lng) }
+      geocoder.geocode({ location: latlng }, (results, status) => {
+        if (status === "OK" && results && results[0]) {
+          const routeComponent = results[0].address_components.find(comp => comp.types.includes("route"))
+          const numberComponent = results[0].address_components.find(comp => comp.types.includes("street_number"))
+          const street = [
+            routeComponent ? routeComponent.long_name : "",
+            numberComponent ? numberComponent.long_name : ""
+          ].filter(Boolean).join(" ")
+          handleInputChange("indirizzo", street)
+          toast.success("Indirizzo trovato con successo!")
+        } else {
+          toast.error("Impossibile trovare l'indirizzo per queste coordinate.")
+        }
+        setIsFetchingAddress(false)
+      })
+    } catch (error) {
+      setIsFetchingAddress(false)
+      toast.error("Errore durante la ricerca dell'indirizzo.")
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setIsSaving(true)
@@ -163,6 +194,13 @@ const AddLightPointForm = ({
         dataToSend.tipo_sostegno = formData.tipo_sostegno_altro
         delete dataToSend.tipo_sostegno_altro
       }
+
+      // Gestione speciale per quadro
+      if (formData.quadro === "unknown" || formData.quadro === "new") {
+        dataToSend.quadro = formData.quadro_altro
+      }
+      delete dataToSend.quadro_altro
+
 
       await onSave(dataToSend)
     } catch (error) {
@@ -297,9 +335,63 @@ const AddLightPointForm = ({
       <div className="p-4 bg-blue-900/20 border border-blue-500/30 rounded-lg">
         <h4 className="text-sm font-medium text-blue-200 mb-3">Informazioni Aggiuntive</h4>
         <div className="space-y-3">
-        {renderField("indirizzo", "Indirizzo")}
+        <div className="space-y-2">
+          <label className="block text-sm font-medium text-blue-300">
+            Indirizzo
+          </label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={formData.indirizzo || ''}
+              onChange={(e) => handleInputChange("indirizzo", e.target.value)}
+              className="flex-1 px-3 py-2 bg-blue-900/40 text-white border border-blue-500/40 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-colors placeholder-blue-400/50"
+              placeholder="Inserisci indirizzo"
+            />
+            <button
+              type="button"
+              onClick={fetchAddressFromLatLng}
+              disabled={isFetchingAddress || !tempPosition}
+              className="px-3 py-2 bg-blue-900/40 border border-blue-500/40 text-blue-300 rounded-lg hover:bg-blue-800/60 hover:text-blue-100 backdrop-blur-md shadow-md disabled:bg-gray-700 disabled:text-blue-500 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
+              title="Calcola indirizzo da coordinate"
+            >
+              {isFetchingAddress ? (
+                <svg className="animate-spin h-4 w-4 text-blue-300" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+              ) : (
+                <MapPin className="h-4 w-4 text-blue-300" />
+              )}
+            </button>
+          </div>
+        </div>
           {renderField("proprieta", "Proprietà")}
-          {renderField("quadro", "Quadro")}
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-blue-300">
+              Quadro
+            </label>
+            <select
+              value={formData.quadro}
+              onChange={(e) => handleInputChange("quadro", e.target.value)}
+              className="w-full px-3 py-2 bg-blue-900/40 text-white border border-blue-500/40 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-colors"
+            >
+              <option value="">Seleziona un quadro</option>
+              <option value="unknown">Quadro Ignoto</option>
+              <option value="new">Quadro da Caricare</option>
+              {electricPanels.map((panel) => (
+                <option key={panel} value={panel}>
+                  {panel}
+                </option>
+              ))}
+            </select>
+            {(formData.quadro === "unknown" || formData.quadro === "new") && (
+              <input
+                type="text"
+                value={formData.quadro_altro}
+                onChange={(e) => handleInputChange("quadro_altro", e.target.value)}
+                className="w-full px-3 py-2 mt-2 bg-blue-900/40 text-white border border-blue-500/40 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-colors placeholder-blue-400/50"
+                placeholder="Inserisci nome quadro"
+                
+              />
+            )}
+          </div>
           {renderField("lotto", "Lotto")}
           {renderField("promiscuita", "Promiscuità")}
           {renderField("note", "Note", "textarea")}

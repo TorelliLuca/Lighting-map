@@ -15,6 +15,7 @@ import AddLightPointModal from "../components/AddLightPointModal"
 
 import LegendGlass from "../components/LegendGlass"
 import SettingsMenu from "../components/SettingsMenu"
+import AddMenu from "../components/AddMenu.jsx"; // Importa il nuovo componente
 import MapLibreMap from "../components/MapLibreMap";
 import ErrorBoundary from "../components/ErrorBoundary.jsx"
 
@@ -106,6 +107,8 @@ function Dashboard() {
   const [cleanupTrigger, setCleanupTrigger] = useState(0);
   const [shouldCleanupMap, setShouldCleanupMap] = useState(false);
   const mapLibreRef = useRef(null)
+  const [selectedMarkerForInfo, setSelectedMarkerForInfo] = useState(null);
+  const [electricPanels, setElectricPanels] = useState([]);
 
   // Carica i dati GeoJSON quando la modalità è semplice e cambia la città
   useEffect(() => {
@@ -151,22 +154,55 @@ function Dashboard() {
           });
           setActiveMarkers(activeMarkersFormat);   
           setAllMarkersData(activeMarkersFormat);
+          const panels = activeMarkersFormat
+        .filter(marker => marker.data.marker === 'QE')
+        .map(marker => marker.data.numero_palo)
+        .filter(Boolean); // Rimuovi eventuali valori nulli o vuoti
+      setElectricPanels([...new Set(panels)]); // Usa Set per valori unici
         }catch(e){setActiveMarkers([]);}
         } else {
           setSimpleMarkers([]);
           setActiveMarkers([]);
           setAllMarkersData([]);
-
+          setElectricPanels([]);
         }
       })
       .catch(() => {
         setSimpleMarkers([]);
         setActiveMarkers([]);
         setAllMarkersData([]);
-
+        setElectricPanels([]);
       })
       .finally(() => setIsMapLoading(false));
   }, [visualizationMode, selectedCity, getTownhallGeojson]);
+
+  useEffect(()=>{
+    const activeMarkersFormat = simpleMarkers.map(m => {
+      // Controllo robusto su lat/lng
+      let lat = m.lat;
+      let lng = m.lng;
+      // Se sono stringhe numeriche, le converto in numero
+      if (typeof lat === "string") lat = parseFloat(lat.replace(",", "."));
+      if (typeof lng === "string") lng = parseFloat(lng.replace(",", "."));
+      // Se non sono numeri validi, fallback a ""
+      const latStr = (typeof lat === "number" && !isNaN(lat)) ? lat.toString() : "";
+      const lngStr = (typeof lng === "number" && !isNaN(lng)) ? lng.toString() : "";
+
+      return {
+        data: {
+          ...m,
+          lat: latStr,
+          lng: lngStr,
+        },
+        ref: ""
+      };
+    });
+    const panels = activeMarkersFormat
+      .filter(marker => marker.data.marker === 'QE')
+      .map(marker => marker.data.numero_palo)
+      .filter(Boolean); // Rimuovi eventuali valori nulli o vuoti
+    setElectricPanels([...new Set(panels)]);
+  }, [simpleMarkers])
 
 
 
@@ -178,6 +214,7 @@ function Dashboard() {
     selectedProprietaFilter,
     highlightOption,
   });
+
 
   useEffect(() => {
     if (visualizationMode === "semplice" && simpleGeojsonData && simpleGeojsonData.features) {
@@ -299,8 +336,15 @@ function Dashboard() {
         if (infoWindowRef.current) {
           infoWindowRef.current.close()
           setCurrentInfoWindow(null)
+          setSelectedMarkerForInfo(null);
         }
       })
+
+      // Aggiungo listener per l'evento di chiusura dell'infowindow (es. click sulla 'x')
+      infoWindowRef.current.addListener('closeclick', () => {
+        setCurrentInfoWindow(null);
+        setSelectedMarkerForInfo(null);
+      });
 
       setMap(mapInstance)
 
@@ -538,7 +582,6 @@ function Dashboard() {
       setIsLoadingCityLightPoints(true);
       try {
         const res = await getTownhallLightpointsCount(); 
-
         setCityLightPointsMap(prev => ({ ...prev, [selectedCity]: res.data[selectedCity] }));
       } catch (e) {
         console.error(e);
@@ -622,6 +665,7 @@ function Dashboard() {
         handleDeleteMarker,
         showPanelNumber,
         showStreetLampNumber,
+        setSelectedMarkerForInfo,
       )
 
       setAllMarkersData(allMarkers)
@@ -631,6 +675,13 @@ function Dashboard() {
 
       const legendColorMap = generateLegendColorMap(filteredMarkers.map(m => m.data), highlightOption)
       setLegendColorMap(legendColorMap)
+
+      // Estrai i quadri elettrici
+      const panels = allMarkers
+        .filter(marker => marker.data.marker === 'QE')
+        .map(marker => marker.data.numero_palo)
+        .filter(Boolean); // Rimuovi eventuali valori nulli o vuoti
+      setElectricPanels([...new Set(panels)]); // Usa Set per valori unici
 
       if (markers.length > 0) {
         map.setCenter(
@@ -856,6 +907,9 @@ function Dashboard() {
             DATA_SEGNALAZIONE: transformDateToIT(report.report_date),
             TIPO_DI_SEGNALAZIONE: translateString(report.report_type),
             DESCRIZIONE: report.description,
+            SEGNALATORE: report.user_creator_id
+              ? report.user_creator_id.name + " " + report.user_creator_id.surname
+              : "",
           }
           jsonToSend.segnalazioni_in_corso.push(objToInsert)
         })
@@ -870,6 +924,12 @@ function Dashboard() {
             DATA_SEGNALAZIONE: transformDateToIT(report.report_date),
             TIPO_DI_SEGNALAZIONE: translateString(report.report_type),
             DESCRIZIONE: report.description,
+            SEGNALATORE: report.user_creator_id
+              ? report.user_creator_id.name + " " + report.user_creator_id.surname
+              : "",
+            OPERATORE: report.user_responsible_id
+              ? report.user_responsible_id.name + " " + report.user_responsible_id.surname
+              : "",
           }
           jsonToSend.segnalazioni_risolte.push(objToInsert)
         })
@@ -885,7 +945,7 @@ function Dashboard() {
             TIPO_DI_OPERAZIONE: translateString(operation.operation_type),
             DESCRIZIONE: operation.note,
             RESPONSABILE_OPERAZIONE: operation.operation_responsible
-              ? operation.operation_responsible.name + "_" + operation.operation_responsible.surname
+              ? operation.operation_responsible.name + " " + operation.operation_responsible.surname
               : "",
           }
           jsonToSend.operazioni_effettuate.push(objToInsert)
@@ -1225,9 +1285,9 @@ function Dashboard() {
     window.open(url)
   }
 
-  window.reportPoint = (city, numeroPalo, lat, lng, addr) => {
+  window.reportPoint = (city, id) => {
     navigate(
-      `/report?comune=${encodeURIComponent(city)}&numeroPalo=${encodeURIComponent(numeroPalo)}&lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}&adr=${encodeURIComponent(addr)}`,
+      `/report?comune=${encodeURIComponent(city)}&id=${encodeURIComponent(id)}}`,
     )
   }
 
@@ -1518,35 +1578,132 @@ function Dashboard() {
       setIsAddModalOpen(true)
     }
   }
+  const handleDuplicateElement = async () => {
+    if (userData?.user_type !== "SUPER_ADMIN") return;
 
-  const handleSaveNewElement = async (formData) => {
+    if (!selectedMarkerForInfo) {
+      toast.error("Seleziona un punto luce o un quadro sulla mappa prima di duplicare.");
+      return;
+    }
+
     try {
-      // Prepara i dati per l'invio al server
-      const dataToSend = {
-        light_point: {...formData},
-        town_hall: selectedCity
-      }
-      
-      const response = await addLightPoint(dataToSend)
-      if (response.status === 201) {
-        toast.success(response.data)
-        
-        // Ricarica i dati della mappa per mostrare il nuovo elemento
-        await cleanupAndLoadMapData()
+      const originalData = selectedMarkerForInfo;
+      const duplicatedData = JSON.parse(JSON.stringify(originalData));
 
-        // Centra la mappa sul nuovo punto aggiunto
-        if (map && formData.lat && formData.lng) {
-          const latNum = parseFloat(formData.lat)
-          const lngNum = parseFloat(formData.lng)
-          if (!isNaN(latNum) && !isNaN(lngNum)) {
-            map.setCenter(new window.google.maps.LatLng(latNum, lngNum))
-            map.setZoom(18)
-          }
+      // Rimuovo l'ID e suggerisco un nuovo nome
+      delete duplicatedData._id;
+      delete duplicatedData.id;
+      if (duplicatedData.numero_palo) {
+        duplicatedData.numero_palo = `${originalData.numero_palo}_copia`;
+      }
+
+      // Sposto leggermente la posizione per evitare sovrapposizioni
+      const offset = 0.0001; // Circa 10-11 metri
+      let newLat, newLng
+      if (visualizationMode === 'semplice') {
+      newLat = originalData.lat + offset;
+      newLng = originalData.lng + offset;
+      }else{
+        newLat = parseFloat(originalData.lat) + offset
+        newLng = parseFloat(originalData.lng) + offset
+      }
+      duplicatedData.lat = newLat.toString();
+      duplicatedData.lng = newLng.toString();
+      
+      const dataToSend = {
+        light_point: duplicatedData,
+        town_hall: selectedCity,
+        return_object: true
+      };
+
+      const response = await addLightPoint(dataToSend);
+      if (response.status === 201) {
+        toast.success("Elemento duplicato con successo!");
+        
+        // La modalità semplice si affida all'aggiornamento dello stato simpleMarkers
+        // e non richiede un ricaricamento completo come cleanupAndLoadMapData.
+        if (visualizationMode === 'semplice') {
+          // Aggiungiamo il nuovo marker allo stato
+          setSimpleMarkers(prev => [...prev, response.data]);
+        } else {
+          await cleanupAndLoadMapData();
         }
+
+        // Centro la mappa sul nuovo punto
+        if (visualizationMode === "complessa" && map) {
+
+          const latLng = new window.google.maps.LatLng(newLat, newLng)
+          map.setCenter(latLng);
+          map.setZoom(20);
+        } else if (visualizationMode === "semplice" && mapLibreRef.current) {
+          mapLibreRef.current.flyTo({ center: [newLng, newLat], zoom: 19 });
+        }
+      } else {
+        toast.error(response.data || "Errore durante la duplicazione.");
       }
     } catch (error) {
-      console.error('Errore durante l\'aggiunta dell\'elemento:', error)
-      toast.error('Errore durante l\'aggiunta dell\'elemento')
+      console.error('Errore durante la duplicazione:', error);
+      toast.error(error.response?.data?.message || "Errore imprevisto durante la duplicazione.");
+    }
+  };
+
+  const handleSaveNewElement = async (formData) => {
+    if (visualizationMode === "semplice") {
+      try {
+        const dataToSend = {
+          light_point: { ...formData },
+          town_hall: selectedCity,
+          return_object: true,
+        };
+
+        const response = await addLightPoint(dataToSend);
+        
+        if (response.status === 201) {
+          toast.success("Elemento aggiunto con successo!");
+          const newMarker = response.data;
+          
+          setSimpleMarkers(prev => [...prev, newMarker]);
+
+          if (mapLibreRef.current && newMarker.lat && newMarker.lng) {
+            const latNum = parseFloat(newMarker.lat);
+            const lngNum = parseFloat(newMarker.lng);
+            if (!isNaN(latNum) && !isNaN(lngNum)) {
+              mapLibreRef.current.flyTo({ center: [lngNum, latNum], zoom: 18 });
+            }
+          }
+        } else {
+            toast.error(response.data?.message || "Errore durante l'aggiunta dell'elemento");
+        }
+      } catch (error) {
+        console.error("Errore durante l'aggiunta dell'elemento:", error);
+        toast.error(error.response?.data?.message || "Errore durante l'aggiunta dell'elemento");
+      }
+    } else { // Modalità "complessa"
+      try {
+        const dataToSend = {
+          light_point: {...formData},
+          town_hall: selectedCity
+        };
+        
+        const response = await addLightPoint(dataToSend);
+        if (response.status === 201) {
+          toast.success(response.data);
+          
+          await cleanupAndLoadMapData();
+
+          if (map && formData.lat && formData.lng) {
+            const latNum = parseFloat(formData.lat);
+            const lngNum = parseFloat(formData.lng);
+            if (!isNaN(latNum) && !isNaN(lngNum)) {
+              map.setCenter(new window.google.maps.LatLng(latNum, lngNum));
+              map.setZoom(18);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Errore durante l\'aggiunta dell\'elemento:', error);
+        toast.error('Errore durante l\'aggiunta dell\'elemento');
+      }
     }
   }
 
@@ -1672,7 +1829,7 @@ function Dashboard() {
   const handleAfterCleanup = () => {
     if (pendingReportParams) {
       navigate(
-        `/report?comune=${encodeURIComponent(pendingReportParams.city)}&numeroPalo=${encodeURIComponent(pendingReportParams.numeroPalo)}&lat=${encodeURIComponent(pendingReportParams.lat)}&lng=${encodeURIComponent(pendingReportParams.lng)}&adr=${encodeURIComponent(pendingReportParams.addr)}`
+        `/report?comune=${encodeURIComponent(pendingReportParams.city)}&id=${encodeURIComponent(pendingReportParams.id)}`
       );
       setPendingReportParams(null);
     }
@@ -1719,6 +1876,7 @@ function Dashboard() {
                 onBeforeReport={handleBeforeReport}
                 onBeforeReportCleanupTrigger={cleanupTrigger}
                 onAfterCleanup={handleAfterCleanup}
+                onMarkerSelect={setSelectedMarkerForInfo}
               />
             </ErrorBoundary>
           ) : <MapLoader />
@@ -1774,13 +1932,10 @@ function Dashboard() {
       />
       {/* FAB per aggiunta punto, solo per SUPER_ADMIN */}
       {userData?.user_type === "SUPER_ADMIN" && (
-        <button
-          onClick={handleAddNewElement}
-          className="fixed bottom-60 left-6 z-2 p-3 bg-black/70 hover:bg-blue-900/70 text-blue-200 border border-blue-500/40 rounded-full shadow-[0_0_15px_rgba(59,130,246,0.3)] backdrop-blur-xl transition-all duration-300 focus:outline-none flex items-center justify-center"
-          title="Aggiungi nuovo punto"
-        >
-          <Plus className="h-5 w-5" />
-        </button>
+        <AddMenu
+          onAddPoint={handleAddNewElement}
+          onDuplicatePoint={handleDuplicateElement}
+        />
       )}
       <SettingsMenu
         showPanelNumber={showPanelNumber}
@@ -1820,14 +1975,17 @@ function Dashboard() {
         onSave={handleSaveMarker}
         map={map}
         allMarkersData={allMarkersData}
+        electricPanels={electricPanels}
       />
       <AddLightPointModal
         isOpen={isAddModalOpen}
         onClose={handleCloseAddModal}
         onSave={handleSaveNewElement}
-        map={map}
+        map={visualizationMode === "complessa" ? map : mapLibreRef.current}
         selectedCity={selectedCity}
         userData={userData}
+        visualizationMode={visualizationMode}
+        electricPanels={electricPanels}
       />
       <EditLightPointModal
         isOpen={isEditSimpleModalOpen}
@@ -1840,6 +1998,7 @@ function Dashboard() {
         onSave={handleSaveSimpleMarker}
         map={null} // non serve per MapLibre
         allMarkersData={simpleMarkers}
+        electricPanels={electricPanels}
       />
       <style jsx="true">{`
         :root {

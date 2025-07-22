@@ -1,12 +1,14 @@
 "use client"
 import { useState } from "react"
 import { ChevronLeft, Save, MapPin, Zap } from "lucide-react"
+import toast from "react-hot-toast"
 
 const AddElectricPanelForm = ({
   onSave,
   onBack,
   tempPosition,
-  selectedCity
+  selectedCity,
+  electricPanels = [] // aggiunto default vuoto per sicurezza
 }) => {
   const [formData, setFormData] = useState({
     numero_palo: "",
@@ -18,6 +20,8 @@ const AddElectricPanelForm = ({
     potenza_contratto: ""
   })
   const [isSaving, setIsSaving] = useState(false)
+  const [isFetchingAddress, setIsFetchingAddress] = useState(false)
+  const [pendingSave, setPendingSave] = useState(null)
 
   // Opzioni per le select
   const selectOptions = {
@@ -38,32 +42,101 @@ const AddElectricPanelForm = ({
     setFormData(prev => ({ ...prev, [key]: value }))
   }
 
+  const fetchAddressFromLatLng = async () => {
+    if (!tempPosition?.lat || !tempPosition?.lng) return
+    setIsFetchingAddress(true)
+    try {
+      const geocoder = new window.google.maps.Geocoder()
+      const latlng = { lat: Number(tempPosition.lat), lng: Number(tempPosition.lng) }
+      geocoder.geocode({ location: latlng }, (results, status) => {
+        if (status === "OK" && results && results[0]) {
+          const routeComponent = results[0].address_components.find(comp => comp.types.includes("route"))
+          const numberComponent = results[0].address_components.find(comp => comp.types.includes("street_number"))
+          const street = [
+            routeComponent ? routeComponent.long_name : "",
+            numberComponent ? numberComponent.long_name : ""
+          ].filter(Boolean).join(" ")
+          handleInputChange("indirizzo", street)
+          toast.success("Indirizzo trovato con successo!")
+        } else {
+          toast.error("Impossibile trovare l'indirizzo per queste coordinate.")
+        }
+        setIsFetchingAddress(false)
+      })
+    } catch (error) {
+      setIsFetchingAddress(false)
+      toast.error("Errore durante la ricerca dell'indirizzo.")
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setIsSaving(true)
 
     try {
-      // Prepara i dati per l'invio
-      const dataToSend = { ...formData }
-
-      // Gestione speciale per proprieta con "Altro"
-      if (formData.proprieta === "Altro" && formData.proprieta_altro) {
-        dataToSend.proprieta = formData.proprieta_altro
-        delete dataToSend.proprieta_altro
+      // Controllo duplicato (case insensitive, senza spazi)
+      const inputValue = (formData.numero_palo || '').replace(/\s+/g, '').toLowerCase();
+      const alreadyExists = electricPanels.some(panel => (panel || '').replace(/\s+/g, '').toLowerCase() === inputValue);
+      if (alreadyExists) {
+        // Mostra toast con azioni e grafica custom glassmorphism
+        toast.custom((t) => (
+          <div className={`max-w-xs w-full p-4 rounded-2xl shadow-xl border border-blue-400/30 bg-blue-900/70 backdrop-blur-md flex flex-col items-center ${t.visible ? 'animate-fade-in' : 'animate-fade-out'}`}
+               style={{ boxShadow: '0 8px 32px 0 rgba(31, 38, 135, 0.37)' }}>
+            <div className="flex items-center gap-2 mb-2">
+              <svg className="h-6 w-6 text-blue-300" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9 9 4.03 9 9z" /></svg>
+              <span className="text-blue-100 font-semibold text-base">Codice già presente</span>
+            </div>
+            <div className="text-blue-200 text-sm mb-4 text-center">
+              Esiste già un quadro con questo codice.<br />Vuoi inserirlo comunque?
+            </div>
+            <div className="flex gap-3 w-full">
+              <button
+                className="flex-1 px-4 py-2 rounded-full bg-blue-600/80 text-white font-medium hover:bg-blue-700/90 transition-colors shadow-md"
+                onClick={async () => {
+                  toast.dismiss(t.id)
+                  setIsSaving(true)
+                  await proceedSave()
+                }}
+              >Procedi comunque</button>
+              <button
+                className="flex-1 px-4 py-2 rounded-full bg-blue-900/60 text-blue-200 font-medium hover:bg-blue-800/80 border border-blue-400/30 transition-colors shadow-md"
+                onClick={() => {
+                  toast.dismiss(t.id)
+                  setIsSaving(false)
+                }}
+              >Annulla</button>
+            </div>
+          </div>
+        ), { duration: 10000 })
+        setIsSaving(false)
+        setPendingSave({ ...formData })
+        return;
       }
-
-      // Gestione speciale per alimentazione con "Altro"
-      if (formData.alimentazione === "Altro" && formData.alimentazione_altro) {
-        dataToSend.alimentazione = formData.alimentazione_altro
-        delete dataToSend.alimentazione_altro
-      }
-
-      await onSave(dataToSend)
+      await proceedSave()
     } catch (error) {
       console.error("Errore durante il salvataggio:", error)
     } finally {
       setIsSaving(false)
     }
+  }
+
+  // Funzione che esegue effettivamente il salvataggio
+  const proceedSave = async () => {
+    const dataToSend = { ...pendingSave || formData }
+    dataToSend.numero_palo = dataToSend.numero_palo
+    dataToSend.quadro = dataToSend.numero_palo
+    // Gestione speciale per proprieta con "Altro"
+    if (dataToSend.proprieta === "Altro" && dataToSend.proprieta_altro) {
+      dataToSend.proprieta = dataToSend.proprieta_altro
+      delete dataToSend.proprieta_altro
+    }
+    // Gestione speciale per alimentazione con "Altro"
+    if (dataToSend.alimentazione === "Altro" && dataToSend.alimentazione_altro) {
+      dataToSend.alimentazione = dataToSend.alimentazione_altro
+      delete dataToSend.alimentazione_altro
+    }
+    await onSave(dataToSend)
+    setPendingSave(null)
   }
 
   const renderField = (key, label, type = "text", required = false) => {
@@ -101,6 +174,25 @@ const AddElectricPanelForm = ({
       )
     }
 
+    // Campo speciale per numero_palo (Numero Quadro con prefisso PC)
+    if (key === 'numero_palo') {
+      return (
+        <div key={key} className="space-y-2">
+          <label className="block text-sm font-medium text-blue-300">
+            {label} {required && <span className="text-red-400">*</span>}
+          </label>
+          <input
+            type="text"
+            value={formData[key] || 'PC'}
+            onChange={(e) => handleInputChange(key, e.target.value)}
+            className="w-full px-3 py-2 bg-blue-900/40 text-white border border-blue-500/40 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-colors placeholder-blue-400/50"
+            placeholder="Es: PC123"
+            required={required}
+          />
+        </div>
+      )
+    }
+
     return (
       <div key={key} className="space-y-2">
         <label className="block text-sm font-medium text-blue-300">
@@ -127,9 +219,9 @@ const AddElectricPanelForm = ({
           Campi Obbligatori
         </h4>
         <div className="space-y-3">
-          {renderField("numero_palo", "Numero Palo", "text", true)}
-          
-          {renderField("numero_quadro", "Numero Quadro", "text", true)}
+          {/* Campo Numero Quadro (ex numero_palo) */}
+          {renderField("numero_palo", "Numero Quadro", "text", true)}
+          {/* RIMOSSO: {renderField("numero_quadro", "Numero Quadro", "text", true)} */}
         </div>
       </div>
 
@@ -171,7 +263,33 @@ const AddElectricPanelForm = ({
       <div className="p-4 bg-blue-900/20 border border-blue-500/30 rounded-lg">
         <h4 className="text-sm font-medium text-blue-200 mb-3">Informazioni Aggiuntive</h4>
         <div className="space-y-3">
-        {renderField("indirizzo", "Indirizzo")}
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-blue-300">
+              Indirizzo
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={formData.indirizzo || ''}
+                onChange={(e) => handleInputChange("indirizzo", e.target.value)}
+                className="flex-1 px-3 py-2 bg-blue-900/40 text-white border border-blue-500/40 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-colors placeholder-blue-400/50"
+                placeholder="Inserisci indirizzo"
+              />
+              <button
+                type="button"
+                onClick={fetchAddressFromLatLng}
+                disabled={isFetchingAddress || !tempPosition}
+                className="px-3 py-2 bg-blue-900/40 border border-blue-500/40 text-blue-300 rounded-lg hover:bg-blue-800/60 hover:text-blue-100 backdrop-blur-md shadow-md disabled:bg-gray-700 disabled:text-blue-500 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
+                title="Calcola indirizzo da coordinate"
+              >
+                {isFetchingAddress ? (
+                  <svg className="animate-spin h-4 w-4 text-blue-300" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+                ) : (
+                  <MapPin className="h-4 w-4 text-blue-300" />
+                )}
+              </button>
+            </div>
+          </div>
           {renderField("proprieta", "Proprietà")}
         </div>
       </div>
@@ -222,7 +340,7 @@ const AddElectricPanelForm = ({
         </button>
         <button
           type="submit"
-          disabled={isSaving || !formData.numero_palo ||  !formData.numero_quadro}
+          disabled={isSaving || !formData.numero_palo }
           className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors"
         >
           <Save className="h-4 w-4" />

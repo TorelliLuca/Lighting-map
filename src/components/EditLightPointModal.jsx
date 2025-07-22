@@ -10,6 +10,7 @@ const EditLightPointModal = ({
   onSave,
   map,
   allMarkersData,
+  electricPanels = [],
 }) => {
   // Stato locale per la posizione temporanea
   const [tempPosition, setTempPosition] = useState(null)
@@ -319,6 +320,12 @@ const EditLightPointModal = ({
         delete dataToSend.tipo_sostegno_altro
       }
 
+      // Gestione speciale per quadro
+      if (formData.quadro === "unknown" || formData.quadro === "new") {
+        dataToSend.quadro = formData.quadro_altro
+      }
+      delete dataToSend.quadro_altro
+
       
       await onSave(dataToSend)
       //onClose()
@@ -385,36 +392,34 @@ const EditLightPointModal = ({
       return null
     }
 
-
-
-    
-
-    // Gestione speciale per tipo_sostegno con campo "Altro"
-    if (key === "tipo_sostegno") {
+    // Gestione speciale per quadro (come in AddLightPointForm)
+    if (key === "quadro") {
       return (
         <div key={key} className="space-y-2">
           <label className="block text-sm font-medium text-blue-300">
-            {label}
+            Quadro
           </label>
           <select
-            value={formData.tipo_sostegno || ''}
-            onChange={(e) => handleInputChange('tipo_sostegno', e.target.value)}
+            value={formData.quadro || ''}
+            onChange={(e) => handleInputChange("quadro", e.target.value)}
             className="w-full px-3 py-2 bg-blue-900/40 text-white border border-blue-500/40 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-colors"
           >
-            <option value="">Seleziona tipo sostegno</option>
-            {selectOptions.tipo_sostegno.map(option => (
-              <option key={option.value} value={option.value}>
-                {option.label}
+            <option value="">Seleziona un quadro</option>
+            <option value="unknown">Quadro Ignoto</option>
+            <option value="new">Quadro da Caricare</option>
+            {electricPanels.map((panel) => (
+              <option key={panel} value={panel}>
+                {panel}
               </option>
             ))}
           </select>
-          {formData.tipo_sostegno === "Altro" && (
+          {(formData.quadro === "unknown" || formData.quadro === "new") && (
             <input
               type="text"
-              value={formData.tipo_sostegno_altro || ''}
-              onChange={(e) => handleInputChange('tipo_sostegno_altro', e.target.value)}
-              className="w-full px-3 py-2 bg-blue-900/40 text-white border border-blue-500/40 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-colors placeholder-blue-400/50"
-              placeholder="Specifica tipo sostegno"
+              value={formData.quadro_altro || ''}
+              onChange={(e) => handleInputChange("quadro_altro", e.target.value)}
+              className="w-full px-3 py-2 mt-2 bg-blue-900/40 text-white border border-blue-500/40 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-colors placeholder-blue-400/50"
+              placeholder="Inserisci nome quadro"
             />
           )}
         </div>

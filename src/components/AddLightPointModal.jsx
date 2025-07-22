@@ -1,8 +1,9 @@
 "use client"
 import { useState, useEffect } from "react"
-import { X, Plus, MapPin, Zap } from "lucide-react"
+import { X, MapPin, Zap } from "lucide-react"
 import AddLightPointForm from "./AddLightPointForm"
 import AddElectricPanelForm from "./AddElectricPanelForm"
+import maplibregl from "maplibre-gl"
 
 const AddLightPointModal = ({
   isOpen,
@@ -10,7 +11,9 @@ const AddLightPointModal = ({
   onSave,
   map,
   selectedCity,
-  userData
+  userData,
+  visualizationMode, // <-- nuova prop
+  electricPanels
 }) => {
   const [step, setStep] = useState("select") // "select", "lightpoint", "panel"
   const [tempPosition, setTempPosition] = useState(null)
@@ -24,91 +27,137 @@ const AddLightPointModal = ({
 
   // Inizializza la posizione al centro della mappa quando si apre il modal
   useEffect(() => {
-    if (isOpen && map && window.google) {
-      const center = map.getCenter()
-      if (center) {
-        const position = { lat: center.lat(), lng: center.lng() }
-        setTempPosition(position)
-        createTempMarker(position)
+    if (isOpen) {
+      setStep("select");
+
+      // Google Maps
+      if (visualizationMode === "complessa" && map && window.google) {
+        const center = map.getCenter();
+        if (center) {
+          const position = { lat: center.lat(), lng: center.lng() };
+          setTempPosition(position);
+          createTempMarker(position, "google");
+        }
+      } else if (visualizationMode === "semplice" && map) {
+        // MapLibre
+        const center = map.getCenter();
+        if (center) {
+          const position = { lat: center.lat, lng: center.lng };
+          setTempPosition(position);
+          createTempMarker(position, "maplibre");
+        }
+      }else{
+        console.log("non entro in nessun tipo")
       }
     }
-    
     // Cleanup quando il modal si chiude
     return () => {
       if (tempMarker) {
-        tempMarker.setMap(null)
-        setTempMarker(null)
+        if (window.google && tempMarker.setMap) {
+          tempMarker.setMap(null);
+        } else if (tempMarker.remove) {
+          tempMarker.remove();
+        }
+        setTempMarker(null);
+      }
+    };
+  }, [isOpen, map, visualizationMode]);
+
+  // Crea un marker temporaneo per il drag (Google o MapLibre)
+  const createTempMarker = async (position, provider) => {
+    // Cleanup precedente
+    if (tempMarker) {
+      if (window.google && tempMarker.setMap) {
+        tempMarker.setMap(null);
+      } else if (tempMarker.remove) {
+        tempMarker.remove();
       }
     }
-  }, [isOpen, map])
+    if (provider === "google") {
+      try {
+        const { AdvancedMarkerElement } = await window.google.maps.importLibrary("marker")
+        const marker = new AdvancedMarkerElement({
+          position: new window.google.maps.LatLng(position.lat, position.lng),
+          map: map,
+          gmpDraggable: true,
+          content: createTempMarkerContent()
+        })
+        marker.addListener("drag", (event) => {
+          const newPos = event.latLng
+          setTempPosition({ lat: newPos.lat(), lng: newPos.lng() })
+          setIsDragging(true)
+        })
+        marker.addListener("dragend", (event) => {
+          const newPos = event.latLng
+          setTempPosition({ lat: newPos.lat(), lng: newPos.lng() })
+          setIsDragging(false)
+        })
+        setTempMarker(marker)
+      } catch (error) {
+        console.error("Errore nella creazione del marker temporaneo:", error)
+      }
+    } else if (provider === "maplibre") {
+      try {
+        // Crea elemento HTML per il marker
+        const el = createTempMarkerContent(true)
 
-  // Crea un marker temporaneo per il drag
-  const createTempMarker = async (position) => {
-    if (!map || !window.google) return
-
-    // Rimuovi il marker temporaneo precedente se esiste
-    if (tempMarker) {
-      tempMarker.setMap(null)
-    }
-
-    try {
-      const { AdvancedMarkerElement } = await window.google.maps.importLibrary("marker")
-      
-      // Crea un marker temporaneo draggable
-      const marker = new AdvancedMarkerElement({
-        position: new window.google.maps.LatLng(position.lat, position.lng),
-        map: map,
-        gmpDraggable: true,
-        content: createTempMarkerContent()
-      })
-
-      // Aggiungi listener per il drag
-      marker.addListener("drag", (event) => {
-        const newPos = event.latLng
-        setTempPosition({ lat: newPos.lat(), lng: newPos.lng() })
-        setIsDragging(true)
-      })
-
-      marker.addListener("dragend", (event) => {
-        const newPos = event.latLng
-        setTempPosition({ lat: newPos.lat(), lng: newPos.lng() })
-        setIsDragging(false)
-      })
-
-      setTempMarker(marker)
-    } catch (error) {
-      console.error("Errore nella creazione del marker temporaneo:", error)
+        const marker = new maplibregl.Marker({
+          element: el,
+          draggable: true
+        })
+          .setLngLat([position.lng, position.lat])
+          .addTo(map)
+          console.log("el aggiunto alla mappa")
+        marker.on("drag", () => {
+          const lngLat = marker.getLngLat()
+          setTempPosition({ lat: lngLat.lat, lng: lngLat.lng })
+          setIsDragging(true)
+        })
+        marker.on("dragend", () => {
+          const lngLat = marker.getLngLat()
+          setTempPosition({ lat: lngLat.lat, lng: lngLat.lng })
+          setIsDragging(false)
+        })
+        setTempMarker(marker)
+      } catch (error) {
+        console.error("Errore nella creazione del marker temporaneo MapLibre:", error)
+      }
     }
   }
 
   // Crea il contenuto del marker temporaneo
-  const createTempMarkerContent = () => {
+  // Se isMapLibre è true, aggiungi classi Tailwind direttamente
+  const createTempMarkerContent = (isMapLibre = false) => {
     const container = document.createElement("div")
-    container.className = "temp-marker"
+    if (isMapLibre) {
+      container.className = "w-11 h-11 flex items-center justify-center rounded-full border-2 border-dashed border-blue-500 bg-blue-500/10 shadow-lg animate-pulse cursor-move"
+    } else {
+      container.className = "temp-marker"
+    }
     container.innerHTML = `
-  <div style="
-    width: 44px;
-    height: 44px;
-    background: rgba(59, 130, 246, 0.15);
-    border: 3px dashed #3b82f6;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: move;
-    box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
-    animation: pulse 2s infinite;
-  ">
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-      <ellipse cx="12" cy="10" rx="6" ry="7" fill="#fffde4" stroke="#facc15" stroke-width="2"/>
-      <rect x="9" y="16" width="6" height="3" rx="1.5" fill="#d1d5db" stroke="#3b82f6" stroke-width="1"/>
-      <rect x="10" y="19" width="4" height="2" rx="1" fill="#3b82f6" />
-      <line x1="12" y1="3" x2="12" y2="0.5" stroke="#facc15" stroke-width="1.5" stroke-linecap="round"/>
-      <line x1="7.5" y1="5" x2="5.5" y2="3.5" stroke="#facc15" stroke-width="1.5" stroke-linecap="round"/>
-      <line x1="16.5" y1="5" x2="18.5" y2="3.5" stroke="#facc15" stroke-width="1.5" stroke-linecap="round"/>
-    </svg>
-  </div>
-`
+      <div style="
+        width: 44px;
+        height: 44px;
+        background: rgba(59, 130, 246, 0.15);
+        border: 3px dashed #3b82f6;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: move;
+        box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+        animation: pulse 2s infinite;
+      ">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+          <ellipse cx="12" cy="10" rx="6" ry="7" fill="#fffde4" stroke="#facc15" stroke-width="2"/>
+          <rect x="9" y="16" width="6" height="3" rx="1.5" fill="#d1d5db" stroke="#3b82f6" stroke-width="1"/>
+          <rect x="10" y="19" width="4" height="2" rx="1" fill="#3b82f6" />
+          <line x1="12" y1="3" x2="12" y2="0.5" stroke="#facc15" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="7.5" y1="5" x2="5.5" y2="3.5" stroke="#facc15" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="16.5" y1="5" x2="18.5" y2="3.5" stroke="#facc15" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+    `
     return container
   }
 
@@ -135,8 +184,12 @@ const AddLightPointModal = ({
       
       // Pulisci il marker temporaneo
       if (tempMarker) {
-        tempMarker.setMap(null)
-        setTempMarker(null)
+        if (window.google && tempMarker.setMap) {
+          tempMarker.setMap(null);
+        } else if (tempMarker.remove) {
+          tempMarker.remove();
+        }
+        setTempMarker(null);
       }
       
       // Reset del modal
@@ -152,8 +205,12 @@ const AddLightPointModal = ({
   const handleCancel = () => {
     // Pulisci il marker temporaneo
     if (tempMarker) {
-      tempMarker.setMap(null)
-      setTempMarker(null)
+      if (window.google && tempMarker.setMap) {
+        tempMarker.setMap(null);
+      } else if (tempMarker.remove) {
+        tempMarker.remove();
+      }
+      setTempMarker(null);
     }
     
     // Reset del modal
@@ -190,7 +247,6 @@ const AddLightPointModal = ({
             </button>
           </div>
 
-          {/* Avviso modalità drag */}
           {step === "select" && (
             <div className="space-y-4">
               <div className="text-center mb-6">
@@ -241,6 +297,7 @@ const AddLightPointModal = ({
               onBack={handleBack}
               tempPosition={tempPosition}
               selectedCity={selectedCity}
+              electricPanels={electricPanels}
             />
           )}
 
@@ -251,6 +308,7 @@ const AddLightPointModal = ({
               onBack={handleBack}
               tempPosition={tempPosition}
               selectedCity={selectedCity}
+              electricPanels={electricPanels}
             />
           )}
         </div>

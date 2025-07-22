@@ -3,14 +3,14 @@
 import { useState, useEffect, useContext } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { UserContext } from "../context/UserContext"
-import { AlertCircle, CheckCircle, ChevronLeft, MapPin, Map } from "lucide-react"
+import { AlertCircle, CheckCircle, ChevronLeft, MapPin, Map, User } from "lucide-react"
 import { LightbulbLoader } from "../components/lightbulb-loader"
 import { api } from "../context/UserContext"
 
 const BASE_URL = import.meta.env.VITE_SERVER_URL
 
 export default function Report() {
-  const { userData } = useContext(UserContext)
+  const { userData, getLightpoint, addReport } = useContext(UserContext)
   const navigate = useNavigate()
   const location = useLocation()
   const [formData, setFormData] = useState({
@@ -21,7 +21,7 @@ export default function Report() {
   const [isSuccess, setIsSuccess] = useState(false)
   const [error, setError] = useState("")
   const [address, setAddress] = useState("Loading address...")
-  const [queryParams, setQueryParams] = useState({})
+  const [lightpoint, setLightpoint] = useState(null)
 
   const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API
 
@@ -35,41 +35,7 @@ export default function Report() {
     OTHER: "Altro",
   }
 
-  useEffect(() => {
-    if (!userData) {
-      navigate("/")
-      return
-    }
-
-    // Parse query parameters
-    const params = new URLSearchParams(location.search)
-    const paramsObj = {
-      comune: params.get("comune"),
-      numeroPalo: params.get("numeroPalo"),
-      lat: params.get("lat"),
-      lng: params.get("lng"),
-      adr: params.get("adr"),
-    }
-
-    setQueryParams(paramsObj)
-
-    // Get address from coordinates if not provided
-    if (paramsObj.lat && paramsObj.lng) {
-      if (!paramsObj.adr) {
-        setAddress(paramsObj.adr)
-      } else {
-        findAddress(paramsObj.lat, paramsObj.lng)
-          .then((addressResult) => {
-            setAddress(addressResult)
-          })
-          .catch((error) => {
-            console.error("Error fetching address:", error)
-            setAddress("Address not found")
-          })
-      }
-    }
-  }, [userData, navigate, location.search])
-
+  // Funzione per trovare l'indirizzo tramite lat/lng
   const findAddress = async (lat, lng) => {
     try {
       const response = await fetch(
@@ -84,6 +50,45 @@ export default function Report() {
     }
   }
 
+  // Carica il punto luce all'avvio
+  useEffect(() => {
+    if (!userData) {
+      navigate("/")
+      return
+    }
+    
+    const params = new URLSearchParams(location.search)
+    const comune = params.get("comune")
+    const id = params.get("id")
+
+    const fetchLightpoint = async () => {
+      try {
+        const response = await getLightpoint(id)
+        if (response && response.data) {
+          setLightpoint(response.data)
+          // Se c'è lat/lng, trova l'indirizzo
+          if (response.data.lat && response.data.lng) {
+            if (response.data.adr) {
+              setAddress(response.data.adr)
+            } else {
+              const addr = await findAddress(response.data.lat, response.data.lng)
+              setAddress(addr)
+            }
+          } else {
+            setAddress("Address not found")
+          }
+        } else {
+          setLightpoint(null)
+          setAddress("Address not found")
+        }
+      } catch (err) {
+        setLightpoint(null)
+        setAddress("Address not found")
+      }
+    }
+    fetchLightpoint()
+  }, [userData, navigate, location.search])
+
   const handleChange = (e) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
@@ -92,9 +97,10 @@ export default function Report() {
   const sendMailOfReport = async () => {
     try {
       const date = new Date().toISOString()
+      const comune = new URLSearchParams(location.search).get("comune")
 
       const mailData = {
-        name: queryParams.comune,
+        name: comune,
         user: {
           name: userData.name,
           surname: userData.surname,
@@ -103,15 +109,16 @@ export default function Report() {
         },
         date: date,
         light_point: {
-          numero_palo: queryParams.numeroPalo,
+          numero_palo: lightpoint?.numeroPalo,
           indirizzo: address,
+          ...lightpoint, // puoi aggiungere altre caratteristiche qui
         },
         report: {
           report_type: reportTypes[formData.reportType],
           description: formData.description,
         },
       }
-      const response = await api.post("/send-email-to-user/lightPointReported", mailData)
+      await api.post("/send-email-to-user/lightPointReported", mailData)
       return true
     } catch (error) {
       console.error("Error sending email notification:", error)
@@ -123,18 +130,28 @@ export default function Report() {
     e.preventDefault()
     setIsLoading(true)
     setError("")
+    const comune = new URLSearchParams(location.search).get("comune")
 
     try {
       const reportData = {
         report_type: formData.reportType,
         description: formData.description,
-        name: queryParams.comune,
-        numero_palo: queryParams.numeroPalo,
+        name: comune,
+        user_creator_id: userData.id,
+        numero_palo: lightpoint?.numeroPalo,
         date: new Date(),
+        ...lightpoint, 
       }
-      
-      const response = await api.post("/addReport", reportData)
-      await sendMailOfReport()
+      const res1 = await addReport(reportData)
+      if (!res1 ) {
+        setError("Errore nell'invio della segnalazione. Riprova.")
+        return
+      }
+      const res2 = await sendMailOfReport()
+      if (!res2) {
+        setError("Errore nell'invio della mail di notifica. Riprova.")
+        return
+      }
       setIsSuccess(true)
     } catch (error) {
       console.error("Error submitting report:", error)
@@ -178,6 +195,18 @@ export default function Report() {
     )
   }
 
+  // Loading state
+  if (!lightpoint) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4">
+        <div className="w-full max-w-md flex flex-col items-center justify-center">
+          <LightbulbLoader />
+          <p className="mt-4 text-blue-200">Caricamento punto luce...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4">
       <div className="w-full max-w-md relative overflow-hidden rounded-2xl shadow-[0_0_40px_rgba(0,149,255,0.15)]">
@@ -198,8 +227,15 @@ export default function Report() {
             <div className="flex items-center space-x-2">
               <MapPin className="w-5 h-5" />
               <p className="text-blue-100">
-                <span className="font-medium">N° Punto Luce:</span>{" "}
-                <span className="text-blue-200">{queryParams.numeroPalo}</span>
+                {lightpoint.marker === "PL" ? (
+                  <>
+                    <span className="font-medium">N° Punto Luce:</span>{" "}
+                    <span className="text-blue-200">{lightpoint.numero_palo}</span>
+                  </>
+                ) : <>
+                    <span className="font-medium">N° Quadro:</span>{" "}
+                    <span className="text-blue-200">{lightpoint.numero_palo}</span>
+                  </>}
               </p>
             </div>
             <div className="flex items-start space-x-2">
@@ -208,6 +244,13 @@ export default function Report() {
                 <span className="font-medium">Indirizzo:</span> <span className="text-blue-200">{address}</span>
               </p>
             </div>
+            <div className="flex items-start space-x-2">
+              <User className="w-5 h-5" />
+              <p className="text-blue-100">
+                <span className="font-medium">Segnalante:</span> <span className="text-blue-200">{userData?.surname} {userData?.name}</span>
+              </p>
+            </div>
+            
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">

@@ -8,7 +8,7 @@ import {
 } from "../utils/utils"
 import React from "react"
 
-const InfoWindow = ({ content, marker, city, userData, onEditClick, onDeleteClick, mapType, onBeforeReport }) => {
+const InfoWindow = ({ content, marker, city, userData, onEditClick, onDeleteClick, mapType, onBeforeReport, idMarker }) => {
   const handleToggleStreetView = () => {
     if (mapType === "maplibre"){
       window.open(`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${marker.lat},${marker.lng}`, "_blank")
@@ -32,13 +32,10 @@ const InfoWindow = ({ content, marker, city, userData, onEditClick, onDeleteClic
     if (onBeforeReport) {
       onBeforeReport({
         city,
-        numeroPalo: clearBlanket(marker.numero_palo),
-        lat: marker.lat,
-        lng: marker.lng,
-        addr: clearBlanket(marker.indirizzo)
+        id:idMarker
       });
     } else {
-      window.reportPoint(city, clearBlanket(marker.numero_palo), marker.lat, marker.lng, clearBlanket(marker.indirizzo));
+      window.reportPoint(city, idMarker);
     }
   }
 

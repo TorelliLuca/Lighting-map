@@ -201,6 +201,7 @@ const createMarkers = async (
   onDeleteClick,
   showPanelNumber,
   showStreetLampNumber,
+  setSelectedMarkerForInfo,
 ) => {
   if (!window.google || !map) return []
 
@@ -370,6 +371,9 @@ const createMarkers = async (
       infoWindowRef.current.setContent(infoWindowContainer)
       infoWindowRef.current.open(map, mapMarker)
       setCurrentInfoWindow(infoWindowRef.current)
+      if (typeof setSelectedMarkerForInfo === "function") {
+        setSelectedMarkerForInfo(marker);
+      }
     })
 
     newMarkers.push({ data: marker, ref: mapMarker, reactRoot: customRoot, reactContainer: customContainer })
@@ -488,6 +492,7 @@ const setupMarkerClustering = async (
   onDeleteClick,
   showPanelNumber,
   showStreetLampNumber,
+  setSelectedMarkerForInfo,
 ) => {
   // Make sure Google Maps API is fully loaded
   if (!window.google || !window.google.maps || !map) {
@@ -531,6 +536,7 @@ const setupMarkerClustering = async (
       onDeleteClick,
       showPanelNumber,
       showStreetLampNumber,
+      setSelectedMarkerForInfo,
     )
 
     allMarkers = [...allMarkers, ...batchResult]

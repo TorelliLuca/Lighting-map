@@ -39,7 +39,8 @@ const MapLibreMap = forwardRef(({
   selectedCity,
   onBeforeReport,
   onBeforeReportCleanupTrigger,
-  onAfterCleanup
+  onAfterCleanup,
+  onMarkerSelect, // Callback per notificare la selezione di un marker
 }, ref) => {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
@@ -390,7 +391,6 @@ const MapLibreMap = forwardRef(({
           })
           .catch(err => {
             if (!isMapActive.current) return;
-            console.log("errore, esco", err);
           });
       } catch (err) {
         if (!isMapActive.current) return;
@@ -448,6 +448,7 @@ const MapLibreMap = forwardRef(({
         props = cleanAndNormalizeContent(props)
 
 
+
         ReactDOM.createRoot(popupDiv).render(
           <InfoWindow
             content={content}
@@ -459,6 +460,7 @@ const MapLibreMap = forwardRef(({
             onEditClick={onEditClick}
             onDeleteClick={onDeleteClick}
             onBeforeReport={onBeforeReport}
+            idMarker={props._id}
           />
         );
         // AGGIUNTA: salva la popup nella ref
@@ -468,6 +470,18 @@ const MapLibreMap = forwardRef(({
             .setDOMContent(popupDiv)
             .addTo(mapRef.current);
           popupRef.current = popup;
+          
+          // Notifica al parent il marker selezionato
+          if (onMarkerSelect) {
+            onMarkerSelect(props);
+          }
+
+          // Aggiungi listener per la deselezione
+          popup.on('close', () => {
+            if (onMarkerSelect) {
+              onMarkerSelect(null);
+            }
+          });
         }
       } catch (err) {
         if (!isMapActive.current) return;
@@ -981,14 +995,8 @@ const MapLibreMap = forwardRef(({
   //   }
   // }, [mapLoaded]);
 
-  // Espone il metodo flyTo al padre
-  useImperativeHandle(ref, () => ({
-    flyTo: ({ center, zoom }) => {
-      if (mapRef.current) {
-        mapRef.current.flyTo({ center, zoom });
-      }
-    }
-  }));
+  // Espone l'istanza della mappa al padre
+  useImperativeHandle(ref, () => mapRef.current);
 
 
   return (

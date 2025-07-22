@@ -105,7 +105,7 @@ export const UserProvider = ({ children }) => {
   // Register function
   const register = async (userData) => {
     try {
-      await api.post("/users/addPendingUser", userData)
+      await api.post("/addPendingUser", userData)
     } catch (error) {
       console.error("Registration failed:", error)
       throw error
@@ -307,6 +307,24 @@ export const UserProvider = ({ children }) => {
       return
     }
   }
+  const getLightpoint = async (id) =>{
+    try {
+      const response = await api.get(`/townHalls/lightpoints/${id}`);
+      return response
+    } catch (error) {
+      console.error(error)
+      return
+    }
+  }
+  const addReport = async (data) =>{
+    try {
+      const response = await api.post(`/addReport`, data);
+      return response
+    } catch (error) {
+      console.error(error)
+      return
+    }
+  }
 
   return (
     <UserContext.Provider 
@@ -331,6 +349,8 @@ export const UserProvider = ({ children }) => {
         getAverageResponseTime,
         getTownhallGeojson, // aggiunto qui
         getTownhallLightpointsCount,
+        getLightpoint,
+        addReport,
         isAuthenticated: !!token
       }}
     >
