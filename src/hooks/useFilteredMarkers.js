@@ -41,6 +41,7 @@ function generateLegendColorMap(markers, highlightOption) {
 
 // Funzione per determinare il colore del marker
 function getMarkerColor(marker, highlightOption, colorMappings) {
+ 
   // Notifiche attive
   const hasActiveNotifications = marker.segnalazioni_in_corso && marker.segnalazioni_in_corso.length > 0;
   let markerColor = DEFAULT_COLOR;

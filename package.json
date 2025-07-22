@@ -40,7 +40,8 @@
     "tailwind-merge": "^3.0.2",
     "tailwind-scrollbar": "^4.0.2",
     "tailwindcss": "^4.0.9",
-    "tailwindcss-animate": "^1.0.7"
+    "tailwindcss-animate": "^1.0.7",
+    "uniqolor": "^1.1.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",
