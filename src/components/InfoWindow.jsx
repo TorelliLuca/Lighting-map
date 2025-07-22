@@ -178,18 +178,18 @@ const InfoWindow = ({ content, marker, city, userData, onEditClick, onDeleteClic
   }
 
   return (
-    <div className={`p-2 md:p-4 pb-0 rounded-lg shadow-lg border border-black relative w-full max-w-xs md:max-w-md`} style={{
-      minWidth: '180px',
+    <div className={`p-2 md:p-4 pb-0 rounded-lg shadow-lg border  relative w-full max-w-xs md:max-w-md`} style={{
+      minWidth: '200px',
       background: '#fff',
       color: '#111',
-      maxHeight: '80vh',
+      maxHeight: '100vh',
     }}>
       {/* Main content area */}
       <div
-        className="overflow-y-auto mb-4 custom-scrollbar"
+        className="overflow-y-auto mb-4 custom-scrollbar h-250 md:h-150"
         style={{
           paddingBottom: contentPaddingBottom,
-          maxHeight: '50vh',
+          //maxHeight: '600vh',
         }}
       >
         {Object.entries(content)

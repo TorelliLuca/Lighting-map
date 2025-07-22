@@ -39,7 +39,7 @@ function AddMenu({ onAddPoint, onDuplicatePoint }) {
   }
 
   return (
-    <div className="fixed bottom-60 left-6 z-3">
+    <div className="fixed bottom-60 left-6 z-2">
       <button
         ref={buttonRef}
         onClick={() => setIsExpanded(!isExpanded)}

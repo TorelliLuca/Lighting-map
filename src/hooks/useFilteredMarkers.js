@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { getColorList, DEFAULT_COLOR } from '../utils/ColorGenerator';
 
 // Genera la mappa colori coordinata come in createMarkers.jsx
-function generateLegendColorMap(markers, highlightOption) {
+export function generateLegendColorMap(markers, highlightOption) {
   let colorMappings = { quadro: {}, proprieta: {}, lotto: {}, tipo_lampada: {}, tipo_apparecchio: {} };
   let uniqueValues = [];
   if (highlightOption === 'PROPRIETA') {
@@ -64,6 +64,7 @@ function getMarkerColor(marker, highlightOption, colorMappings) {
     if (marker.lotto && colorMappings.lotto[marker.lotto]) {
       markerColor = colorMappings.lotto[marker.lotto];
     }
+  } else if (highlightOption === 'TIPO_LAMPADA') {
     if (marker.marker === 'QE') {
       markerColor = '#3b82f6'; // Colore fisso per i quadri
     } else {
@@ -77,7 +78,9 @@ function getMarkerColor(marker, highlightOption, colorMappings) {
     if (tipoApparecchio && colorMappings.tipo_apparecchio && colorMappings.tipo_apparecchio[tipoApparecchio]) {
       markerColor = colorMappings.tipo_apparecchio[tipoApparecchio];
     }
+    
   }
+  
   return markerColor;
 }
 

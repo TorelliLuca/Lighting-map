@@ -29,7 +29,7 @@ export default function Login({ setIsAuthenticated }) {
       await login(email, password)
       navigate("/dashboard")
     } catch (err) {
-      setError(err.response?.data || "Si è verificato un errore durante il login")
+      setError(err.response?.data || "Si è verificato un errore durante il login" + err.message)
     } finally {
       setIsLoading(false)
     }

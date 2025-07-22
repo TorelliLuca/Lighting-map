@@ -39,29 +39,14 @@ export const coloreGliphOn = "#80EB34"
 
 // Restituisce una lista di n colori unici, senza ripetizioni
 export function getColorList(n) {
-  const base = [...colorsBackground]
-  if (n <= base.length) return base.slice(0, n)
-  // Genera colori HSL equidistanti se servono più colori
-  const extra = generateSafeColors(n - base.length)
-  return base.concat(extra)
-}
-
-/**
- * Genera una palette di colori HEX ben distribuiti e accessibili.
- * @param {number} count - Numero di colori da generare.
- * @param {number} [s=70] - Saturazione (0-100).
- * @param {number} [l=50] - Luminosità (0-100).
- * @returns {string[]} Array di colori HEX.
- */
-export function generateSafeColors(count, s = 100, l = 50) {
-  const colors = [];
-  for (let i = 0; i < count; i++) {
-    // Usa uniqolor per generare un colore unico basato su un seed
-    const { color } = uniqolor(i.toString(), { saturation: s, lightness: l });
-    colors.push(color);
+  const base = [...colorsBackground];
+  if (n <= base.length) return base.slice(0, n);
+  // Ripeti ciclicamente i colori base fino a raggiungere n
+  const repeated = [];
+  for (let i = 0; i < n; i++) {
+    repeated.push(base[i % base.length]);
   }
-  return colors;
+  return repeated;
 }
-
 
 

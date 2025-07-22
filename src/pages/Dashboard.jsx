@@ -20,8 +20,9 @@ import MapLibreMap from "../components/MapLibreMap";
 import ErrorBoundary from "../components/ErrorBoundary.jsx"
 
 import { translateString, transformDateToIT } from "../utils/utils"
-import { createMarkers, setupMarkerClustering, filterMarkers, cleanupMapResources, updateMarkerColors, currentClusterer, generateLegendColorMap } from "../utils/createMarkers.jsx"
-import useFilteredMarkers from '../hooks/useFilteredMarkers.js';
+import { createMarkers, setupMarkerClustering, filterMarkers, cleanupMapResources, updateMarkerColors, currentClusterer } from "../utils/createMarkers.jsx"
+import useFilteredMarkers from '../hooks/useFilteredMarkers';
+import { generateLegendColorMap } from '../hooks/useFilteredMarkers'; // importa la funzione
 
 import toast, { Toaster } from "react-hot-toast"
 
@@ -183,7 +184,7 @@ function Dashboard() {
       let lng = m.lng;
       // Se sono stringhe numeriche, le converto in numero
       if (typeof lat === "string") lat = parseFloat(lat.replace(",", "."));
-      if (typeof lng === "string") lng = parseFloat(lng.replace(",", "."));
+      if (typeof lng === "string" ) lng = parseFloat(lng.replace(",", "."));
       // Se non sono numeri validi, fallback a ""
       const latStr = (typeof lat === "number" && !isNaN(lat)) ? lat.toString() : "";
       const lngStr = (typeof lng === "number" && !isNaN(lng)) ? lng.toString() : "";
@@ -208,12 +209,19 @@ function Dashboard() {
 
 
   // Applica i filtri lato client ai marker semplici (MapLibre)
-  const { geojsonData: simpleGeojsonData } = useFilteredMarkers({
+  const { geojsonData: simpleGeojsonData, filteredMarkers } = useFilteredMarkers({
     markers: simpleMarkers,
     filterOption,
     selectedProprietaFilter,
     highlightOption,
   });
+
+
+  // Aggiorna legendColorMap ogni volta che cambiano i marker filtrati o l'opzione di evidenziazione
+  useEffect(() => {
+    const colorMap = generateLegendColorMap(filteredMarkers, highlightOption);
+    setLegendColorMap(colorMap);
+  }, [filteredMarkers, highlightOption])
 
 
   useEffect(() => {
@@ -602,6 +610,36 @@ function Dashboard() {
       }
     }
   }, [selectedCity, cityLightPointsMap]);
+
+  useEffect(() => {
+    if (map && visualizationMode === "complessa") {
+      const handleZoomChanged = () => {
+        const zoom = map.getZoom();
+        localStorage.setItem(STORAGE_KEYS.MAP_ZOOM, zoom.toString());
+      };
+      map.addListener("zoom_changed", handleZoomChanged);
+
+      // Cleanup del listener quando il componente si smonta o la mappa cambia
+      return () => {
+        window.google.maps.event.clearListeners(map, "zoom_changed");
+      };
+    }else if (mapLibreRef.current && visualizationMode === "semplice") {
+      let lastZoom = mapLibreRef.current.getZoom();
+      const handleMoveEnd = () => {
+        const zoom = mapLibreRef.current.getZoom();
+        if (zoom !== lastZoom) {
+          localStorage.setItem(STORAGE_KEYS.MAP_ZOOM, zoom.toString());
+          lastZoom = zoom;
+        }
+      };
+      mapLibreRef.current.on("moveend", handleMoveEnd);
+
+
+      return () => {
+        mapLibreRef.current.off("moveend", handleMoveEnd);
+      };
+    }
+  }, [map,mapLibreRef, visualizationMode]);
 
   // Function to clean up previous data and load new data
   const cleanupAndLoadMapData = async () => {
@@ -1502,7 +1540,7 @@ function Dashboard() {
         const lngNum = parseFloat(updatedMarker.lng)
         if (!isNaN(latNum) && !isNaN(lngNum)) {
           map.setCenter(new window.google.maps.LatLng(latNum, lngNum))
-          map.setZoom(18)
+          map.setZoom(localStorage.getItem(STORAGE_KEYS.MAP_ZOOM) || 18) // Usa lo zoom salvato o un valore di default
         }
       }
     } catch (error) {
@@ -1628,16 +1666,17 @@ function Dashboard() {
         } else {
           await cleanupAndLoadMapData();
         }
-
+        handleEditSimpleClick(response.data);
         // Centro la mappa sul nuovo punto
         if (visualizationMode === "complessa" && map) {
 
           const latLng = new window.google.maps.LatLng(newLat, newLng)
           map.setCenter(latLng);
-          map.setZoom(20);
+          map.setZoom(localStorage.getItem(STORAGE_KEYS.MAP_ZOOM) || 20);
         } else if (visualizationMode === "semplice" && mapLibreRef.current) {
-          mapLibreRef.current.flyTo({ center: [newLng, newLat], zoom: 19 });
+          mapLibreRef.current.flyTo({ center: [newLng, newLat], zoom: localStorage.getItem(STORAGE_KEYS.MAP_ZOOM) });
         }
+
       } else {
         toast.error(response.data || "Errore durante la duplicazione.");
       }
@@ -1668,7 +1707,7 @@ function Dashboard() {
             const latNum = parseFloat(newMarker.lat);
             const lngNum = parseFloat(newMarker.lng);
             if (!isNaN(latNum) && !isNaN(lngNum)) {
-              mapLibreRef.current.flyTo({ center: [lngNum, latNum], zoom: 18 });
+              mapLibreRef.current.flyTo({ center: [lngNum, latNum], zoom: localStorage.getItem(STORAGE_KEYS.MAP_ZOOM) });
             }
           }
         } else {
@@ -1696,7 +1735,7 @@ function Dashboard() {
             const lngNum = parseFloat(formData.lng);
             if (!isNaN(latNum) && !isNaN(lngNum)) {
               map.setCenter(new window.google.maps.LatLng(latNum, lngNum));
-              map.setZoom(18);
+              map.setZoom(localStorage.getItem(STORAGE_KEYS.MAP_ZOOM) || 18);
             }
           }
         }

@@ -69,7 +69,7 @@ function LegendGlass({ highlightOption, legendColorMap }) {
   }
 
   return (
-    <div className="fixed bottom-42 left-6 z-2 select-none">
+    <div className="fixed bottom-42 left-6 z-4 select-none">
       {/* Bottone palette */}
       <button
         ref={buttonRef}
