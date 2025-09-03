@@ -363,6 +363,7 @@ const createMarkers = async (
             userData={userData} 
             onEditClick={onEditClick}
             onDeleteClick={onDeleteClick}
+            idMarker={ marker._id}
           />
         )
     

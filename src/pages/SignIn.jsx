@@ -2,10 +2,11 @@
 
 import { useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { Eye, EyeOff, Mail, Lock, User, CheckCircle } from "lucide-react"
+import { Eye, EyeOff, Mail, Lock, User, CheckCircle, Shield, Check, X, AlertCircle } from "lucide-react"
 import { LightbulbLoader } from "../components/lightbulb-loader"
 import Logo from "../components/Logo"
 import axios from "axios"
+import { capitalizeString, validateName } from "../utils/utils"
 
 const BASE_URL = import.meta.env.VITE_SERVER_URL
 
@@ -22,20 +23,107 @@ export default function SignIn() {
   const [error, setError] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [isSuccess, setIsSuccess] = useState(false)
+  const [nameError, setNameError] = useState("");
+  const [surnameError, setSurnameError] = useState("");
   const navigate = useNavigate()
 
   const handleChange = (e) => {
-    const { name, value } = e.target
-    setFormData((prev) => ({ ...prev, [name]: value }))
+    const { name, value } = e.target;
+    const trimmedValue = value.trim();
+
+    if (error) {
+      setError("");
+    }
+
+    if (name === "name") {
+      if (trimmedValue && !validateName(trimmedValue)) {
+        setNameError("Il nome non può contenere numeri o caratteri speciali.");
+      } else {
+        setNameError("");
+      }
+    } else if (name === "surname") {
+      if (trimmedValue && !validateName(trimmedValue)) {
+        setSurnameError("Il cognome non può contenere numeri o caratteri speciali.");
+      } else {
+        setSurnameError("");
+      }
+    }
+
+    // Aggiorna lo stato del form
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  // Funzione per validare i singoli requisiti della password
+  const getPasswordValidation = (password) => {
+    return {
+      minLength: password.length >= 8,
+      hasUppercase: /[A-Z]/.test(password),
+      hasLowercase: /[a-z]/.test(password),
+      hasNumber: /\d/.test(password),
+      hasSpecialChar: /[!@#$%^&*(),.?":{}|<>]/.test(password),
+    }
   }
 
-  const validateForm = () => {
-    if (formData.password !== formData.confirmPassword) {
-      setError("Passwords do not match")
-      return false
-    }
-    return true
+  // Calcola la forza della password
+  const getPasswordStrength = (password) => {
+    const validation = getPasswordValidation(password)
+    const passed = Object.values(validation).filter(Boolean).length
+
+    if (password.length === 0) return { level: 0, text: "", color: "" }
+    if (passed <= 2) return { level: 1, text: "Debole", color: "text-red-400" }
+    if (passed === 3) return { level: 2, text: "Media", color: "text-yellow-400" }
+    if (passed === 4) return { level: 3, text: "Forte", color: "text-green-400" }
+    if (passed === 5) return { level: 4, text: "Molto Forte", color: "text-emerald-400" }
+
+    return { level: 0, text: "", color: "" }
   }
+
+  const validatePassword = (password) => {
+    if (password.length < 8) {
+      return "La password deve essere di almeno 8 caratteri"
+    }
+    if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(password)) {
+      return "La password deve contenere almeno una lettera maiuscola, una minuscola e un numero"
+    }
+    return null
+  }
+  const validateEmail = (email) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return emailRegex.test(email)
+  }
+
+const validateForm = () => {
+  // Esegui la validazione finale al submit
+  if (!formData.name.trim() || !formData.surname.trim() || !formData.email.trim() || !formData.password.trim() || !formData.confirmPassword.trim()) {
+    setError("Per favore, compila tutti i campi.");
+    return false;
+  }
+  
+  if (nameError || surnameError) {
+    setError("Correggi gli errori nei campi Nome e Cognome.");
+    return false;
+  }
+  
+  // Validazione dell'email (rimane invariata)
+  if (!validateEmail(formData.email.trim())) {
+    setError("Inserisci un indirizzo email valido.");
+    return false;
+  }
+
+  // Validazione della password (rimane invariata)
+  const passwordError = validatePassword(formData.password);
+  if (passwordError) {
+    setError(passwordError);
+    return false;
+  }
+  
+  if (formData.password !== formData.confirmPassword) {
+    setError("Le password non corrispondono.");
+    return false;
+  }
+  
+  return true;
+};
 
   const sendMailToAdmin = async (name, surname) => {
     try {
@@ -55,16 +143,16 @@ export default function SignIn() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    setError("")
 
     if (!validateForm()) return
 
     setIsLoading(true)
-    setError("")
 
     try {
       const dataToSend = {
-        name: formData.name,
-        surname: formData.surname,
+        name: capitalizeString(formData.name),
+        surname: capitalizeString(formData.surname),
         email: formData.email,
         password: formData.password,
       }
@@ -73,11 +161,15 @@ export default function SignIn() {
       setIsSuccess(true)
     } catch (error) {
       console.error(error)
-      setError(error.response.data || "Registration failed. Please try again.")
+      setError(error.response?.data || "Registration failed. Please try again.")
     } finally {
       setIsLoading(false)
     }
   }
+
+  const passwordValidation = getPasswordValidation(formData.password)
+  const passwordStrength = getPasswordStrength(formData.password)
+  const passwordsMatch = formData.password === formData.confirmPassword && formData.confirmPassword.length > 0
 
   if (isSuccess) {
     return (
@@ -89,14 +181,14 @@ export default function SignIn() {
               <div className="mx-auto flex items-center justify-center h-20 w-20 rounded-full bg-blue-500/20 backdrop-blur-sm mb-6 border border-blue-400/30">
                 <CheckCircle className="h-10 w-10 text-blue-400" />
               </div>
-              <h2 className="text-2xl font-bold text-white">Registrazione Completata</h2>
+              <h2 className="text-2xl font-bold text-white">Registrazione Quasi Completata</h2>
               <p className="mt-2 text-blue-200/80">
-                La tua registrazione è stata inviata. Riceverai un'email quando la tua richiesta sarà approvata.
+                La tua registrazione è stata inviata ma devi ancora confermare la tua mail. Controlla la casella di posta per confermare la mail.
               </p>
               <div className="mt-8">
                 <Link
                   to="/"
-                  className="w-full inline-block py-3 px-4 rounded-xl font-medium text-white 
+                  className="w-full inline-block py-3 px-4 rounded-xl font-medium text-white
                   bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400
                   focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:ring-offset-2 focus:ring-offset-black
                   shadow-[0_0_15px_rgba(59,130,246,0.5)] transition-all duration-200 text-center"
@@ -137,9 +229,7 @@ export default function SignIn() {
                     Nome
                   </label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <User className="h-5 w-5 text-blue-400" />
-                    </div>
+                    {/* ... input del nome */}
                     <input
                       id="name"
                       name="name"
@@ -147,12 +237,18 @@ export default function SignIn() {
                       required
                       value={formData.name}
                       onChange={handleChange}
-                      className="block w-full pl-10 pr-3 py-3 rounded-xl border border-blue-500/30 
+                      // ... altre classi CSS
+                      className={`block w-full pl-10 pr-3 py-3 rounded-xl border ${nameError ? "border-red-500/50" : "border-blue-500/30"}
                       bg-blue-900/20 text-white placeholder-blue-300/50 backdrop-blur-sm
-                      focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
+                      focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50`}
                       placeholder="First Name"
                     />
                   </div>
+                  {nameError && (
+                    <div className="flex items-center mt-2 text-sm text-red-400 ml-2">
+                      <span>{nameError}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="relative">
@@ -160,9 +256,7 @@ export default function SignIn() {
                     Cognome
                   </label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <User className="h-5 w-5 text-blue-400" />
-                    </div>
+                    {/* ... input del cognome */}
                     <input
                       id="surname"
                       name="surname"
@@ -170,12 +264,18 @@ export default function SignIn() {
                       required
                       value={formData.surname}
                       onChange={handleChange}
-                      className="block w-full pl-10 pr-3 py-3 rounded-xl border border-blue-500/30 
+                      // ... altre classi CSS
+                      className={`block w-full pl-10 pr-3 py-3 rounded-xl border ${surnameError ? "border-red-500/50" : "border-blue-500/30"}
                       bg-blue-900/20 text-white placeholder-blue-300/50 backdrop-blur-sm
-                      focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
+                      focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50`}
                       placeholder="Last Name"
                     />
                   </div>
+                  {surnameError && (
+                    <div className="flex items-center mt-2 text-sm text-red-400 ml-2">
+                      <span>{surnameError}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -196,7 +296,7 @@ export default function SignIn() {
                     value={formData.email}
                     onChange={handleChange}
                     pattern="[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"
-                    className="block w-full pl-10 pr-3 py-3 rounded-xl border border-blue-500/30 
+                    className="block w-full pl-10 pr-3 py-3 rounded-xl border border-blue-500/30
                     bg-blue-900/20 text-white placeholder-blue-300/50 backdrop-blur-sm
                     focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
                     placeholder="you@example.com"
@@ -219,7 +319,7 @@ export default function SignIn() {
                     required
                     value={formData.password}
                     onChange={handleChange}
-                    className="block w-full pl-10 pr-10 py-3 rounded-xl border border-blue-500/30 
+                    className="block w-full pl-10 pr-10 py-3 rounded-xl border border-blue-500/30
                     bg-blue-900/20 text-white placeholder-blue-300/50 backdrop-blur-sm
                     focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
                     placeholder="••••••••"
@@ -232,7 +332,94 @@ export default function SignIn() {
                     {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                   </button>
                 </div>
+
+                {/* Password Strength Indicator */}
+                {formData.password.length > 0 && (
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-blue-200/70">Forza password:</span>
+                      <span className={`text-xs font-medium ${passwordStrength.color}`}>
+                        {passwordStrength.text}
+                      </span>
+                    </div>
+                    <div className="w-full bg-blue-900/30 rounded-full h-2 mb-2">
+                      <div
+                        className={`h-2 rounded-full transition-all duration-300 ${
+                          passwordStrength.level === 1
+                            ? "bg-red-500 w-1/4"
+                            : passwordStrength.level === 2
+                            ? "bg-yellow-500 w-2/4"
+                            : passwordStrength.level === 3
+                            ? "bg-green-500 w-3/4"
+                            : passwordStrength.level === 4
+                            ? "bg-emerald-500 w-full"
+                            : "w-0"
+                        }`}
+                      ></div>
+                    </div>
+                  </div>
+                )}
               </div>
+
+              {/* Password Requirements Checklist */}
+              {formData.password.length > 0 && (
+                <div className="bg-blue-900/10 border border-blue-500/20 rounded-xl p-4">
+                  <div className="flex items-center mb-3">
+                    <Shield className="h-4 w-4 text-blue-400 mr-2" />
+                    <span className="text-sm font-medium text-blue-200">Requisiti password</span>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center text-sm">
+                      <div className={`mr-2 ${passwordValidation.minLength ? "text-green-400" : "text-red-400"}`}>
+                        {passwordValidation.minLength ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+                      </div>
+                      <span className={passwordValidation.minLength ? "text-green-200" : "text-red-200"}>
+                        Almeno 8 caratteri
+                      </span>
+                    </div>
+                    <div className="flex items-center text-sm">
+                      <div className={`mr-2 ${passwordValidation.hasUppercase ? "text-green-400" : "text-red-400"}`}>
+                        {passwordValidation.hasUppercase ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+                      </div>
+                      <span className={passwordValidation.hasUppercase ? "text-green-200" : "text-red-200"}>
+                        Una lettera maiuscola (A-Z)
+                      </span>
+                    </div>
+                    <div className="flex items-center text-sm">
+                      <div className={`mr-2 ${passwordValidation.hasLowercase ? "text-green-400" : "text-red-400"}`}>
+                        {passwordValidation.hasLowercase ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+                      </div>
+                      <span className={passwordValidation.hasLowercase ? "text-green-200" : "text-red-200"}>
+                        Una lettera minuscola (a-z)
+                      </span>
+                    </div>
+                    <div className="flex items-center text-sm">
+                      <div className={`mr-2 ${passwordValidation.hasNumber ? "text-green-400" : "text-red-400"}`}>
+                        {passwordValidation.hasNumber ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+                      </div>
+                      <span className={passwordValidation.hasNumber ? "text-green-200" : "text-red-200"}>
+                        Un numero (0-9)
+                      </span>
+                    </div>
+                    <div className="flex items-center text-sm">
+                      <div
+                        className={`mr-2 ${
+                          passwordValidation.hasSpecialChar ? "text-green-400" : "text-amber-400"
+                        }`}
+                      >
+                        {passwordValidation.hasSpecialChar ? (
+                          <Check className="h-4 w-4" />
+                        ) : (
+                          <AlertCircle className="h-4 w-4" />
+                        )}
+                      </div>
+                      <span className={passwordValidation.hasSpecialChar ? "text-green-200" : "text-amber-200"}>
+                        Un carattere speciale (!@#$%^&*) - Consigliato
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="relative">
                 <label htmlFor="confirmPassword" className="block text-sm font-medium text-blue-200 mb-2">
@@ -249,7 +436,7 @@ export default function SignIn() {
                     required
                     value={formData.confirmPassword}
                     onChange={handleChange}
-                    className="block w-full pl-10 pr-10 py-3 rounded-xl border border-blue-500/30 
+                    className="block w-full pl-10 pr-10 py-3 rounded-xl border border-blue-500/30
                     bg-blue-900/20 text-white placeholder-blue-300/50 backdrop-blur-sm
                     focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
                     placeholder="••••••••"
@@ -262,6 +449,17 @@ export default function SignIn() {
                     {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                   </button>
                 </div>
+                {/* Password Match Indicator */}
+                {formData.confirmPassword.length > 0 && (
+                  <div className="flex items-center mt-2 text-sm">
+                    <div className={`mr-2 ${passwordsMatch ? "text-green-400" : "text-red-400"}`}>
+                      {passwordsMatch ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
+                    </div>
+                    <span className={passwordsMatch ? "text-green-200" : "text-red-200"}>
+                      {passwordsMatch ? "Le password coincidono" : "Le password non coincidono"}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -288,7 +486,7 @@ export default function SignIn() {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-3 px-4 rounded-xl font-medium text-white 
+                className="w-full py-3 px-4 rounded-xl font-medium text-white
                 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400
                 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:ring-offset-2 focus:ring-offset-black
                 shadow-[0_0_15px_rgba(59,130,246,0.5)] transition-all duration-200
@@ -313,6 +511,7 @@ export default function SignIn() {
                 </Link>
               </p>
             </div>
+            
           </form>
         </div>
 
@@ -323,4 +522,3 @@ export default function SignIn() {
     </div>
   )
 }
-

@@ -107,7 +107,7 @@ const AddLightPointModal = ({
         })
           .setLngLat([position.lng, position.lat])
           .addTo(map)
-          console.log("el aggiunto alla mappa")
+          //console.log("el aggiunto alla mappa")
         marker.on("drag", () => {
           const lngLat = marker.getLngLat()
           setTempPosition({ lat: lngLat.lat, lng: lngLat.lng })

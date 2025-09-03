@@ -101,6 +101,26 @@ export const UserProvider = ({ children }) => {
       throw error
     }
   }
+  const forgotPassword = async (email) => {
+    try {
+      const response = await api.post(`/forgot-password`, { email })
+
+      return response
+    } catch (error) {
+      console.error("Reset password failed:", error)
+      throw error
+    }
+  }
+  const resetPassword = async (password, token) => {
+    try {
+      const response = await api.post(`/reset-password`, { password, token })
+
+      return response
+    } catch (error) {
+      console.error("Reset password failed:", error)
+      throw error
+    }
+  }
 
   // Register function
   const register = async (userData) => {
@@ -325,6 +345,16 @@ export const UserProvider = ({ children }) => {
       return
     }
   }
+  
+  const confirmEmail = async (data) =>{
+    try {
+      const response = await api.get(`/confirm-email`, { params: data });
+      return response
+    } catch (error) {
+      console.error(error)
+      return
+    }
+  }
 
   return (
     <UserContext.Provider 
@@ -333,6 +363,8 @@ export const UserProvider = ({ children }) => {
         token,
         loading,
         login,
+        resetPassword,
+        forgotPassword,
         register,
         logout,
         updateUserData,

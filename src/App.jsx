@@ -10,6 +10,8 @@ import Operation from "./pages/Operation"
 import { UserProvider } from "./context/UserContext"
 import ProtectedRoute from "./components/ProctetedRoute"
 import { ThemeProvider, createGlobalStyle } from 'styled-components';
+import ConfirmEmail from "./pages/ConfirmEmail"
+import ResetPassword from "./pages/ResetPassword"
 
 // Componente che gestisce solo la favicon
 const FaviconHandler = () => {
@@ -89,6 +91,8 @@ function App() {
             <Route path="/" element={<Login />} />
             <Route path="/login" element={<Login />} />
             <Route path="/signin" element={<SignIn />} />
+            <Route path="/confirm-email" element={<ConfirmEmail />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/dashboard" element={
               <ProtectedRoute>
                 <Dashboard />

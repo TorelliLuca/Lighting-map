@@ -28,7 +28,8 @@ export default defineConfig({
             src: '/faviconWhite.png',
             type: 'image/png'
           }
-        ]
+        ],
+        
       }
     })
   ]

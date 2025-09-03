@@ -22,9 +22,10 @@ import ErrorBoundary from "../components/ErrorBoundary.jsx"
 import { translateString, transformDateToIT } from "../utils/utils"
 import { createMarkers, setupMarkerClustering, filterMarkers, cleanupMapResources, updateMarkerColors, currentClusterer } from "../utils/createMarkers.jsx"
 import useFilteredMarkers from '../hooks/useFilteredMarkers';
-import { generateLegendColorMap } from '../hooks/useFilteredMarkers'; // importa la funzione
+import { generateLegendColorMap } from '../hooks/useFilteredMarkers'; 
 
 import toast, { Toaster } from "react-hot-toast"
+
 
 const BASE_URL = import.meta.env.VITE_SERVER_URL
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API
@@ -204,6 +205,8 @@ function Dashboard() {
       .filter(Boolean); // Rimuovi eventuali valori nulli o vuoti
     setElectricPanels([...new Set(panels)]);
   }, [simpleMarkers])
+
+
 
 
 
@@ -636,7 +639,7 @@ function Dashboard() {
 
 
       return () => {
-        mapLibreRef.current.off("moveend", handleMoveEnd);
+        //mapLibreRef.current.off("moveend", handleMoveEnd);
       };
     }
   }, [map,mapLibreRef, visualizationMode]);
@@ -1325,7 +1328,7 @@ function Dashboard() {
 
   window.reportPoint = (city, id) => {
     navigate(
-      `/report?comune=${encodeURIComponent(city)}&id=${encodeURIComponent(id)}}`,
+      `/report?comune=${encodeURIComponent(city)}&id=${encodeURIComponent(id)}`,
     )
   }
 
@@ -1666,14 +1669,15 @@ function Dashboard() {
         } else {
           await cleanupAndLoadMapData();
         }
-        handleEditSimpleClick(response.data);
+        
         // Centro la mappa sul nuovo punto
         if (visualizationMode === "complessa" && map) {
-
+          handleEditClick(response.data);
           const latLng = new window.google.maps.LatLng(newLat, newLng)
           map.setCenter(latLng);
           map.setZoom(localStorage.getItem(STORAGE_KEYS.MAP_ZOOM) || 20);
         } else if (visualizationMode === "semplice" && mapLibreRef.current) {
+          handleEditSimpleClick(response.data);
           mapLibreRef.current.flyTo({ center: [newLng, newLat], zoom: localStorage.getItem(STORAGE_KEYS.MAP_ZOOM) });
         }
 
@@ -1893,7 +1897,9 @@ function Dashboard() {
         currentMarkerIndex={currentMarkerIndex}
         setCurrentMarkerIndex={setCurrentMarkerIndex}
         allMarkers={activeMarkers}
+        selectedCity={selectedCity}
       />
+
 
       {isMapLoading && <MapLoader />}
 

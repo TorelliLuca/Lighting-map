@@ -6,6 +6,9 @@ import { UserContext } from "../context/UserContext"
 import { AlertCircle, CheckCircle, ChevronLeft, MapPin, Map, User } from "lucide-react"
 import { LightbulbLoader } from "../components/lightbulb-loader"
 import { api } from "../context/UserContext"
+import { usePushNotifications } from "../hooks/usePushNotifications"
+import { sendPushNotification } from "../utils/pushNotifications"
+import { title } from "process"
 
 const BASE_URL = import.meta.env.VITE_SERVER_URL
 
@@ -22,6 +25,7 @@ export default function Report() {
   const [error, setError] = useState("")
   const [address, setAddress] = useState("Loading address...")
   const [lightpoint, setLightpoint] = useState(null)
+  const isPushReady = usePushNotifications();
 
   const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API
 
@@ -37,6 +41,8 @@ export default function Report() {
 
   // Funzione per trovare l'indirizzo tramite lat/lng
   const findAddress = async (lat, lng) => {
+    lat = lat.replace(",", ".")
+    lng = lng.replace(",", ".")
     try {
       const response = await fetch(
         `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`,
@@ -138,7 +144,7 @@ export default function Report() {
         description: formData.description,
         name: comune,
         user_creator_id: userData.id,
-        numero_palo: lightpoint?.numeroPalo,
+        numero_palo: lightpoint?.numero_palo,
         date: new Date(),
         ...lightpoint, 
       }
@@ -151,6 +157,29 @@ export default function Report() {
       if (!res2) {
         setError("Errore nell'invio della mail di notifica. Riprova.")
         return
+      }
+      console.log(isPushReady);
+      if(isPushReady) {
+        let title, body;
+        console.log(lightpoint);
+        if (lightpoint && lightpoint.marker === "PL") {
+          title = `Guasto segnalato sul punto luce: ${lightpoint.numero_palo}`;
+          if (reportData.description) {
+            body = `È stato segnalato un problema di tipo "${reportTypes[reportData.report_type]}" nel comune di ${reportData.name} alle ore: ${reportData.date.toLocaleTimeString()} del giorno ${reportData.date.toLocaleDateString()}.Note: ${reportData.description}`;
+            } else {
+            body = `È stato segnalato un problema di tipo "${reportTypes[reportData.report_type]}" nel comune di ${reportData.name} alle ore: ${reportData.date.toLocaleTimeString()} del giorno ${reportData.date.toLocaleDateString()}.`;
+            }
+        } else {
+          title = `Guasto segnalato sul quadro elettrico: ${lightpoint.numero_palo}`;
+          if (reportData.description) {
+              body = `È stato segnalato un problema di tipo "${reportTypes[reportData.report_type]}" nel comune di ${reportData.name} alle ore: ${reportData.date.toLocaleTimeString()} del giorno ${reportData.date.toLocaleDateString()}.Note: ${reportData.description}`;
+            } else {
+              body = `È stato segnalato un problema di tipo "${reportTypes[reportData.report_type]}" nel comune di ${reportData.name} alle ore: ${reportData.date.toLocaleTimeString()} del giorno ${reportData.date.toLocaleDateString()}.`;
+
+            }
+        }
+        const r = await sendPushNotification(title, body, userData.id)
+        console.log(r);
       }
       setIsSuccess(true)
     } catch (error) {

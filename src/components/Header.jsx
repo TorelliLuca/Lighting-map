@@ -7,6 +7,7 @@ import { LightbulbLoader } from "./lightbulb-loader"
 import Logo from "./Logo"
 import { translateUserType } from "../utils/utils"
 import SearchBar from "./SearchBar"
+import { MapPin } from "lucide-react"
 
 function Header({
   UserContext,
@@ -24,6 +25,7 @@ function Header({
   currentMarkerIndex,
   setCurrentMarkerIndex,
   allMarkers,
+  selectedCity
 }) {
   const [isLoading, setIsLoading] = useState(false)
   const markerIndex = currentMarkerIndex || 0
@@ -223,6 +225,12 @@ function Header({
         </div>
 
         <div className="flex items-center space-x-4">
+        {selectedCity && (
+          <div className="flex items-center space-x-2 bg-blue-900/20 px-3 py-1.5 rounded-lg border border-blue-500/30">
+            <MapPin className="h-4 w-4 text-blue-400" />
+            <span className="text-sm text-blue-300">{selectedCity}</span>
+          </div>
+        )}
           <div className="flex items-center space-x-2">
             <div className="bg-blue-900/20 p-1.5 rounded-full border border-blue-500/30">
               <User className="h-5 w-5 text-blue-400" />

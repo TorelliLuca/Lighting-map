@@ -95,3 +95,23 @@ export const translateUserType = (userType) => {
       return 'Utente';
   }
 };
+
+export const capitalizeString = (str) => {
+  if (!str) {
+    return '';
+  }
+
+  const lowerCaseStr = str.toLowerCase();
+
+  const firstChar = lowerCaseStr.charAt(0).toUpperCase();
+
+  const restOfStr = lowerCaseStr.slice(1);
+
+  return firstChar + restOfStr;
+}
+
+export function validateName(name) {
+  // Regex che accetta solo lettere (maiuscole e minuscole), spazi, apostrofi e accenti
+  const nameRegex = /^[A-Za-zÀ-ÖØ-öø-ÿ\s'-]+$/;
+  return nameRegex.test(name);
+}
