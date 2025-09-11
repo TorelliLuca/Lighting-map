@@ -113,6 +113,8 @@ function Dashboard() {
   const [electricPanels, setElectricPanels] = useState([]);
 
   // Carica i dati GeoJSON quando la modalità è semplice e cambia la città
+
+
   useEffect(() => {
     if (visualizationMode !== "semplice" || !selectedCity) {
       setSimpleMarkers([]);
@@ -306,7 +308,10 @@ function Dashboard() {
     if (userData.town_halls_list && userData.town_halls_list.length > 0) {
       setSelectedCity(userData.town_halls_list[0].name)
     }
+
   }, [userData, navigate])
+
+
 
   // Add a new useEffect to restore state when the component mounts
   // Add this after the useEffect that initializes userData
@@ -1634,6 +1639,7 @@ function Dashboard() {
       // Rimuovo l'ID e suggerisco un nuovo nome
       delete duplicatedData._id;
       delete duplicatedData.id;
+      delete duplicatedData.data_creazione
       if (duplicatedData.numero_palo) {
         duplicatedData.numero_palo = `${originalData.numero_palo}_copia`;
       }
@@ -1656,6 +1662,7 @@ function Dashboard() {
         town_hall: selectedCity,
         return_object: true
       };
+      console.log(dataToSend);
 
       const response = await addLightPoint(dataToSend);
       if (response.status === 201) {

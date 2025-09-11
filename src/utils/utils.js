@@ -115,3 +115,32 @@ export function validateName(name) {
   const nameRegex = /^[A-Za-zÀ-ÖØ-öø-ÿ\s'-]+$/;
   return nameRegex.test(name);
 }
+
+export function getContractStatus(endDate) {
+  const threeMonthsInDays = 90;
+
+  const end = new Date(endDate);
+  const today = new Date();
+
+  // Imposta l'ora, i minuti, i secondi e i millisecondi a zero per confrontare solo le date.
+  end.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+
+  // Calcola la differenza in giorni tra la data di fine e la data odierna.
+  const timeDifference = end.getTime() - today.getTime();
+  const daysDifference = Math.ceil(timeDifference / (1000 * 60 * 60 * 24));
+
+  // Caso 1: La data di fine è nel futuro.
+  if (daysDifference >= 0) {
+    // Caso 1a: Mancano meno di 3 mesi.
+    if (daysDifference <= threeMonthsInDays) {
+      return 'In scadenza';
+    }
+    // Caso 1b: Mancano più di 3 mesi.
+    return 'Attivo';
+  }
+
+  // Caso 2: La data di fine è nel passato (il contratto è scaduto).
+  const daysSinceExpiration = Math.abs(daysDifference);
+  return `Scaduto da ${daysSinceExpiration} giorni`;
+}

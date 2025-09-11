@@ -14,6 +14,7 @@ const DEFAULT_ZOOM = 12;
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_API; 
 const MAPTILER_STYLE = `https://api.maptiler.com/maps/streets/style.json?key=${MAPTILER_KEY}`;
+const MAPTILER_STYLE_SATELLITE = `https://api.maptiler.com/maps/satellite/style.json?key=${MAPTILER_KEY}`;
 
 const STORAGE_KEY_PREFIX = "lighting-map-"
 const STORAGE_KEYS = {

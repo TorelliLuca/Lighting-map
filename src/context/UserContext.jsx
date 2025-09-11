@@ -356,6 +356,16 @@ export const UserProvider = ({ children }) => {
     }
   }
 
+  const getOrganizationByUserId = async (id) => {
+    try {
+      const response = await api.get(`/organizations/my-organization/${id}`);
+      return response
+    } catch (error) {
+      console.error(error)
+      return
+    }
+  }
+
   return (
     <UserContext.Provider 
       value={{ 
@@ -383,6 +393,8 @@ export const UserProvider = ({ children }) => {
         getTownhallLightpointsCount,
         getLightpoint,
         addReport,
+        getOrganizationByUserId,
+        confirmEmail,
         isAuthenticated: !!token
       }}
     >

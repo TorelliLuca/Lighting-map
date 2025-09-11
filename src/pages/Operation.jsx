@@ -18,6 +18,7 @@ export default function Operation() {
     reportId: "operationWithoutReport",
     operationType: "MADE_SAFE_BUT_SYSTEM_NEEDS_RESTORING",
     notes: "",
+    maintenanceType: "ORDINARY", // default value
   })
   const [activeReports, setActiveReports] = useState([])
   const [isLoading, setIsLoading] = useState(false)
@@ -126,6 +127,7 @@ export default function Operation() {
         id_segnalazione: formData.reportId === "operationWithoutReport" ? null : formData.reportId,
         is_solved: isSolved,
         date: new Date(),
+        maintenance_type: formData.maintenanceType, 
       }
 
       const response = await api.post("/addOperation", operationData)
@@ -271,6 +273,41 @@ export default function Operation() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </div>
+              </div>
+            </div>
+
+            {/* Maintenance Type Radio Buttons */}
+            <div>
+              <label className="block text-sm font-medium text-blue-200 mb-2">
+                Tipo di Manutenzione
+              </label>
+              <div className="flex space-x-4">
+                <label className="flex items-center cursor-pointer">
+                  <input
+                    type="radio"
+                    name="maintenanceType"
+                    value="ORDINARY"
+                    checked={formData.maintenanceType === "ORDINARY"}
+                    onChange={handleChange}
+                    className="form-radio text-blue-500 focus:ring-blue-500"
+                  />
+                  <span className="ml-2 text-blue-100 ">
+                    Ordinaria
+                  </span>
+                </label>
+                <label className="flex items-center cursor-pointer">
+                  <input
+                    type="radio"
+                    name="maintenanceType"
+                    value="EXTRAORDINARY"
+                    checked={formData.maintenanceType === "EXTRAORDINARY"}
+                    onChange={handleChange}
+                    className="form-radio text-blue-500 focus:ring-blue-500"
+                  />
+                  <span className="ml-2 text-blue-100 ">
+                    Straordinaria
+                  </span>
+                </label>
               </div>
             </div>
 

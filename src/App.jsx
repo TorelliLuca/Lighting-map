@@ -1,117 +1,108 @@
-"use client"
+"use client";
 
-import React, { useState, useEffect } from "react"
-import { BrowserRouter as Router, Routes, Route, Navigate, BrowserRouter } from "react-router-dom"
-import Login from "./pages/Login"
-import SignIn from "./pages/Signin"
-import Dashboard from "./pages/Dashboard"
-import Report from "./pages/Report"
-import Operation from "./pages/Operation"
-import { UserProvider } from "./context/UserContext"
-import ProtectedRoute from "./components/ProctetedRoute"
-import { ThemeProvider, createGlobalStyle } from 'styled-components';
-import ConfirmEmail from "./pages/ConfirmEmail"
-import ResetPassword from "./pages/ResetPassword"
+import React, { useState, useEffect, useContext } from "react";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import Login from "./pages/Login";
+import SignIn from "./pages/SignIn";
+import Dashboard from "./pages/Dashboard";
+import Report from "./pages/Report";
+import Operation from "./pages/Operation";
+import { UserProvider, UserContext } from "./context/UserContext";
+import ProtectedRoute from "./components/ProtectedRoute";
+import ConfirmEmail from "./pages/ConfirmEmail";
+import ResetPassword from "./pages/ResetPassword";
+import MyOrganization from "./pages/MyOrganization";
+import OrganizationManagement from "./pages/OrganizationManagement";
+import NotFound from "./pages/NotFound";
 
-// Componente che gestisce solo la favicon
-const FaviconHandler = () => {
-  useEffect(() => {
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const isDarkMode = mediaQuery.matches;
-
-    const link = document.querySelector("link[rel*='icon']") || document.createElement('link');
-    link.type = 'image/png';
-    link.rel = 'shortcut icon';
-
-    const basePath = import.meta.env.VITE_PUBLIC_URL || "";
-
-    if (isDarkMode) {
-      link.href = `${basePath}/faviconWhite.png`;
-    } else {
-      link.href = `${basePath}/faviconDark.png`;
-    }
-
-    document.getElementsByTagName('head')[0].appendChild(link);
-
-    const handleChange = (e) => {
-      link.href = e.matches ? `${basePath}/faviconWhite.png` : `${basePath}/faviconDark.png`;
-    };
-
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, []);
-
-  return null;
+// Mappatura delle rotte con i titoli corrispondenti
+const routeTitles = {
+    "/": "Login | Lighting Map",
+    "/login": "Login | Lighting Map",
+    "/signin": "Registrati | Lighting Map",
+    "/confirm-email": "Conferma Email | Lighting Map",
+    "/reset-password": "Reset Password | Lighting Map",
+    "/dashboard": "Dashboard | Lighting Map",
+    "/report": "Report | Lighting Map",
+    "/operation": "Operazioni | Lighting Map",
+    "/my-organization": "La mia Organizzazione | Lighting Map",
+    "/organization-management": "Gestione Organizzazioni | Lighting Map",
 };
 
-
-// Definizione del tema basata sulla preferenza del sistema
-const useSystemTheme = () => {
-  const [theme, setTheme] = React.useState({
-    mode: window.matchMedia && 
-      window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-  });
-
-  React.useEffect(() => {
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = (e) => {
-      setTheme({ mode: e.matches ? 'dark' : 'light' });
-    };
-    
-    mediaQuery.addEventListener('change', handleChange);
-    return () => mediaQuery.removeEventListener('change', handleChange);
-  }, []);
-
-  return theme;
+// Hook per gestire dinamicamente il titolo della pagina
+const usePageTitle = () => {
+    const location = useLocation();
+    useEffect(() => {
+        const title = routeTitles[location.pathname] || "Lighting Map";
+        document.title = title;
+    }, [location.pathname]);
 };
 
+// Hook per gestire la favicon in base al tema del sistema
+const useFavicon = () => {
+    useEffect(() => {
+        const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+        const link = document.querySelector("link[rel*='icon']") || document.createElement('link');
+        link.rel = 'shortcut icon';
+        link.type = 'image/png';
+        document.head.appendChild(link);
 
+        const updateFavicon = (isDark) => {
+            const basePath = import.meta.env.VITE_PUBLIC_URL || "";
+            link.href = isDark ? `${basePath}/faviconWhite.png` : `${basePath}/faviconDark.png`;
+        };
 
+        const handleChange = (e) => updateFavicon(e.matches);
 
+        // Imposta la favicon iniziale
+        updateFavicon(mediaQuery.matches);
+
+        mediaQuery.addEventListener('change', handleChange);
+        return () => mediaQuery.removeEventListener('change', handleChange);
+    }, []);
+};
+
+// Main App Component
 function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const theme = useSystemTheme();
+    useFavicon();
 
-  useEffect(() => {
-    const userData = localStorage.getItem("userData")
-    if (userData) {
-      setIsAuthenticated(true)
-    }
-  }, [])
-
-  return (
-    
-    <BrowserRouter  basename="/LIGHTING-MAP"> 
-    {/* <BrowserRouter  > */}
-    <UserProvider>
-      <ThemeProvider theme={theme}>
-        <FaviconHandler />
-          <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black text-white">
-            <Routes>
-            <Route path="/" element={<Login />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/signin" element={<SignIn />} />
-            <Route path="/confirm-email" element={<ConfirmEmail />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
-            <Route path="/dashboard" element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            } />
-              <Route path="/report" element={
-                <ProtectedRoute>
-                <Report />
-              </ProtectedRoute>} />
-              <Route path="/operation" element={<ProtectedRoute>
-                <Operation />
-              </ProtectedRoute>} />
-            </Routes>
-          </div>
-        </ThemeProvider>
-      </UserProvider>
-  </BrowserRouter>
-  )
+    return (
+        <BrowserRouter basename="/LIGHTING-MAP">
+            <UserProvider>
+                <AppContent />
+            </UserProvider>
+        </BrowserRouter>
+    );
 }
 
-export default App
+// Componente contenitore per le rotte e il contesto
+// Separiamo questo componente per poter usare useLocation all'interno del BrowserRouter
+const AppContent = () => {
+    usePageTitle();
 
+    return (
+        <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black text-white">
+            <Routes>
+                <Route path="/" element={<Login />} />
+                <Route path="/login" element={<Login />} />
+                <Route path="/signin" element={<SignIn />} />
+                <Route path="/confirm-email" element={<ConfirmEmail />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
+                
+                {/* Rotte protette */}
+                <Route element={<ProtectedRoute />}>
+                    <Route path="/dashboard" element={<Dashboard />} />
+                    <Route path="/my-organization" element={<MyOrganization />} />
+                    <Route path="/organization-management" element={<OrganizationManagement />} />
+                    <Route path="/report" element={<Report />} />
+                    <Route path="/operation" element={<Operation />} />
+                </Route>
+
+                {/* Catch-all per rotte non trovate */}
+                <Route path="*" element={<NotFound/>} />
+            </Routes>
+        </div>
+    );
+};
+
+export default App;

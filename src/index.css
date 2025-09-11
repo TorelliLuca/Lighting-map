@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-@theme {
+/* @theme {
   --color-chambray: #37638b;
   --color-desert-storm: #fbfbfa;
   --color-bazaar: #926878;
@@ -21,4 +21,4 @@
   @keyframes fadeInUp {
     to { opacity: 1; transform: translateY(0); }
   }
-}
+} */

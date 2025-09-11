@@ -146,6 +146,7 @@ const OperationCard = ({ operation }) => {
   }
 
   const getOperationColor = (opType) => {
+    
     switch (opType) {
       case "FAULT_ELIMINATED_AND_SYSTEM_RESTORED":
         return "text-green-400"
@@ -156,12 +157,23 @@ const OperationCard = ({ operation }) => {
     }
   }
 
+  const formatMaintenanceType = (type) => {
+    switch (type) {
+      case "ORDINARY":
+        return "Ordinaria"
+      case "EXTRAORDINARY":
+        return "Straordinaria"
+      default:
+        return ""
+    }
+  }
+
   return (
     <div className="bg-black/40 p-4 rounded-lg border border-blue-500/30 hover:bg-black/60 transition-all duration-200">
       <div className="flex justify-between items-start mb-3">
         <div className="flex items-center gap-2">
           <Wrench className="h-5 w-5 text-blue-400" />
-          <span className="text-sm font-medium text-blue-200">Operazione</span>
+          <span className="text-sm font-medium text-blue-200">Operazione {formatMaintenanceType(operation.maintenance_type)}</span>
         </div>
         <span className="text-xs text-gray-400">{formatDate(operation.operation_date)}</span>
       </div>
@@ -339,7 +351,7 @@ function InfoPanel({ activeMarkers, onClose, townhallName }) {
     reportsInProgress = reportsInProgress.sort((a, b) => new Date(b.report_date) - new Date(a.report_date))
     reportsResolved = reportsResolved.sort((a, b) => new Date(b.report_date) - new Date(a.report_date))
     operations = operations.sort((a, b) => new Date(b.operation_date) - new Date(a.operation_date))
-
+    console.log(operations);
     setReportsStats({
       totalReportsInProgress: reportsInProgress.length,
       totalReportsResolved: reportsResolved.length,
@@ -353,7 +365,6 @@ function InfoPanel({ activeMarkers, onClose, townhallName }) {
   }, [activeMarkers])
 
   useEffect(() => {
-    // Predisposizione chiamata API per tempo di risposta medio
     async function fetchAvgResponseTime() {
       setLoadingAvg(true)
       setErrorAvg(null)
@@ -969,7 +980,7 @@ function InfoPanel({ activeMarkers, onClose, townhallName }) {
                     <ReportCard key={`resolved-${idx}`} report={report} type="resolved" />
                   ))}
                 </div>
-                {reportsStats.reportsResolved.length > 12 && (
+                {!showMoreReportsResolved && reportsStats.reportsResolved.length > 12 && (
                   <p className="text-center text-green-300 mt-4 cursor-pointer" onClick={() => setShowMoreReportsResolved(true)}>
                     ... e altre {reportsStats.reportsResolved.length - 12} segnalazioni
                   </p>
@@ -988,7 +999,7 @@ function InfoPanel({ activeMarkers, onClose, townhallName }) {
                     <OperationCard key={`operation-${idx}`} operation={operation} />
                   ))}
                 </div>
-                {reportsStats.operations.length > 12 && (
+                {!showMoreOperations && reportsStats.operations.length > 12 && (
                   <p className="text-center text-blue-300 mt-4 cursor-pointer" onClick={() => setShowMoreOperations(true)}>
                     ... e altre {reportsStats.operations.length - 12} operazioni
                   </p>

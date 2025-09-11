@@ -99,11 +99,9 @@ const AddLightPointForm = ({ onSave, onBack, tempPosition, selectedCity, electri
       { value: "Palo decorativo con sbraccio", label: "Palo decorativo con sbraccio" },
       { value: "Palo per attraversamento pedonale", label: "Palo per attraversamento pedonale" },
       { value: "Palo stradale", label: "Palo stradale" },
-      { value: "Parete", label: "Parete" },
       { value: "Sbraccio", label: "Sbraccio" },
       { value: "Sbraccio artistico per lanterna", label: "Sbraccio artistico per lanterna" },
       { value: "Sbraccio decorativo", label: "Sbraccio decorativo" },
-      { value: "Soffitto", label: "Soffitto" },
       { value: "Sospensione", label: "Sospensione" },
       { value: "Staffa", label: "Staffa" },
       { value: "Tesata aerea", label: "Tesata aerea" },
@@ -121,6 +119,7 @@ const AddLightPointForm = ({ onSave, onBack, tempPosition, selectedCity, electri
       { value: "Tubazione su parete", label: "Tubazione su parete" },
       { value: "Palo FV", label: "Palo FV" },
       { value: "Altro", label: "Altro" },
+      { value: "Nessuna Linea", label: "Nessuna Linea" },
     ],
     promiscuita: [
       { value: "Nessuna", label: "Nessuna" },
@@ -346,9 +345,15 @@ const AddLightPointForm = ({ onSave, onBack, tempPosition, selectedCity, electri
         <h4 className="text-sm font-medium text-blue-200 mb-3">Caratteristiche Tecniche</h4>
         <div className="space-y-3">
           {renderField("composizione_punto", "Composizione Punto")}
+          {
+            formData.composizione_punto && formData.composizione_punto === "Multiplo" && (
+              renderField("numero_apparecchi", "Numero Apparecchi")
+            )
+          }
           {renderField("tipo_apparecchio", "Tipo Apparecchio")}
           {renderField("tipo_sostegno", "Tipo Sostegno")}
           {renderField("tipo_linea", "Tipo Linea")}
+          {renderField("modello", "Modello Apparecchio")}
         </div>
       </div>
 
