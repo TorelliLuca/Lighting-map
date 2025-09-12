@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useContext, useRef, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
-import { UserContext } from "../context/UserContext"
+import { api, UserContext } from "../context/UserContext"
 import Header from "../components/Header"
 import MapControls from "../components/MapControls"
 import InfoPanel from "../components/InfoPanel"
@@ -111,9 +111,9 @@ function Dashboard() {
   const mapLibreRef = useRef(null)
   const [selectedMarkerForInfo, setSelectedMarkerForInfo] = useState(null);
   const [electricPanels, setElectricPanels] = useState([]);
-
-  // Carica i dati GeoJSON quando la modalità è semplice e cambia la città
-
+  // Ref per gestire il poligono dei confini del comune su Google Maps
+  const townhallBorderRef = useRef(null)
+  const townhallBorderFeaturesRef = useRef([])
 
   useEffect(() => {
     if (visualizationMode !== "semplice" || !selectedCity) {
@@ -443,6 +443,86 @@ function Dashboard() {
     }
   }, [map, selectedCity])
 
+  // Effetto per caricare e mostrare i confini del comune in modalità "complessa"
+  useEffect(() => {
+    // Pulisce eventuale poligono esistente
+    const cleanupBorder = () => {
+      // Rimuovi eventuali Feature aggiunti in precedenza
+      if (map && townhallBorderFeaturesRef.current && townhallBorderFeaturesRef.current.length) {
+        townhallBorderFeaturesRef.current.forEach(f => {
+          try { map.data.remove(f) } catch (_) {}
+        })
+        townhallBorderFeaturesRef.current = []
+      }
+    }
+
+    if (!map || visualizationMode !== 'complessa' || !selectedCity) {
+      cleanupBorder()
+      return
+    }
+
+    const fetchAndRenderBorders = async () => {
+      try {
+        // Endpoint: restituisce GeoJSON con struttura fissa: Feature con geometry.type === 'Polygon'
+        const res = await api.get(`/borders/townhall-name/${encodeURIComponent(selectedCity)}`)
+        const geojson = res.data
+
+        // Normalizza in array di poligoni. Struttura attesa: Feature con Polygon
+        const polygons = []
+        if (geojson?.type === 'Feature') {
+          const g = geojson.geometry
+          if (g?.type === 'Polygon') polygons.push(g.coordinates)
+          if (g?.type === 'MultiPolygon') polygons.push(...g.coordinates)
+        } else if (geojson?.type === 'Polygon') {
+          polygons.push(geojson.coordinates)
+        } else if (geojson?.type === 'FeatureCollection') {
+          geojson.features?.forEach(f => {
+            if (f.geometry?.type === 'Polygon') polygons.push(f.geometry.coordinates)
+            if (f.geometry?.type === 'MultiPolygon') polygons.push(...f.geometry.coordinates)
+          })
+        } else if (geojson?.type === 'MultiPolygon') {
+          polygons.push(...geojson.coordinates)
+        }
+
+        if (polygons.length === 0) {
+          cleanupBorder()
+          return
+        }
+
+        // Pulisci feature precedenti
+        cleanupBorder()
+
+        // Stile del Data Layer (si applica ai feature caricati)
+        map.data.setStyle({
+          strokeColor: '#60A5FA',
+          strokeOpacity: 0.9,
+          strokeWeight: 2,
+          fillColor: '#93C5FD',
+          fillOpacity: 0.08,
+          clickable: false,
+          zIndex: 5,
+        })
+
+        // Aggiungi GeoJSON direttamente al layer dati
+        const added = map.data.addGeoJson(geojson)
+        townhallBorderFeaturesRef.current = added
+      } catch (err) {
+        if (err?.name !== 'AbortError') {
+          console.error('Errore caricando i confini del comune:', err)
+        }
+        // In caso di errore, rimuove eventuali residui
+        cleanupBorder()
+      }
+    }
+
+    fetchAndRenderBorders()
+
+    // Cleanup quando dipendenze cambiano o all'unmount
+    return () => {
+      cleanupBorder()
+    }
+  }, [map, selectedCity, visualizationMode])
+
   // Ricrea i marker solo quando cambiano i dati base (città, caricamento dati)
   useEffect(() => {
     if (allMarkersData.length > 0 && map && cityDataLoaded) {
@@ -536,6 +616,13 @@ function Dashboard() {
     return () => {
       setIsMapLoading(false)
       cleanupMapResources()
+      // Cleanup finale confini dal Data Layer
+      if (map && townhallBorderFeaturesRef.current && townhallBorderFeaturesRef.current.length) {
+        townhallBorderFeaturesRef.current.forEach(f => {
+          try { map.data.remove(f) } catch (_) {}
+        })
+        townhallBorderFeaturesRef.current = []
+      }
     }
   }, [])
 
@@ -784,6 +871,13 @@ function Dashboard() {
     
     // Reset add modal state
     setIsAddModalOpen(false)
+    // Rimuovi i confini aggiunti nel Data Layer
+    if (map && townhallBorderFeaturesRef.current && townhallBorderFeaturesRef.current.length) {
+      townhallBorderFeaturesRef.current.forEach(f => {
+        try { map.data.remove(f) } catch (_) {}
+      })
+      townhallBorderFeaturesRef.current = []
+    }
   }
 
   const removeMarkers = () => {

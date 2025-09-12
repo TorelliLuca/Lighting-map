@@ -89,11 +89,9 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
       { value: "Palo decorativo con sbraccio", label: "Palo decorativo con sbraccio" },
       { value: "Palo per attraversamento pedonale", label: "Palo per attraversamento pedonale" },
       { value: "Palo stradale", label: "Palo stradale" },
-      { value: "Parete", label: "Parete" },
       { value: "Sbraccio", label: "Sbraccio" },
       { value: "Sbraccio artistico per lanterna", label: "Sbraccio artistico per lanterna" },
       { value: "Sbraccio decorativo", label: "Sbraccio decorativo" },
-      { value: "Soffitto", label: "Soffitto" },
       { value: "Sospensione", label: "Sospensione" },
       { value: "Staffa", label: "Staffa" },
       { value: "Tesata aerea", label: "Tesata aerea" },
@@ -101,6 +99,7 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
       { value: "Torre faro", label: "Torre faro" },
     ],
     tipo_linea: [
+      { value: "Nessuna Linea", label: "Nessuna Linea" },
       { value: "Cavo interrato con pozzetti", label: "Cavo interrato con pozzetti" },
       { value: "Cavo interrato con risalita", label: "Cavo interrato con risalita" },
       { value: "Cavo interrato senza pozzetti", label: "Cavo interrato senza pozzetti" },
@@ -111,6 +110,7 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
       { value: "Tubazione su parete", label: "Tubazione su parete" },
       { value: "Palo FV", label: "Palo FV" },
       { value: "Altro", label: "Altro" },
+      
     ],
     promiscuita: [
       { value: "Nessuna", label: "Nessuna" },
@@ -147,6 +147,7 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
     "proprieta",
     "tipo_apparecchio",
     "modello_armatura",
+    "modello",
     "numero_apparecchi",
     "lampada_e_potenza",
     "tipo_sostegno",

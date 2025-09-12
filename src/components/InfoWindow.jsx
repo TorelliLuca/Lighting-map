@@ -244,7 +244,13 @@ const InfoWindow = ({ content, marker, city, userData, onEditClick, onDeleteClic
                   <div className="mb-2" key={key}>
                     <strong className="text-blue-800 text-xl">{value}</strong>
                   </div>
-                )}
+                )}else if (key === "data_creazione"){
+                  return (
+                  <div className="mb-2" key={key}>
+                    <strong className="text-blue-800">{key.replace(/_/g, " ")}:</strong> {transformDateToIT(value) || "N.D."}
+                  </div>
+                )
+                }
                 return (
                   <div className="mb-2" key={key}>
                     <strong className="text-blue-800">{key.replace(/_/g, " ")}:</strong> {value || "N.D."}
@@ -258,7 +264,13 @@ const InfoWindow = ({ content, marker, city, userData, onEditClick, onDeleteClic
                   <div className="mb-2" key={key}>
                     <strong className="text-blue-800 text-xl">{value}</strong>
                   </div>
-                )}
+                )}else if (key === "data_creazione"){
+                  return (
+                  <div className="mb-2" key={key}>
+                    <strong className="text-blue-800">{key.replace(/_/g, " ")}:</strong> {transformDateToIT(value) || "N.D."}
+                  </div>
+                )
+                }
                 if (key === "numero_palo"){
                   key = "Numero quadro"
                   return (

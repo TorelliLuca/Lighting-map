@@ -5,7 +5,10 @@ import process from "process";
 import ReactDOM from "react-dom/client";
 import InfoWindow from "./InfoWindow";
 import { useContext } from "react";
-import { UserContext } from "../context/UserContext"
+import { UserContext, api } from "../context/UserContext"
+import MapStyleSwitcher from "./MapStyleSwitcher";
+import MapButton from "./MapButton";
+import { LocateFixed } from "lucide-react";
 
 
 
@@ -50,6 +53,11 @@ const MapLibreMap = forwardRef(({
   const popupRef = useRef(null);
   // stato per sapere se è il primo caricamento
   const [firstLoadDone, setFirstLoadDone] = useState(false);
+  // Stato per modalità stile: false = streets, true = satellite
+  const [isSatellite, setIsSatellite] = useState(false);
+  const userLocationMarkerRef = useRef(null);
+  const userLocationWatchIdRef = useRef(null);
+  const userLocationCenteredOnceRef = useRef(false);
 
   //  ref per tracciare l'ultima città e il primo marker centrato per useeffect dello zoom al cambio di città
   const lastCityRef = useRef();
@@ -105,7 +113,6 @@ const MapLibreMap = forwardRef(({
     const map = mapRef.current;
 
     if ( !map || !geojsonData || !mapLoaded) return;
-
     // Se siamo in edit, rimuovi il marker dalla source principale
     let geojsonDataForSource = geojsonData;
     if (editingMarkerId) {
@@ -119,7 +126,7 @@ const MapLibreMap = forwardRef(({
     if (mapRef.current && typeof mapRef.current.getLayer === 'function' && mapRef.current.getLayer("reported-symbol")) mapRef.current.removeLayer("reported-symbol");
     //if (mapRef.current && typeof mapRef.current.getSource === 'function' && mapRef.current.getSource("markers")) mapRef.current.removeSource("markers");
     if (!(mapRef.current && typeof mapRef.current.getSource === 'function' && mapRef.current.getSource("markers"))){
-    mapRef.current.addSource("markers", {
+      mapRef.current.addSource("markers", {
       type: "geojson",
       data: geojsonDataForSource,
       cluster: true,
@@ -325,20 +332,6 @@ const MapLibreMap = forwardRef(({
         "icon-allow-overlap": true
       }
     });
-
-    // Layer per i punti singoli
-    // mapRef.current.addLayer({
-    //   id: "unclustered-point",
-    //   type: "circle",
-    //   source: "markers",
-    //   filter: ["!", ["has", "point_count"]],
-    //   paint: {
-    //     "circle-color": ["get", "color"],
-    //     "circle-radius": 6,
-    //     "circle-stroke-width": 1,
-    //     "circle-stroke-color": "#fff"
-    //   }
-    // });
     if (mapRef.current && typeof mapRef.current.getLayer === 'function' && mapRef.current.getLayer("clusters-pulse-bg")) mapRef.current.removeLayer("clusters-pulse-bg");
 
     // Layer cerchio di background per i cluster segnalati (sotto il triangolo pulsante)
@@ -526,58 +519,12 @@ const MapLibreMap = forwardRef(({
 
 
 
-// Logga l'ordine dei layer dopo la creazione
-// if (mapRef.current) {
-//   if (typeof mapRef.current.getLayersOrder === 'function') {
-//     console.log('Ordine layer:', mapRef.current.getLayersOrder());
-//   } else if (mapRef.current.getStyle && mapRef.current.getStyle().layers) {
-//     console.log('Ordine layer:', mapRef.current.getStyle().layers.map(l => l.id));
-//   }
-// }
-
-
-
     // Cleanup
     return () => {
-      // isMapActive.current = false;
-      // const map = mapRef.current;
-      // if (!map || !map.style) return;
-      // // Rimuovi tutti i listener
-      // if (typeof map.off === 'function') {
-      //   map.off("click", "clusters", safeHandleClusterClick);
-      //   map.off("click", "clusters-static", safeHandleClusterClick);
-      //   map.off('click', 'unclustered-point-pl', safeHandleMarkerClick);
-      //   map.off('click', 'unclustered-point-qe', safeHandleMarkerClick);
-      //   map.off('mouseenter', 'unclustered-point-pl', safeMouseEnterPL);
-      //   map.off('mouseleave', 'unclustered-point-pl', safeMouseLeavePL);
-      //   map.off('mouseenter', 'unclustered-point-qe', safeMouseEnterQE);
-      //   map.off('mouseleave', 'unclustered-point-qe', safeMouseLeaveQE);
-      // }
-      // // CLEANUP ROBUSTO: rimuovi tutti i layer che usano la source 'markers' prima di rimuovere la source
-      // const layersToRemove = [
-      //   "cluster-count",
-      //   "clusters",
-      //   "clusters-static",
-      //   "clusters-pulse-bg",
-      //   "unclustered-point-qe",
-      //   "unclustered-point-pl",
-      //   "reported-symbol",
-      //   "marker-label-qe",
-      //   "marker-label-pl"
-      // ];
-      // console.log("rimuovo cluster e marker")
-      // layersToRemove.forEach(layerId => {
-      //   if (map && typeof map.getLayer === 'function' && map.getLayer(layerId)) {
-      //     map.removeLayer(layerId);
-      //   }
-      // });
-      // if (map && typeof map.getSource === 'function' && map.getSource('markers')) {
-      //   map.removeSource('markers');
-      // }
 
     };
     
-  }, [geojsonData, mapLoaded, userData, editingMarkerId]);
+  }, [geojsonData, mapLoaded, userData, editingMarkerId, isSatellite]);
 
   //  useEffect(()=>{
   //   if (!isMapActive.current) return;
@@ -657,7 +604,7 @@ const MapLibreMap = forwardRef(({
         if (map && typeof map.getLayer === 'function' && map.getLayer(layerId)) map.removeLayer(layerId);
       });
     };
-  }, [geojsonData, mapLoaded, showStreetLampNumber, showPanelNumber]);
+  }, [geojsonData, mapLoaded, showStreetLampNumber, showPanelNumber, isSatellite]);
 
   // Funzione per generare un quadrato colorato come ImageData per MapLibre
   function createSquareImage(color, size = 32) {
@@ -701,7 +648,7 @@ const MapLibreMap = forwardRef(({
         map.removeLayer('unclustered-point-pl');
       }
     };
-  }, [geojsonData, mapLoaded, editingMarkerId]);
+  }, [geojsonData, mapLoaded, editingMarkerId, isSatellite]);
 
   // Layer marker: QE = quadrato colorato (symbol)
   useEffect(() => {
@@ -765,7 +712,7 @@ const MapLibreMap = forwardRef(({
         }
       });
     };
-  }, [geojsonData, mapLoaded, editingMarkerId]);
+  }, [geojsonData, mapLoaded, editingMarkerId, isSatellite]);
 
 
 
@@ -887,7 +834,7 @@ const MapLibreMap = forwardRef(({
       // Rimuovi listener drag
       if (dragMarker) dragMarker.off('drag', handleDrag);
     };
-  }, [editingMarkerId, geojsonData, mapLoaded]);
+  }, [editingMarkerId, geojsonData, mapLoaded, isSatellite]);
 
   // Centra la mappa sul primo marker della città quando selectedCity cambia
   useEffect(() => {
@@ -922,7 +869,6 @@ const MapLibreMap = forwardRef(({
       lastFirstMarkerRef.current = newFirstMarker;
     }
   }, [selectedCity, mapLoaded, geojsonData.features?.length]);
-
  
 
   // Cleanup for report trigger
@@ -978,26 +924,205 @@ const MapLibreMap = forwardRef(({
     }
   }, [onBeforeReportCleanupTrigger]);
 
-  // // Funzione per ottenere tutti gli id dei layer presenti nella mappa
-  // function getAllLayerIds() {
-  //   if (!mapRef.current || !mapRef.current.style) return [];
-  //   try {
-  //   return mapRef.current.getStyle().layers.map(layer => layer.id);
-  //   }catch(e){
-  //     return []
-  //   }
-  // }
+  const addBordersToMap = (borderData) => {
+  const map = mapRef.current;
+  if (!map || !borderData) return;
 
-  // // Espongo la funzione come metodo pubblico su mapRef.current
-  // useEffect(() => {
-  //   if (mapRef.current) {
-  //     mapRef.current.getAllLayerIds = getAllLayerIds;
-  //     console.log(mapRef.current.getAllLayerIds())
-  //   }
-  // }, [mapLoaded]);
+  const sourceId = 'municipality-borders';
+  const layerId = 'municipality-borders-layer';
+  const labelLayerId = 'municipality-borders-label';
+  const fillLayerId = 'municipality-borders-fill';
+
+  // Rimuovi source e layer esistenti se presenti
+  if (map.getLayer(labelLayerId)) map.removeLayer(labelLayerId);
+  if (map.getLayer(layerId)) map.removeLayer(layerId);
+  if (map.getLayer(fillLayerId)) map.removeLayer(fillLayerId);
+  if (map.getSource(sourceId)) map.removeSource(sourceId);
+
+
+  // Aggiungi la source con i dati GeoJSON dei confini
+  map.addSource(sourceId, {
+    type: 'geojson',
+    data: borderData 
+  });
+
+  // Layer per il contorno dei confini
+  map.addLayer({
+    id: layerId,
+    type: 'line',
+    source: sourceId,
+    paint: {
+      'line-color': '#000080', 
+      'line-width': [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        8, 2,  // zoom 8 = width 2
+        15, 2  // zoom 15 = width 4
+      ],
+      'line-opacity': 0.8,
+
+    }
+  });
+
+  // Layer opzionale per il riempimento (area del comune)
+  map.addLayer({
+    id: fillLayerId,
+    type: 'fill',
+    source: sourceId,
+    paint: {
+      'fill-color': '#FF6B35',
+      'fill-opacity': 0.1 // Molto trasparente
+    }
+  }, layerId); // Inserito sotto il layer del contorno
+
+  // Layer opzionale per il nome del comune
+  if (borderData.properties && borderData.properties.comune) {
+    map.addLayer({
+      id: labelLayerId,
+      type: 'symbol',
+      source: sourceId,
+      layout: {
+        'text-field': borderData.properties.comune,
+        'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
+        'text-size': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          8, 12,  // zoom 8 = size 12
+          15, 18  // zoom 15 = size 18
+        ],
+        'text-anchor': 'center',
+        'text-allow-overlap': false,
+        'symbol-placement': 'point'
+      },
+      paint: {
+        'text-color': '#2D3748',
+        'text-halo-color': '#FFFFFF',
+        'text-halo-width': 2,
+        'text-opacity': 0.8
+      }
+    });
+  }
+};
+
+  useEffect(() => {
+  const fetchTownhallsBorders = async () => {
+    if (!selectedCity || !mapLoaded) return;
+    
+    try {
+      // Assumendo che istat_id sia disponibile dalle props o dal context
+      const response = await api.get(`/borders/townhall-name/${selectedCity}`); 
+      
+      if (response.data && response.data.geometry) {
+        addBordersToMap(response.data);
+      }
+    } catch (error) {
+      console.error('Errore nel caricamento dei confini comunali:', error);
+    }
+  };
+
+  fetchTownhallsBorders();
+}, [selectedCity, mapLoaded, isSatellite]);
+// Aggiungi questo useEffect dopo la creazione della mappa
+useEffect(() => {
+  const map = mapRef.current;
+  if (!map) return;
+
+  const handleStyleData = () => {
+    if (!map.isStyleLoaded()) return;
+    
+    // Forza la ricreazione di tutti i layer dopo il cambio di stile
+    // Questo triggererà tutti i useEffect che dipendono da mapLoaded
+    setMapLoaded(false);
+    setTimeout(() => setMapLoaded(true), 100);
+  };
+
+  map.on('styledata', handleStyleData);
+
+  return () => {
+    map.off('styledata', handleStyleData);
+  };
+}, []);
+
+
+  
+
 
   // Espone l'istanza della mappa al padre
   useImperativeHandle(ref, () => mapRef.current);
+
+  function goToUserLocation() {
+    try {
+      if (!isMapActive.current || !mapRef.current) return;
+      if (!('geolocation' in navigator)) {
+        console.warn('Geolocalizzazione non supportata dal browser.');
+        return;
+      }
+
+      // resetta il flag di centraggio per questo ciclo
+      userLocationCenteredOnceRef.current = false;
+
+      const handlePosition = (pos) => {
+        const { latitude, longitude } = pos.coords;
+        if (!isMapActive.current || !mapRef.current) return;
+        // crea/aggiorna marker
+        const el = document.createElement('div');
+        el.className = 'w-4 h-4 bg-blue-500 border-2 border-white rounded-full shadow-[0_0_0_6px_rgba(59,130,246,0.35)]';
+        if (userLocationMarkerRef.current) {
+          userLocationMarkerRef.current.setLngLat([longitude, latitude]);
+        } else {
+          userLocationMarkerRef.current = new maplibregl.Marker({ element: el })
+            .setLngLat([longitude, latitude])
+            .addTo(mapRef.current);
+        }
+        // centra solo al primo fix
+        if (!userLocationCenteredOnceRef.current && typeof mapRef.current.easeTo === 'function') {
+          userLocationCenteredOnceRef.current = true;
+          mapRef.current.easeTo({
+            center: [longitude, latitude],
+            zoom: Math.max(15, mapRef.current.getZoom() || 12),
+            duration: 800,
+            essential: true
+          });
+        }
+      };
+
+      const handleError = (err) => {
+        console.error('Errore geolocalizzazione:', err);
+      };
+
+      // interrompi eventuale watch precedente
+      if (userLocationWatchIdRef.current) {
+        try { navigator.geolocation.clearWatch(userLocationWatchIdRef.current); } catch {}
+        userLocationWatchIdRef.current = null;
+      }
+
+      // posizione immediata
+      navigator.geolocation.getCurrentPosition(handlePosition, handleError, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
+      // avvia watch realtime (senza auto-follow successivi)
+      userLocationWatchIdRef.current = navigator.geolocation.watchPosition(
+        handlePosition,
+        handleError,
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+      );
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (userLocationMarkerRef.current) {
+        try { userLocationMarkerRef.current.remove(); } catch {}
+        userLocationMarkerRef.current = null;
+      }
+      if (userLocationWatchIdRef.current) {
+        try { navigator.geolocation.clearWatch(userLocationWatchIdRef.current); } catch {}
+        userLocationWatchIdRef.current = null;
+      }
+    };
+  }, []);
 
 
   return (
@@ -1005,7 +1130,18 @@ const MapLibreMap = forwardRef(({
       ref={mapContainerRef}
       style={{ width: "100%", height: "100vh" }}
       id="maplibre-map"
-    />
+    >
+      <MapStyleSwitcher
+        map={mapRef}
+        initialStyleUrl={MAPTILER_STYLE}
+        satelliteStyleUrl={MAPTILER_STYLE_SATELLITE}
+        isSatellite={isSatellite}
+        onModeChange={(mode) => setIsSatellite(mode)}
+      />
+      <div className="absolute top-30 right-2 z-2">
+        <MapButton icon={LocateFixed} onClick={goToUserLocation} title="Vai alla mia posizione" />
+      </div>
+    </div>
   );
 });
 
