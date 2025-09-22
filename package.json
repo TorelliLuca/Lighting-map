@@ -7,7 +7,13 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build",
+    "docs:open": "start docs/README.md",
+    "docs:api": "start docs/API/Components.md && start docs/API/Hooks.md && start docs/API/Utils.md && start docs/API/Context.md",
+    "docs:env": "start docs/ENV.md",
+    "docs:contrib": "start docs/Contributing.md"
   },
   "dependencies": {
     "@fortawesome/fontawesome-free": "^6.7.2",
@@ -46,7 +52,12 @@
     "uniqolor": "^1.1.1"
   },
   "devDependencies": {
+    "@chromatic-com/storybook": "^4.1.1",
     "@eslint/js": "^9.19.0",
+    "@storybook/addon-a11y": "^9.1.7",
+    "@storybook/addon-docs": "^9.1.7",
+    "@storybook/addon-onboarding": "^9.1.7",
+    "@storybook/addon-vitest": "^9.1.7",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
     "@vitejs/plugin-react": "^4.3.4",
@@ -54,9 +65,16 @@
     "eslint-plugin-react": "^7.37.4",
     "eslint-plugin-react-hooks": "^5.0.0",
     "eslint-plugin-react-refresh": "^0.4.18",
+    "eslint-plugin-storybook": "^9.1.7",
     "globals": "^15.14.0",
+    "storybook": "^9.1.7",
     "vite": "^6.1.0",
-    "vite-plugin-pwa": "^1.0.1"
+    "vite-plugin-pwa": "^1.0.1",
+    "@storybook/nextjs-vite": "^9.1.7",
+    "vitest": "^3.2.4",
+    "@vitest/browser": "^3.2.4",
+    "playwright": "^1.55.0",
+    "@vitest/coverage-v8": "^3.2.4"
   },
   "homepage": "/LIGHTING-MAP/"
 }
