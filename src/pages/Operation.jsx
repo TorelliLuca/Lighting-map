@@ -7,6 +7,7 @@ import { AlertCircle, CheckCircle, ChevronLeft, PenToolIcon as Tool, User, Hash 
 import { LightbulbLoader } from "../components/lightbulb-loader"
 import { api } from "../context/UserContext"
 import { translateString } from "../utils/utils"
+import { sendPushNotification } from "../utils/pushNotifications"
 
 const BASE_URL = import.meta.env.VITE_SERVER_URL
 
@@ -133,6 +134,18 @@ export default function Operation() {
       const response = await api.post("/addOperation", operationData)
       setIsSuccess(true)
       await sendMailOfReport()
+
+      try {
+        const opLabel = operationTypes[formData.operationType] || formData.operationType
+        await sendPushNotification({
+          title: `Operazione su punto luce ${queryParams.numeroPalo}`,
+          body: `Nel comune di ${queryParams.comune}: ${opLabel}.${formData.notes ? ` Note: ${formData.notes}` : ""}`,
+          townHallName: queryParams.comune,
+          url: `${import.meta.env.BASE_URL}dashboard`,
+        })
+      } catch (pushError) {
+        console.error("Push notification failed:", pushError)
+      }
     } catch (error) {
       console.error("Error submitting operation:", error)
       setError("Failed to submit operation. Please try again.")

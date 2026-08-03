@@ -270,12 +270,18 @@ export const UserProvider = ({ children }) => {
 
   const updateLightPoint = async (lightPointId, data) => {
     try {
+      console.log("data", data);
       const response = await api.patch(`/townHalls/lightPoints/update/${lightPointId}`, data)
       return response
     } catch (error) {
       console.error(error)
       return
     }
+  }
+
+  const updateLightPointsBatch = async (updates) => {
+    const response = await api.patch(`/townHalls/lightPoints/updateBatch`, { updates })
+    return response
   }
 
   const addLightPoint = async (data) => {
@@ -311,6 +317,42 @@ export const UserProvider = ({ children }) => {
   const getTownhallGeojson = async (selectedCity) => {
     try {
       const response = await api.get(`/townHalls/${selectedCity}/geojson`)
+      return response
+    } catch (error) {
+      console.error(error)
+      return
+    }
+  }
+
+  const getTownhallMeta = async (selectedCity) => {
+    try {
+      const response = await api.get(`/townHalls/${encodeURIComponent(selectedCity)}/meta`)
+      return response
+    } catch (error) {
+      console.error(error)
+      return
+    }
+  }
+
+  const loadTownhallLightPointsPage = async (selectedCity, offset = 0, limit = 500) => {
+    try {
+      const response = await api.get(
+        `/townHalls/${encodeURIComponent(selectedCity)}/lightPoints`,
+        { params: { offset, limit } },
+      )
+      return response
+    } catch (error) {
+      console.error(error)
+      return
+    }
+  }
+
+  const getTownhallGeojsonPage = async (selectedCity, offset = 0, limit = 500) => {
+    try {
+      const response = await api.get(
+        `/townHalls/${encodeURIComponent(selectedCity)}/geojson`,
+        { params: { offset, limit } },
+      )
       return response
     } catch (error) {
       console.error(error)
@@ -386,10 +428,14 @@ export const UserProvider = ({ children }) => {
         downloadReport,
         getActiveReports,
         updateLightPoint,
+        updateLightPointsBatch,
         addLightPoint,
         deleteLightPoint,
         getAverageResponseTime,
         getTownhallGeojson, // aggiunto qui
+        getTownhallMeta,
+        loadTownhallLightPointsPage,
+        getTownhallGeojsonPage,
         getTownhallLightpointsCount,
         getLightpoint,
         addReport,

@@ -16,6 +16,7 @@ const COLORS = [
   "#c084fc",
 ]
 import { useUser } from "../context/UserContext"
+import { getTipoLampada } from "../utils/utils"
 const PROPERTY_COLORS = {
   EnelSole: "#ef4444", // rosso
   Municipale: "#2563eb", // blu
@@ -50,6 +51,43 @@ const OPERATION_TYPE_LABELS = {
   OTHER: "Altro",
 }
 
+const ClickablePoleNumber = ({ numeroPalo, lat, lng, onNavigate }) => {
+  if (!numeroPalo) return null
+
+  const canNavigate = lat != null && lng != null && onNavigate
+
+  const handleClick = (e) => {
+    e.stopPropagation()
+    if (canNavigate) onNavigate(lat, lng, numeroPalo)
+  }
+
+  const content = (
+    <>
+      <MapPin className="h-4 w-4 text-blue-400 shrink-0" />
+      <span>Punto luce n° {numeroPalo}</span>
+    </>
+  )
+
+  if (!canNavigate) {
+    return (
+      <div className="flex items-center gap-2 text-sm font-medium text-blue-200">
+        {content}
+      </div>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      className="flex items-center gap-2 text-sm font-medium text-blue-300 hover:text-blue-100 underline underline-offset-2 cursor-pointer transition-colors text-left"
+      title="Vai al punto sulla mappa"
+    >
+      {content}
+    </button>
+  )
+}
+
 const StatCard = ({ title, value, icon: Icon, color = "blue" }) => (
   <div
     className={`bg-${color}-900/50 p-4 rounded-xl border border-${color}-500/30 hover:border-${color}-400/50 hover:bg-${color}-800/60 transition-all duration-200`}
@@ -62,7 +100,7 @@ const StatCard = ({ title, value, icon: Icon, color = "blue" }) => (
   </div>
 )
 
-const ReportCard = ({ report, type }) => {
+const ReportCard = ({ report, type, onNavigateToPoint }) => {
   const formatDate = (dateStr) => {
     if (!dateStr) return "N/A"
     const date = new Date(dateStr)
@@ -107,6 +145,13 @@ const ReportCard = ({ report, type }) => {
       </div>
 
       <div className="space-y-2">
+        <ClickablePoleNumber
+          numeroPalo={report.numero_palo}
+          lat={report.lat}
+          lng={report.lng}
+          onNavigate={onNavigateToPoint}
+        />
+
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-blue-400" />
           <span className={`text-sm ${getTypeColor(report.report_type)}`}>
@@ -138,7 +183,7 @@ const ReportCard = ({ report, type }) => {
   )
 }
 
-const OperationCard = ({ operation }) => {
+const OperationCard = ({ operation, onNavigateToPoint }) => {
   const formatDate = (dateStr) => {
     if (!dateStr) return "N/A"
     const date = new Date(dateStr)
@@ -170,12 +215,21 @@ const OperationCard = ({ operation }) => {
 
   return (
     <div className="bg-black/40 p-4 rounded-lg border border-blue-500/30 hover:bg-black/60 transition-all duration-200">
-      <div className="flex justify-between items-start mb-3">
-        <div className="flex items-center gap-2">
-          <Wrench className="h-5 w-5 text-blue-400" />
-          <span className="text-sm font-medium text-blue-200">Operazione {formatMaintenanceType(operation.maintenance_type)}</span>
-        </div>
-        <span className="text-xs text-gray-400">{formatDate(operation.operation_date)}</span>
+      <div className="flex justify-between items-start mb-3 gap-2">
+        <ClickablePoleNumber
+          numeroPalo={operation.numero_palo}
+          lat={operation.lat}
+          lng={operation.lng}
+          onNavigate={onNavigateToPoint}
+        />
+        <span className="text-xs text-gray-400 shrink-0">{formatDate(operation.operation_date)}</span>
+      </div>
+
+      <div className="flex items-center gap-2 mb-2">
+        <Wrench className="h-4 w-4 text-blue-400" />
+        <span className="text-sm font-medium text-blue-200">
+          Operazione {formatMaintenanceType(operation.maintenance_type)}
+        </span>
       </div>
 
       <div className="space-y-2">
@@ -198,7 +252,7 @@ const OperationCard = ({ operation }) => {
           ) : (
             <Clock className="h-4 w-4 text-yellow-400" />
           )}
-          <span className={`text-sm ${operation.is_solved ? "text-green-200" : "text-yellow-200"}`}>
+            <span className={`text-sm ${operation.is_solved ? "text-green-200" : "text-yellow-200"}`}>
             {operation.is_solved ? "Risolto" : "In attesa"}
           </span>
         </div>
@@ -207,7 +261,7 @@ const OperationCard = ({ operation }) => {
   )
 }
 
-function InfoPanel({ activeMarkers, onClose, townhallName }) {
+function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) {
   const { getAverageResponseTime } = useUser()
   const [stats, setStats] = useState({
     totalPoints: 0,
@@ -265,10 +319,7 @@ function InfoPanel({ activeMarkers, onClose, townhallName }) {
     const lampTypes = [
       ...new Set(
         pl
-          .map((p) => {
-            const match = p.data.lampada_potenza?.match(/^\w+/g)
-            return match ? match[0] : null
-          })
+          .map((p) => getTipoLampada(p.data))
           .filter(Boolean),
       ),
     ]
@@ -296,10 +347,7 @@ function InfoPanel({ activeMarkers, onClose, townhallName }) {
     // Calculate counts by lamp type
     const lampTypeCounts = {}
     lampTypes.forEach((type) => {
-      const filteredByType = pl.filter((p) => {
-        const match = p.data.lampada_potenza?.match(/^\w+/g)
-        return match && match[0] === type
-      })
+      const filteredByType = pl.filter((p) => getTipoLampada(p.data) === type)
       lampTypeCounts[type] = calculateTotalLightFixtures(filteredByType)
     })
 
@@ -324,7 +372,12 @@ function InfoPanel({ activeMarkers, onClose, townhallName }) {
       // Segnalazioni in corso
       if (marker.data.segnalazioni_in_corso) {
         marker.data.segnalazioni_in_corso.forEach((report) => {
-          reportsInProgress.push(report)
+          reportsInProgress.push({
+            ...report,
+            numero_palo: marker.data.numero_palo,
+            lat: marker.data.lat,
+            lng: marker.data.lng,
+          })
           const type = report.report_type || "OTHER"
           reportsByType[type] = (reportsByType[type] || 0) + 1
         })
@@ -333,7 +386,12 @@ function InfoPanel({ activeMarkers, onClose, townhallName }) {
       // Segnalazioni risolte
       if (marker.data.segnalazioni_risolte) {
         marker.data.segnalazioni_risolte.forEach((report) => {
-          reportsResolved.push(report)
+          reportsResolved.push({
+            ...report,
+            numero_palo: marker.data.numero_palo,
+            lat: marker.data.lat,
+            lng: marker.data.lng,
+          })
           const type = report.report_type || "OTHER"
           reportsByType[type] = (reportsByType[type] || 0) + 1
         })
@@ -342,7 +400,12 @@ function InfoPanel({ activeMarkers, onClose, townhallName }) {
       // Operazioni
       if (marker.data.operazioni_effettuate) {
         marker.data.operazioni_effettuate.forEach((operation) => {
-          operations.push(operation)
+          operations.push({
+            ...operation,
+            numero_palo: marker.data.numero_palo,
+            lat: marker.data.lat,
+            lng: marker.data.lng,
+          })
           const type = operation.operation_type || "OTHER"
           operationsByType[type] = (operationsByType[type] || 0) + 1
         })
@@ -350,8 +413,7 @@ function InfoPanel({ activeMarkers, onClose, townhallName }) {
     })
     reportsInProgress = reportsInProgress.sort((a, b) => new Date(b.report_date) - new Date(a.report_date))
     reportsResolved = reportsResolved.sort((a, b) => new Date(b.report_date) - new Date(a.report_date))
-    operations = operations.sort((a, b) => new Date(b.operation_date) - new Date(a.operation_date))
-    console.log(operations);
+    operations.sort((a, b) => new Date(b.operation_date) - new Date(a.operation_date))
     setReportsStats({
       totalReportsInProgress: reportsInProgress.length,
       totalReportsResolved: reportsResolved.length,
@@ -956,9 +1018,9 @@ function InfoPanel({ activeMarkers, onClose, townhallName }) {
                 <h3 className="text-xl font-semibold mb-6 text-center text-red-400">Segnalazioni in Corso</h3>
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-96 overflow-y-auto scrollbar-thin scrollbar-thumb-red-700/70 scrollbar-track-red-950/40">
                   {showMoreReportsInProgress ? reportsStats.reportsInProgress.map((report, idx) => (
-                    <ReportCard key={`progress-${idx}`} report={report} type="progress" />
+                    <ReportCard key={`progress-${idx}`} report={report} type="progress" onNavigateToPoint={onNavigateToPoint} />
                   )) : reportsStats.reportsInProgress.slice(0, 12).map((report, idx) => (
-                    <ReportCard key={`progress-${idx}`} report={report} type="progress" />
+                    <ReportCard key={`progress-${idx}`} report={report} type="progress" onNavigateToPoint={onNavigateToPoint} />
                   ))}
                 </div>
                 {!showMoreReportsInProgress && reportsStats.reportsInProgress.length > 12 && (
@@ -975,9 +1037,9 @@ function InfoPanel({ activeMarkers, onClose, townhallName }) {
                 <h3 className="text-xl font-semibold mb-6 text-center text-green-400">Segnalazioni Risolte</h3>
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-96 overflow-y-auto scrollbar-thin scrollbar-thumb-green-700/70 scrollbar-track-green-950/40">
                   {showMoreReportsResolved ? reportsStats.reportsResolved.map((report, idx) => (
-                    <ReportCard key={`resolved-${idx}`} report={report} type="resolved" />
+                    <ReportCard key={`resolved-${idx}`} report={report} type="resolved" onNavigateToPoint={onNavigateToPoint} />
                   )) : reportsStats.reportsResolved.slice(0, 12).map((report, idx) => (
-                    <ReportCard key={`resolved-${idx}`} report={report} type="resolved" />
+                    <ReportCard key={`resolved-${idx}`} report={report} type="resolved" onNavigateToPoint={onNavigateToPoint} />
                   ))}
                 </div>
                 {!showMoreReportsResolved && reportsStats.reportsResolved.length > 12 && (
@@ -994,9 +1056,9 @@ function InfoPanel({ activeMarkers, onClose, townhallName }) {
                 <h3 className="text-xl font-semibold mb-6 text-center text-blue-400">Operazioni Effettuate</h3>
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-96 overflow-y-auto scrollbar-thin scrollbar-thumb-blue-700/70 scrollbar-track-blue-950/40">
                   {showMoreOperations ? reportsStats.operations.map((operation, idx) => (
-                    <OperationCard key={`operation-${idx}`} operation={operation} />
+                    <OperationCard key={`operation-${idx}`} operation={operation} onNavigateToPoint={onNavigateToPoint} />
                   )) : reportsStats.operations.slice(0, 12).map((operation, idx) => (
-                    <OperationCard key={`operation-${idx}`} operation={operation} />
+                    <OperationCard key={`operation-${idx}`} operation={operation} onNavigateToPoint={onNavigateToPoint} />
                   ))}
                 </div>
                 {!showMoreOperations && reportsStats.operations.length > 12 && (

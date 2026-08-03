@@ -1,6 +1,21 @@
 import uniqolor from "uniqolor";
 
 export const DEFAULT_COLOR = "#3b82f6"
+export const FC_QUADRO_COLOR = "#000000"
+
+export function isFcQuadro(quadro) {
+  return quadro != null && String(quadro).trim().toLowerCase() === "fc"
+}
+
+export function applyFcQuadroToLegendMap(colorMappings) {
+  if (!colorMappings?.quadro) return colorMappings
+  for (const key of Object.keys(colorMappings.quadro)) {
+    if (isFcQuadro(key)) {
+      colorMappings.quadro[key] = FC_QUADRO_COLOR
+    }
+  }
+  return colorMappings
+}
 
 export const colorsBackground = [
   "#ff0000", // Rosso intenso

@@ -1,0 +1,9 @@
+---
+description: "Test e Storybook"
+globs: ["**/*.test.{js,jsx}", "**/*.stories.{js,jsx}", ".storybook/**"]
+alwaysApply: false
+---
+
+- Test con Vitest (+ @vitest/browser e Playwright per i test in browser
+  reale), non introdurre Jest o altri runner.
+

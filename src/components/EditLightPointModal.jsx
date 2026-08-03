@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react"
 import { X, Save, MapPin, RotateCcw, Crosshair, ChevronDown } from "lucide-react"
 import toast from "react-hot-toast"
+import { migrateLegacyLightPointFields, prepareLightPointPayload } from "../utils/utils"
 
 const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersData, electricPanels = [] }) => {
   // Stato locale per la posizione temporanea
@@ -61,7 +62,7 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
       { value: "Mancante", label: "Mancante" },
       { value: "Altro", label: "Altro" },
     ],
-    lampada: [
+    tipo_lampada: [
       { value: "FLUO", label: "FLUO" },
       { value: "HG", label: "HG" },
       { value: "LED", label: "LED" },
@@ -146,11 +147,14 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
     "quadro",
     "proprieta",
     "tipo_apparecchio",
-    "modello_armatura",
-    "modello",
+    "armatura",
+    "marca_apparecchio",
+    "modello_apparecchio",
     "numero_apparecchi",
-    "lampada_e_potenza",
+    "tipo_lampada",
+    "potenza_lampada",
     "tipo_sostegno",
+    "altezza_sostegno",
     "tipo_linea",
     "promiscuita",
     "note",
@@ -193,18 +197,7 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
   useEffect(() => {
     if (isOpen && marker) {
       setTempPosition({ lat: marker.lat, lng: marker.lng })
-      const editableData = { ...marker }
-
-      // Gestione speciale per lampada_potenza - separa in lampada e potenza
-      if (editableData.lampada_potenza) {
-        const lampadaPotenza = editableData.lampada_potenza.toString()
-        const parts = lampadaPotenza.split(" ")
-        const lampada = parts[0] || ""
-        const potenza = parts.slice(1).join(" ") || ""
-
-        editableData.lampada = lampada
-        editableData.potenza = potenza
-      }
+      const editableData = migrateLegacyLightPointFields({ ...marker })
 
       setFormData(editableData)
       setOriginalData(editableData)
@@ -353,20 +346,11 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
     if (!hasChanges) return
     setIsSaving(true)
     try {
-      const dataToSend = {
+      const dataToSend = prepareLightPointPayload({
         ...formData,
         lat: tempPosition.lat,
         lng: tempPosition.lng,
-      }
-
-      if (formData.lampada || formData.potenza) {
-        const lampada = formData.lampada || ""
-        const potenza = formData.potenza || ""
-        dataToSend.lampada_potenza = `${lampada} ${potenza}`.trim()
-
-        delete dataToSend.lampada
-        delete dataToSend.potenza
-      }
+      })
 
       if (formData.tipo_apparecchio === "Altro" && formData.tipo_apparecchio_altro) {
         dataToSend.tipo_apparecchio = formData.tipo_apparecchio_altro
@@ -451,6 +435,9 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
         "segnalazioni_risolte",
         "operazioni_effettuate",
         "lampada_potenza",
+        "modello",
+        "modello_armatura",
+        "lampada_e_potenza",
       ].includes(key)
     ) {
       return null
@@ -482,6 +469,7 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
             options={[
               { value: "unknown", label: "Quadro Ignoto" },
               { value: "new", label: "Quadro da Caricare" },
+              { value: "FC", label: "FC" },
               ...electricPanels.map((panel) => ({ value: panel, label: panel })),
             ]}
             placeholder="Seleziona un quadro"
@@ -495,6 +483,21 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
               placeholder="Inserisci nome quadro"
             />
           )}
+        </div>
+      )
+    }
+
+    if (key === "potenza_lampada") {
+      return (
+        <div key={key} className="space-y-2">
+          <label className="block text-sm font-medium text-blue-300">{label}</label>
+          <input
+            type="number"
+            value={value || ""}
+            onChange={(e) => handleInputChange(key, e.target.value)}
+            className="w-full px-3 py-3 bg-blue-900/40 text-white border border-blue-500/40 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-colors placeholder-blue-400/50 min-h-[44px]"
+            placeholder="Potenza (W)"
+          />
         </div>
       )
     }
@@ -660,34 +663,8 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
                 <>
                   {/* Altri campi filtrati per QE o PL */}
                   {marker.marker === "QE"
-                    ? campiQE
-                        .filter((key) => key in formData)
-                        .map((key) => renderField(key, formData[key], marker.marker))
-                    : campiPL
-                        .filter((key) => key in formData)
-                        .map((key) => renderField(key, formData[key], marker.marker))}
-
-                  {/* Campo lampada e potenza - solo se marker PL e se esiste lampada_potenza */}
-                  {marker.marker !== "QE" && (formData.lampada_potenza || formData.lampada || formData.potenza) && (
-                    <div className="space-y-2">
-                      <label className="block text-sm font-medium text-blue-300">Lampada e Potenza</label>
-                      <div className={`grid ${isMobile ? "grid-cols-1 gap-3" : "grid-cols-2 gap-2"}`}>
-                        <CustomSelect
-                          value={formData.lampada || ""}
-                          onChange={(value) => handleInputChange("lampada", value)}
-                          options={selectOptions.lampada}
-                          placeholder="Seleziona lampada"
-                        />
-                        <input
-                          type="number"
-                          value={formData.potenza || ""}
-                          onChange={(e) => handleInputChange("potenza", e.target.value)}
-                          className="px-3 py-3 bg-blue-900/40 text-white border border-blue-500/40 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-colors placeholder-blue-400/50 min-h-[44px]"
-                          placeholder="Potenza"
-                        />
-                      </div>
-                    </div>
-                  )}
+                    ? campiQE.map((key) => renderField(key, formData[key] ?? "", marker.marker))
+                    : campiPL.map((key) => renderField(key, formData[key] ?? "", marker.marker))}
                 </>
               )}
             </div>

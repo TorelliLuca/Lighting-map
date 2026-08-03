@@ -6,9 +6,7 @@ import { UserContext } from "../context/UserContext"
 import { AlertCircle, CheckCircle, ChevronLeft, MapPin, Map, User } from "lucide-react"
 import { LightbulbLoader } from "../components/lightbulb-loader"
 import { api } from "../context/UserContext"
-import { usePushNotifications } from "../hooks/usePushNotifications"
 import { sendPushNotification } from "../utils/pushNotifications"
-import { title } from "process"
 
 const BASE_URL = import.meta.env.VITE_SERVER_URL
 
@@ -25,7 +23,6 @@ export default function Report() {
   const [error, setError] = useState("")
   const [address, setAddress] = useState("Loading address...")
   const [lightpoint, setLightpoint] = useState(null)
-  const isPushReady = usePushNotifications();
 
   const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API
 
@@ -158,29 +155,33 @@ export default function Report() {
         setError("Errore nell'invio della mail di notifica. Riprova.")
         return
       }
-      console.log(isPushReady);
-      if(isPushReady) {
-        let title, body;
-        console.log(lightpoint);
-        if (lightpoint && lightpoint.marker === "PL") {
-          title = `Guasto segnalato sul punto luce: ${lightpoint.numero_palo}`;
-          if (reportData.description) {
-            body = `È stato segnalato un problema di tipo "${reportTypes[reportData.report_type]}" nel comune di ${reportData.name} alle ore: ${reportData.date.toLocaleTimeString()} del giorno ${reportData.date.toLocaleDateString()}.Note: ${reportData.description}`;
-            } else {
-            body = `È stato segnalato un problema di tipo "${reportTypes[reportData.report_type]}" nel comune di ${reportData.name} alle ore: ${reportData.date.toLocaleTimeString()} del giorno ${reportData.date.toLocaleDateString()}.`;
-            }
-        } else {
-          title = `Guasto segnalato sul quadro elettrico: ${lightpoint.numero_palo}`;
-          if (reportData.description) {
-              body = `È stato segnalato un problema di tipo "${reportTypes[reportData.report_type]}" nel comune di ${reportData.name} alle ore: ${reportData.date.toLocaleTimeString()} del giorno ${reportData.date.toLocaleDateString()}.Note: ${reportData.description}`;
-            } else {
-              body = `È stato segnalato un problema di tipo "${reportTypes[reportData.report_type]}" nel comune di ${reportData.name} alle ore: ${reportData.date.toLocaleTimeString()} del giorno ${reportData.date.toLocaleDateString()}.`;
 
-            }
+      try {
+        let pushTitle
+        let pushBody
+        const time = reportData.date.toLocaleTimeString()
+        const day = reportData.date.toLocaleDateString()
+        const reportLabel = reportTypes[reportData.report_type]
+        const noteSuffix = reportData.description ? ` Note: ${reportData.description}` : ""
+
+        if (lightpoint && lightpoint.marker === "PL") {
+          pushTitle = `Guasto segnalato sul punto luce: ${lightpoint.numero_palo}`
+        } else {
+          pushTitle = `Guasto segnalato sul quadro elettrico: ${lightpoint?.numero_palo ?? ""}`
         }
-        const r = await sendPushNotification(title, body, userData.id)
-        console.log(r);
+        pushBody = `È stato segnalato un problema di tipo "${reportLabel}" nel comune di ${reportData.name} alle ore: ${time} del giorno ${day}.${noteSuffix}`
+
+        await sendPushNotification({
+          title: pushTitle,
+          body: pushBody,
+          townHallName: comune,
+          url: `${import.meta.env.BASE_URL}dashboard`,
+        })
+      } catch (pushError) {
+        // La segnalazione è già salvata: non bloccare il flusso per un errore push
+        console.error("Push notification failed:", pushError)
       }
+
       setIsSuccess(true)
     } catch (error) {
       console.error("Error submitting report:", error)

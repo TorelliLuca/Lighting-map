@@ -1,0 +1,19 @@
+---
+description: "Componenti mappa e georeferenziazione punti luce"
+globs: ["src/**/*[Mm]ap*.{jsx,tsx}", "src/**/*[Mm]arker*.{jsx,tsx}"]
+alwaysApply: false
+---
+
+Attenzione: il progetto ha due librerie di mappe installate insieme:
+@react-google-maps/api (con @googlemaps/markerclusterer per il clustering
+dei punti luce) e maplibre-gl. Prima di scrivere codice nuovo per la mappa,
+chiedi o verifica quale delle due è quella attiva nel componente che stai
+modificando — non mescolarle nello stesso componente.
+
+- Per il clustering di molti punti luce sulla mappa usa sempre
+  @googlemaps/markerclusterer se il componente è basato su Google Maps.
+- I colori distintivi per categorie/stati dei punti luce si generano con
+  distinct-colors o uniqolor (già presenti): non hardcodare palette nuove.
+- Ogni marker/punto luce deve gestire correttamente lo stato: attivo,
+  guasto, in manutenzione — mantieni questi tre stati coerenti con i filtri
+  della dashboard, non inventarne di nuovi senza allineare anche i filtri.

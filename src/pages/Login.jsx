@@ -12,14 +12,14 @@ const BASE_URL = import.meta.env.VITE_SERVER_URL
 const LoginForm = ({ onForgotPasswordClick, email, setEmail, password, setPassword, handleSubmit, isLoading, error, showPassword, setShowPassword }) => (
   <>
     <div className="flex justify-center">
-      <Logo className="w-64" />
+      <Logo />
     </div>
-    <h2 className="mt-6 text-center text-3xl font-bold text-white">Accedi al tuo account</h2>
+    <h2 className=" text-center text-3xl font-bold text-white">Accedi al tuo account</h2>
     <p className="mt-2 text-center text-sm text-blue-200/70">
       Accedi alla tua dashboard di gestione dell'illuminazione pubblica
     </p>
 
-    <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+    <form className="mt-2 space-y-6" onSubmit={handleSubmit}>
       <div className="space-y-4">
         {/* Email Input */}
         <div className="relative">

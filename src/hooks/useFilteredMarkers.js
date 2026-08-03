@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { getColorList, DEFAULT_COLOR } from '../utils/ColorGenerator';
+import { getColorList, DEFAULT_COLOR, FC_QUADRO_COLOR, applyFcQuadroToLegendMap, isFcQuadro } from '../utils/ColorGenerator';
+import { getTipoLampada } from '../utils/utils';
 
 // Genera la mappa colori coordinata come in createMarkers.jsx
 export function generateLegendColorMap(markers, highlightOption) {
@@ -24,7 +25,7 @@ export function generateLegendColorMap(markers, highlightOption) {
       colorMappings.lotto[val] = colorList[idx];
     });
   } else if (highlightOption === 'TIPO_LAMPADA') {
-    uniqueValues = Array.from(new Set(markers.map(marker => (marker.lampada_potenza || '').split(' ')[0]).filter(Boolean)));
+    uniqueValues = Array.from(new Set(markers.map(marker => getTipoLampada(marker)).filter(Boolean)));
     const colorList = getColorList(uniqueValues.length);
     uniqueValues.forEach((val, idx) => {
       colorMappings.tipo_lampada[val] = colorList[idx];
@@ -36,6 +37,8 @@ export function generateLegendColorMap(markers, highlightOption) {
       colorMappings.tipo_apparecchio[val] = colorList[idx];
     });
   }
+
+  applyFcQuadroToLegendMap(colorMappings);
   return colorMappings;
 }
 
@@ -68,7 +71,7 @@ function getMarkerColor(marker, highlightOption, colorMappings) {
     if (marker.marker === 'QE') {
       markerColor = '#3b82f6'; // Colore fisso per i quadri
     } else {
-      const tipoLampada = (marker.lampada_potenza || '').split(' ')[0];
+      const tipoLampada = getTipoLampada(marker);
       if (tipoLampada && colorMappings.tipo_lampada && colorMappings.tipo_lampada[tipoLampada]) {
         markerColor = colorMappings.tipo_lampada[tipoLampada];
       }
@@ -80,7 +83,11 @@ function getMarkerColor(marker, highlightOption, colorMappings) {
     }
     
   }
-  
+
+  if (isFcQuadro(marker.quadro)) {
+    markerColor = FC_QUADRO_COLOR;
+  }
+
   return markerColor;
 }
 
@@ -129,9 +136,51 @@ function filterMarkers(markers, filterType, selectedProprietaFilter) {
 // Funzione per convertire marker in GeoJSON FeatureCollection (aggiunge color)
 function markersToGeoJSON(markers, highlightOption) {
   const colorMappings = generateLegendColorMap(markers, highlightOption);
+  const differenteRegex = /^differente/i;
+
+  const groupedByPole = new Map();
+  const passthroughMarkers = [];
+
+  markers.forEach((marker) => {
+    const isDifferente = differenteRegex.test((marker.composizione_punto || "").trim());
+    const poleNumber = (marker.numero_palo || "").trim();
+
+    if (marker.marker === "PL" && isDifferente && poleNumber) {
+      const key = poleNumber.toLowerCase();
+      if (!groupedByPole.has(key)) {
+        groupedByPole.set(key, []);
+      }
+      groupedByPole.get(key).push(marker);
+      return;
+    }
+
+    passthroughMarkers.push(marker);
+  });
+
+  const groupedMarkers = [];
+  groupedByPole.forEach((group, key) => {
+    if (group.length <= 1) {
+      passthroughMarkers.push(group[0]);
+      return;
+    }
+
+    const representative = { ...group[0] };
+    representative.is_differente_group = true;
+    representative.differente_group_id = `differente-${key}`;
+    representative.differente_group_count = group.length;
+    representative.differente_group_numero_palo = representative.numero_palo || "";
+    representative.differente_group_members_json = JSON.stringify(group);
+    representative.segnalazioni_in_corso = group.flatMap((m) => m.segnalazioni_in_corso || []);
+    representative.segnalazioni_risolte = group.flatMap((m) => m.segnalazioni_risolte || []);
+    representative.operazioni_effettuate = group.flatMap((m) => m.operazioni_effettuate || []);
+    groupedMarkers.push(representative);
+  });
+
+  const markersForMap = [...passthroughMarkers, ...groupedMarkers];
+
   return {
     type: 'FeatureCollection',
-    features: markers.map((m) => ({
+    features: markersForMap.map((m) => ({
       type: 'Feature',
       geometry: {
         type: 'Point',

@@ -1,11 +1,12 @@
 import { createRoot } from "react-dom/client"
 import { MarkerClusterer, GridAlgorithm } from "@googlemaps/markerclusterer"
 import { IoPin } from "rocketicons/io5"
-import { colorsBackground, DEFAULT_COLOR, getColorList } from "../utils/ColorGenerator"
+import { DEFAULT_COLOR, FC_QUADRO_COLOR, applyFcQuadroToLegendMap, getColorList, isFcQuadro } from "../utils/ColorGenerator"
 import InfoWindow from "../components/InfoWindow"
+import { isMobileInfoWindowViewport } from "./infoWindowActions"
 import { MdReportProblem } from "rocketicons/md"
 import { PlugIcon as HousePlug } from "lucide-react"
-import { isOlderThan } from "./utils"
+import { isOlderThan, getTipoLampada, normalizeLightPointForDisplay } from "./utils"
 
 // Global variable to store the clusterer instance
 let currentClusterer = null
@@ -13,6 +14,41 @@ let currentClusterer = null
 let mapEventListeners = []
 // Global variable to store the last created markers (per cleanup dei React root)
 let lastCreatedMarkers = []
+let markerStylesInjected = false
+
+const ensureMarkerStyles = () => {
+  if (markerStylesInjected || typeof document === "undefined") return
+  const style = document.createElement("style")
+  style.setAttribute("data-lighting-map-markers", "true")
+  style.textContent = `
+    @keyframes pulse {
+      0% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.7; transform: scale(1.1); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+    .animate-pulse {
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    .editing-marker {
+      cursor: move !important;
+      z-index: 1000 !important;
+    }
+    .editing-marker:hover {
+      transform: scale(1.1);
+      transition: transform 0.2s ease;
+    }
+  `
+  document.head.appendChild(style)
+  markerStylesInjected = true
+}
+
+const parseCoord = (value) => {
+  if (value == null || value === "") return 0
+  const normalized =
+    typeof value === "string" ? value.trim().replace(",", ".") : value
+  const n = Number(normalized)
+  return Number.isFinite(n) ? n : 0
+}
 
 // Custom Electric Panel component with notification status indicator
 const ElectricPanelMarker = ({ color, hasActiveNotifications, isOutOfLaw, nPanel, showPanelNumber }) => {
@@ -63,7 +99,7 @@ const ElectricPanelMarker = ({ color, hasActiveNotifications, isOutOfLaw, nPanel
   )
 }
 
-const StreetLampMarker = ({ color, hasActiveNotifications, isOutOfLaw, nPanel }) => {
+const StreetLampMarker = ({ color, hasActiveNotifications, isOutOfLaw, nPanel, groupCount = 0, isTopologyUnlinked = false }) => {
   return (
     <div
       className="flex flex-col items-center justify-center"
@@ -72,10 +108,35 @@ const StreetLampMarker = ({ color, hasActiveNotifications, isOutOfLaw, nPanel })
         height: "55px",
         filter: "drop-shadow(0px 0px 1px white)",
         display: "inline-flex",
+        position: "relative",
       }}
     >
       {/* Main lamp icon */}
-      <IoPin size={24} color={color} style={{ minWidth: "30px", minHeight: "30px" }} />
+      <IoPin
+        size={24}
+        color={color}
+        style={{
+          minWidth: "30px",
+          minHeight: "30px",
+          outline: isTopologyUnlinked ? "2px solid #f97316" : undefined,
+          borderRadius: isTopologyUnlinked ? "50%" : undefined,
+        }}
+      />
+      {isTopologyUnlinked && (
+        <span
+          title="Nessuna linea elettrica collegata"
+          style={{
+            position: "absolute",
+            top: "2px",
+            right: "4px",
+            width: "8px",
+            height: "8px",
+            borderRadius: "50%",
+            background: "#f97316",
+            border: "1px solid #fff",
+          }}
+        />
+      )}
 
       {/* Notification indicator */}
       {hasActiveNotifications && !isOutOfLaw ? (
@@ -114,8 +175,51 @@ const StreetLampMarker = ({ color, hasActiveNotifications, isOutOfLaw, nPanel })
           {nPanel}
         </div>
       )}
+      {groupCount > 1 && (
+        <div className="text-[10px] text-white bg-blue-600 rounded-full px-2 py-0.5 mt-1 border border-blue-300/60">
+          x{groupCount}
+        </div>
+      )}
     </div>
   )
+}
+
+const groupDifferenteMarkers = (markers) => {
+  const differenteRegex = /^differente/i
+  const grouped = new Map()
+  const passthrough = []
+
+  markers.forEach((marker) => {
+    const poleNumber = (marker.numero_palo || "").trim()
+    const isDifferente = differenteRegex.test((marker.composizione_punto || "").trim())
+    if (marker.marker === "PL" && isDifferente && poleNumber) {
+      const key = poleNumber.toLowerCase()
+      if (!grouped.has(key)) grouped.set(key, [])
+      grouped.get(key).push(marker)
+      return
+    }
+    passthrough.push(marker)
+  })
+
+  const groupedMarkers = []
+  grouped.forEach((group, key) => {
+    if (group.length <= 1) {
+      passthrough.push(group[0])
+      return
+    }
+
+    const representative = { ...group[0] }
+    representative.is_differente_group = true
+    representative.differente_group_id = `differente-${key}`
+    representative.differente_group_count = group.length
+    representative.differente_group_members = group.map((member) => ({ ...member }))
+    representative.segnalazioni_in_corso = group.flatMap((m) => m.segnalazioni_in_corso || [])
+    representative.segnalazioni_risolte = group.flatMap((m) => m.segnalazioni_risolte || [])
+    representative.operazioni_effettuate = group.flatMap((m) => m.operazioni_effettuate || [])
+    groupedMarkers.push(representative)
+  })
+
+  return [...passthrough, ...groupedMarkers]
 }
 
 // Custom cluster renderer
@@ -202,49 +306,48 @@ const createMarkers = async (
   showPanelNumber,
   showStreetLampNumber,
   setSelectedMarkerForInfo,
+  options = {},
 ) => {
   if (!window.google || !map) return []
+  const {
+    colorMappings: colorMappingsOverride = null,
+    skipGrouping = false,
+    onItemProgress = null,
+    progressOffset = 0,
+    progressTotal = null,
+    progressEvery = 75,
+    showTopologyLines = false,
+    unlinkedIdSet = null,
+    getIsTopologyEditMode = null,
+    onTopologyPointPick = null,
+    onSetParentClick = null,
+    onClearParentClick = null,
+    getTopologyPower = null,
+  } = options
+  const markersForRender = skipGrouping ? markers : groupDifferenteMarkers(markers)
 
-  // Usa la mappa colori generata per evitare ripetizioni
-  const legendColorMap = generateLegendColorMap(markers, highlightOption)
-  const colorMappings = legendColorMap
+  // Usa la mappa colori passata dal parent (dataset completo) oppure calcolala sul batch
+  const colorMappings =
+    colorMappingsOverride || generateLegendColorMap(markersForRender, highlightOption)
   
-  let NcolorToUse = colorsBackground.length - 1
   const newMarkers = []
 
-  // Create info window container and React root once
+  // Create info window container and React root once (per batch)
   const infoWindowContainer = document.createElement("div")
   const reactRoot = createRoot(infoWindowContainer)
 
-  // Add necessary CSS for animations to document head
-  const style = document.createElement("style")
-  style.textContent = `
-    @keyframes pulse {
-      0% { opacity: 1; transform: scale(1); }
-      50% { opacity: 0.7; transform: scale(1.1); }
-      100% { opacity: 1; transform: scale(1); }
-    }
-    .animate-pulse {
-      animation: pulse 1.5s ease-in-out infinite;
-    }
-    .editing-marker {
-      cursor: move !important;
-      z-index: 1000 !important;
-    }
-    .editing-marker:hover {
-      transform: scale(1.1);
-      transition: transform 0.2s ease;
-    }
-  `
-  document.head.appendChild(style)
+  ensureMarkerStyles()
 
+  const totalForProgress = progressTotal ?? markersForRender.length
+  const shouldMarkUnlinked = showTopologyLines && unlinkedIdSet instanceof Set
 
-  for (const marker of markers) {
-    const content = { ...marker }
+  for (let i = 0; i < markersForRender.length; i++) {
+    const marker = markersForRender[i]
+    const content = normalizeLightPointForDisplay(marker)
     delete content.lat
     delete content.lng
-    const safeLat = Number.isFinite(Number(marker.lat)) ? Number(marker.lat) : 0
-    const safeLng = Number.isFinite(Number(marker.lng)) ? Number(marker.lng) : 0
+    const safeLat = parseCoord(marker.lat)
+    const safeLng = parseCoord(marker.lng)
     const position = new window.google.maps.LatLng(safeLat, safeLng)
     const hasActiveNotifications = marker.segnalazioni_in_corso && marker.segnalazioni_in_corso.length > 0
     const isOutOfLaw =
@@ -255,6 +358,11 @@ const createMarkers = async (
           (report.report_type === "PLANT_OFF" && isOlderThan(report.report_date, 4))
         )
       })
+    const isTopologyUnlinked =
+      shouldMarkUnlinked &&
+      marker.marker === "PL" &&
+      !marker.is_differente_group &&
+      unlinkedIdSet.has(String(marker._id))
 
     let markerColor = DEFAULT_COLOR
 
@@ -281,7 +389,7 @@ const createMarkers = async (
       if (marker.marker === "QE") {
         markerColor = "#3b82f6"; // Colore fisso per i quadri
       } else {
-        const tipoLampada = (marker.lampada_potenza || '').split(' ')[0];
+        const tipoLampada = getTipoLampada(marker);
         if (tipoLampada && colorMappings.tipo_lampada && colorMappings.tipo_lampada[tipoLampada]) {
           markerColor = colorMappings.tipo_lampada[tipoLampada];
         }
@@ -291,6 +399,9 @@ const createMarkers = async (
       if (tipoApparecchio && colorMappings.tipo_apparecchio && colorMappings.tipo_apparecchio[tipoApparecchio]) {
         markerColor = colorMappings.tipo_apparecchio[tipoApparecchio];
       }
+    }
+    if (isFcQuadro(marker.quadro)) {
+      markerColor = FC_QUADRO_COLOR
     }
 
     let markerElement
@@ -317,6 +428,8 @@ const createMarkers = async (
           hasActiveNotifications={hasActiveNotifications}
           isOutOfLaw={isOutOfLaw}
           nPanel={showStreetLampNumber ? marker.numero_palo : undefined}
+          groupCount={marker.differente_group_count || 0}
+          isTopologyUnlinked={isTopologyUnlinked}
         />, 
       )
     }
@@ -350,9 +463,35 @@ const createMarkers = async (
 
       // Add click event
       mapMarker.addListener("click", () => {
+        if (typeof getIsTopologyEditMode === "function" && getIsTopologyEditMode()) {
+          if (typeof onTopologyPointPick === "function") {
+            onTopologyPointPick(marker)
+          }
+          return
+        }
+
         if (currentInfoWindow) {
           currentInfoWindow.close()
         }
+        setCurrentInfoWindow(null)
+
+        if (marker.is_differente_group) {
+          if (typeof setSelectedMarkerForInfo === "function") {
+            setSelectedMarkerForInfo(marker)
+          }
+          return
+        }
+
+        // Mobile: bottom sheet gestito da Dashboard, niente popup Google
+        if (isMobileInfoWindowViewport()) {
+          if (typeof setSelectedMarkerForInfo === "function") {
+            setSelectedMarkerForInfo(marker)
+          }
+          return
+        }
+
+        const power =
+          typeof getTopologyPower === "function" ? getTopologyPower(marker) : null
 
         // Update the React root rendering
         reactRoot.render(
@@ -364,9 +503,12 @@ const createMarkers = async (
             onEditClick={onEditClick}
             onDeleteClick={onDeleteClick}
             idMarker={ marker._id}
+            variant="popup"
+            onSetParentClick={onSetParentClick}
+            onClearParentClick={onClearParentClick}
+            topologyPower={power}
           />
         )
-    
 
       // Use the React container as InfoWindow content
       infoWindowRef.current.setContent(infoWindowContainer)
@@ -379,6 +521,18 @@ const createMarkers = async (
 
     newMarkers.push({ data: marker, ref: mapMarker, reactRoot: customRoot, reactContainer: customContainer })
 
+    // Yield + report ogni N marker così React può ridipingere il contatore
+    const done = i + 1
+    if (
+      typeof onItemProgress === "function" &&
+      (done % progressEvery === 0 || done === markersForRender.length)
+    ) {
+      await onItemProgress({
+        processed: progressOffset + done,
+        total: totalForProgress,
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
   }
 
   // Salva i marker creati globalmente per cleanup
@@ -389,10 +543,19 @@ const createMarkers = async (
 }
 
 // Funzione per aggiornare i colori dei marker esistenti tramite rerender React
-const updateMarkerColors = (markers, highlightOption, editingMarkerId, showPanelNumber, showStreetLampNumber) => {
+const updateMarkerColors = (
+  markers,
+  highlightOption,
+  editingMarkerId,
+  showPanelNumber,
+  showStreetLampNumber,
+  showTopologyLines = false,
+  unlinkedIdSet = null,
+) => {
   // Usa la mappa colori generata per evitare ripetizioni
   const legendColorMap = generateLegendColorMap(markers.map(m => m.data), highlightOption)
   const colorMappings = legendColorMap
+  const shouldMarkUnlinked = showTopologyLines && unlinkedIdSet instanceof Set
 
   markers.forEach(({ data, reactRoot, reactContainer }) => {
     // Safe: esci se il root non è valido o già smontato
@@ -408,6 +571,11 @@ const updateMarkerColors = (markers, highlightOption, editingMarkerId, showPanel
           (report.report_type === "PLANT_OFF" && isOlderThan(report.report_date, 4))
         )
       })
+    const isTopologyUnlinked =
+      shouldMarkUnlinked &&
+      data.marker === "PL" &&
+      !data.is_differente_group &&
+      unlinkedIdSet.has(String(data._id))
 
     if (highlightOption === "") {
       markerColor = hasActiveNotifications ? "#FFCC00" : DEFAULT_COLOR
@@ -432,7 +600,7 @@ const updateMarkerColors = (markers, highlightOption, editingMarkerId, showPanel
       if (data.marker === "QE") {
         markerColor = "#3b82f6"; // Colore fisso per i quadri
       } else {
-        const tipoLampada = (data.lampada_potenza || '').split(' ')[0];
+        const tipoLampada = getTipoLampada(data);
         if (tipoLampada && colorMappings.tipo_lampada && colorMappings.tipo_lampada[tipoLampada]) {
           markerColor = colorMappings.tipo_lampada[tipoLampada];
         }
@@ -443,7 +611,10 @@ const updateMarkerColors = (markers, highlightOption, editingMarkerId, showPanel
         markerColor = colorMappings.tipo_apparecchio[tipoApparecchio];
       }
     }
-
+    
+    if (isFcQuadro(data.quadro)) {
+      markerColor = FC_QUADRO_COLOR
+    }
     // Rerender del componente React nel container esistente
     if (data.marker === "QE") {
       reactRoot.render(
@@ -462,6 +633,8 @@ const updateMarkerColors = (markers, highlightOption, editingMarkerId, showPanel
           hasActiveNotifications={hasActiveNotifications}
           isOutOfLaw={isOutOfLaw}
           nPanel={showStreetLampNumber ? data.numero_palo : undefined}
+          groupCount={data.differente_group_count || 0}
+          isTopologyUnlinked={isTopologyUnlinked}
         />
       )
     }
@@ -494,6 +667,8 @@ const setupMarkerClustering = async (
   showPanelNumber,
   showStreetLampNumber,
   setSelectedMarkerForInfo,
+  onProgress,
+  topologyOptions = {},
 ) => {
   // Make sure Google Maps API is fully loaded
   if (!window.google || !window.google.maps || !map) {
@@ -508,20 +683,27 @@ const setupMarkerClustering = async (
   await window.google.maps.importLibrary("marker")
   await window.google.maps.importLibrary("core")
 
-  // Implement marker batching for large datasets
+  // Group + palette una sola volta sull'intero dataset (non per ogni batch)
+  const markersForRender = groupDifferenteMarkers(markers)
+  const legendColorMap = generateLegendColorMap(markersForRender, highlightOption)
+  ensureMarkerStyles()
+
   const batchSize = 1000
-  let allMarkers = []
+  const allMarkers = []
+  const total = markersForRender.length
 
-  // Process markers in batches to prevent UI freezing
-  for (let i = 0; i < markers.length; i += batchSize) {
-    const batch = markers.slice(i, i + batchSize)
+  const emitProgress = async (processed) => {
+    if (typeof onProgress !== "function" || total <= 0) return
+    onProgress({ processed, total })
+    // Doppio rAF: lascia che React committa e il browser dipinga il contatore
+    await new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve))
+    })
+  }
 
-    // Create a small delay between batches to allow UI to respond
-    if (i > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    }
+  for (let i = 0; i < markersForRender.length; i += batchSize) {
+    const batch = markersForRender.slice(i, i + batchSize)
 
-    // Create markers for this batch
     const batchResult = await createMarkers(
       batch,
       city,
@@ -538,13 +720,25 @@ const setupMarkerClustering = async (
       showPanelNumber,
       showStreetLampNumber,
       setSelectedMarkerForInfo,
+      {
+        colorMappings: legendColorMap,
+        skipGrouping: true,
+        progressOffset: i,
+        progressTotal: total,
+        progressEvery: 75,
+        onItemProgress: emitProgress,
+        showTopologyLines: Boolean(topologyOptions.showTopologyLines),
+        unlinkedIdSet: topologyOptions.unlinkedIdSet || null,
+        getIsTopologyEditMode: topologyOptions.getIsTopologyEditMode || null,
+        onTopologyPointPick: topologyOptions.onTopologyPointPick || null,
+        onSetParentClick: topologyOptions.onSetParentClick || null,
+        onClearParentClick: topologyOptions.onClearParentClick || null,
+        getTopologyPower: topologyOptions.getTopologyPower || null,
+      },
     )
 
-    allMarkers = [...allMarkers, ...batchResult]
+    allMarkers.push(...batchResult)
   }
-
-  // New: calcola la mappa colori coordinata
-  const legendColorMap = generateLegendColorMap(markers, highlightOption)
 
   return { markers: allMarkers, legendColorMap }
 }
@@ -553,9 +747,11 @@ const setupMarkerClustering = async (
 function generateLegendColorMap(markers, highlightOption) {
   let colorMappings = { quadro: {}, proprieta: {}, lotto: {}, tipo_lampada: {}, tipo_apparecchio: {} }
   let uniqueValues = []
+  
   if (highlightOption === "PROPRIETA") {
     uniqueValues = Array.from(new Set(markers.map(marker => marker.proprieta).filter(Boolean)))
     const colorList = getColorList(uniqueValues.length)
+
     uniqueValues.forEach((val, idx) => {
       colorMappings.proprieta[val] = colorList[idx]
     })
@@ -572,7 +768,7 @@ function generateLegendColorMap(markers, highlightOption) {
       colorMappings.lotto[val] = colorList[idx]
     })
   } else if (highlightOption === "TIPO_LAMPADA") {
-    uniqueValues = Array.from(new Set(markers.map(marker => (marker.lampada_potenza || '').split(' ')[0]).filter(Boolean)))
+    uniqueValues = Array.from(new Set(markers.map(marker => getTipoLampada(marker)).filter(Boolean)))
     const colorList = getColorList(uniqueValues.length)
     uniqueValues.forEach((val, idx) => {
       colorMappings.tipo_lampada[val] = colorList[idx]
@@ -584,6 +780,8 @@ function generateLegendColorMap(markers, highlightOption) {
       colorMappings.tipo_apparecchio[val] = colorList[idx]
     })
   }
+
+  applyFcQuadroToLegendMap(colorMappings)
 
   return colorMappings
 }
@@ -762,4 +960,55 @@ const filterMarkers = (markers, filterType, map, selectedProprietaFilter) => {
   return filteredMarkers
 }
 
-export { createMarkers, setupMarkerClustering, filterMarkers, currentClusterer, cleanupMapResources, updateMarkerColors, generateLegendColorMap }
+/**
+ * Inizializza un MarkerClusterer vuoto (per caricamento a batch).
+ * Pulisce risorse precedenti.
+ */
+const initEmptyClusterer = async (map) => {
+  if (!window.google || !window.google.maps || !map) {
+    console.error("Google Maps API not loaded")
+    return null
+  }
+
+  cleanupMapResources()
+  await window.google.maps.importLibrary("marker")
+  await window.google.maps.importLibrary("core")
+  ensureMarkerStyles()
+
+  currentClusterer = new MarkerClusterer({
+    map,
+    markers: [],
+    renderer: createCustomClusterRenderer(),
+    algorithm: new GridAlgorithm({
+      gridSize: 60,
+      maxZoom: 15,
+      minClusterSize: 3,
+    }),
+  })
+
+  return currentClusterer
+}
+
+/**
+ * Aggiunge marker già creati al clusterer corrente (caricamento progressivo).
+ * @param {{ ref: google.maps.marker.AdvancedMarkerElement }[]} markerObjects
+ */
+const appendMarkersToClusterer = (markerObjects) => {
+  if (!currentClusterer || !markerObjects?.length) return
+  const refs = markerObjects.map((m) => m.ref).filter(Boolean)
+  if (refs.length === 0) return
+  currentClusterer.addMarkers(refs)
+}
+
+export {
+  createMarkers,
+  setupMarkerClustering,
+  filterMarkers,
+  currentClusterer,
+  cleanupMapResources,
+  updateMarkerColors,
+  generateLegendColorMap,
+  initEmptyClusterer,
+  appendMarkersToClusterer,
+  groupDifferenteMarkers,
+}

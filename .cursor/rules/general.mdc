@@ -1,0 +1,22 @@
+---
+description: "Lighting-map - stack e convenzioni generali"
+alwaysApply: true
+---
+
+Progetto: Lighting-map, gestione illuminazione pubblica comunale.
+Stack: React 19, Vite 6, Tailwind CSS v4 (plugin @tailwindcss/vite),
+React Router v7, Context API per lo stato globale, axios per le chiamate HTTP.
+
+Convenzioni:
+- Componenti funzionali con arrow function, mai class component.
+- Named export per componenti condivisi, default export solo per pagine/route.
+- Notifiche utente con react-hot-toast, mai alert() nativi.
+- Icone: preferisci lucide-react (già usato da shadcn). Non introdurre nuove
+  librerie di icone: nel progetto convivono già FontAwesome, Heroicons,
+  react-icons, react-feather, rocketicons — non aggiungerne altre, e quando
+  tocchi un componente valuta se puoi migrarlo a lucide-react.
+- Non aggiungere styled-components: nel progetto è presente come dipendenza
+  ma lo standard è Tailwind utility-first; se trovi styled-components in un
+  file che stai modificando, segnalalo invece di riprodurre il pattern.
+- ESLint flat config (eslint.config.js): rispetta le regole react-hooks e
+  react-refresh già configurate, non disabilitarle inline senza motivo esplicito.

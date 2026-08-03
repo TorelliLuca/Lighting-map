@@ -27,6 +27,7 @@ export default function SearchBar({
   onHistoryClick,
   onRemoveHistory,
   isLoading,
+  disabled = false,
 }) {
   const [inputFocused, setInputFocused] = useState(false)
   const [showDropdown, setShowDropdown] = useState(false)
@@ -51,20 +52,22 @@ export default function SearchBar({
   // Gestione submit
   const handleSubmit = (e) => {
     e.preventDefault()
+    if (disabled) return
     if (onSubmit) onSubmit()
   }
 
   // Gestione clear
   const handleClear = () => {
+    if (disabled) return
     setSearchQuery("")
     if (onClear) onClear()
     inputRef.current?.focus()
   }
 
   // Mostra storico solo se barra vuota E input in focus
-  const showHistory = inputFocused && !searchQuery.trim() && history.length > 0
+  const showHistory = !disabled && inputFocused && !searchQuery.trim() && history.length > 0
   // Mostra suggerimenti se input in focus, query non vuota e ci sono suggerimenti
-  const showSuggestionsDropdown = inputFocused && suggestions.length > 0
+  const showSuggestionsDropdown = !disabled && inputFocused && suggestions.length > 0
   // Mostra dropdown se storico o suggerimenti
   const showDropdownMenu = showHistory || showSuggestionsDropdown
 
@@ -81,7 +84,10 @@ export default function SearchBar({
 
 
   return (
-    <div className="w-full max-w-md mx-auto sticky top-0 z-[9999]">
+    <div
+      className={`w-full max-w-md mx-auto sticky top-0 z-[9999] ${disabled ? "opacity-50" : ""}`}
+      title={disabled ? "Disponibile al termine del caricamento" : undefined}
+    >
       <form
         onSubmit={handleSubmit}
         className="flex items-center bg-black/40 backdrop-blur-xl border border-blue-500/30 shadow-lg rounded-2xl px-2 py-1 relative transition-all duration-200"
@@ -96,17 +102,19 @@ export default function SearchBar({
           type="text"
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
-          placeholder="Cerca..."
-          className="flex-1 bg-transparent outline-none text-white placeholder-blue-300/70 px-3 py-2 text-base"
-          onFocus={() => setInputFocused(true)}
+          placeholder={disabled ? "Caricamento in corso…" : "Cerca..."}
+          disabled={disabled}
+          className="flex-1 bg-transparent outline-none text-white placeholder-blue-300/70 px-3 py-2 text-base disabled:cursor-not-allowed"
+          onFocus={() => !disabled && setInputFocused(true)}
           onBlur={() => setTimeout(() => setInputFocused(false), 150)}
         />
         {/* Select custom */}
         <div className="relative" ref={dropdownRef}>
           <button
             type="button"
-            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-900/40 border border-blue-500/20 text-blue-200 hover:bg-blue-900/60 transition-colors"
-            onClick={() => setShowDropdown(v => !v)}
+            disabled={disabled}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-900/40 border border-blue-500/20 text-blue-200 hover:bg-blue-900/60 transition-colors disabled:cursor-not-allowed disabled:hover:bg-blue-900/40"
+            onClick={() => !disabled && setShowDropdown(v => !v)}
             tabIndex={0}
           >
             {filterOptions.find(opt => opt.value === searchFilter)?.icon}

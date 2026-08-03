@@ -1,17 +1,139 @@
 "use client"
+import { useRef, useState } from "react"
 import {
   clearBlanket,
   translateString,
   transformDateToIT,
   listIgnoratedFieldsPL,
   listIgnoratedFieldsQE,
+  orderInfoWindowEntries,
 } from "../utils/utils"
-import React from "react"
+import { canSeeTopologyAnomalies, toIdString } from "../utils/topologyLines"
+import {
+  MapPin,
+  Navigation,
+  CheckCircle2,
+  AlertTriangle,
+  Pencil,
+  X,
+  Trash,
+  ArrowDown,
+  Cable,
+  Unplug,
+  TriangleAlert,
+} from "lucide-react"
+import { clsx } from "clsx"
+import { twMerge } from "tailwind-merge"
+import {
+  INFO_WINDOW_ACTIONS,
+  getVisibleActions,
+  getPrimaryAction,
+  getSecondaryActions,
+  getOverflowActions,
+} from "../utils/infoWindowActions"
+import { InfoWindowOverflowMenu } from "./InfoWindowOverflowMenu"
 
-const InfoWindow = ({ content, marker, city, userData, onEditClick, onDeleteClick, mapType, onBeforeReport, idMarker }) => {
+const cn = (...inputs) => twMerge(clsx(inputs))
+
+const POPUP_SHELL =
+  "content-container relative w-[min(calc(100vw-1.5rem),380px)] max-w-md  border border-transparent bg-white text-slate-900 "
+
+/** Solo popup Google: altezza fissa sull’area scroll, barra azioni in flusso (no flex-1). */
+const POPUP_SCROLL_CLASS =
+  "max-h-[min(45vh,320px)] overflow-y-auto overscroll-contain px-3 py-3 sm:px-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-slate-100 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-400"
+
+const SHEET_SHELL =
+  "content-container relative flex h-full w-full flex-col overflow-hidden rounded-t-2xl bg-white text-slate-900 shadow-2xl"
+
+const SHEET_DISMISS_THRESHOLD = 110
+const SHEET_EXPAND_THRESHOLD = -55
+const SHEET_MAX_DRAG_UP = -100
+
+const SHEET_SCROLL_CLASS =
+  "min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-slate-100 [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-400"
+
+const LABEL_CLASS = "text-xs font-semibold uppercase tracking-wide text-slate-500"
+const VALUE_CLASS = "text-sm text-slate-800"
+const TITLE_CLASS = "text-base font-semibold text-blue-900 sm:text-lg uppercase"
+
+const ACTION_STYLES = {
+  operazione: "border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800",
+  segnala: "border-amber-700 bg-amber-600 text-white hover:bg-amber-700",
+  streetview: "border-slate-300 bg-white text-slate-800 hover:bg-slate-100",
+  goto: "border-blue-700 bg-blue-700 text-white hover:bg-blue-800",
+  modifica: "border-slate-300 bg-white text-slate-800 hover:bg-slate-100",
+  set_parent: "border-slate-300 bg-white text-slate-800 hover:bg-slate-100",
+  clear_parent: "border-slate-300 bg-white text-slate-800 hover:bg-slate-100",
+}
+
+const SECONDARY_STYLE =
+  "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+
+const iconClass = "h-5 w-5 shrink-0"
+
+const renderFieldRow = (key, label, value, isTitle = false) => (
+  <div
+    key={key}
+    className={cn(
+      "rounded-lg border border-white  px-1 py-1",
+      isTitle,
+    )}
+  >
+    {isTitle ? (
+      <p className={TITLE_CLASS}>{value}</p>
+    ) : (
+      <>
+        <p className={LABEL_CLASS}>{label}</p>
+        <p className={cn(VALUE_CLASS, "mt-0.5 break-words")}>{value}</p>
+      </>
+    )}
+  </div>
+)
+
+const renderHistoryDetails = (key, dateString, typeLabel, body) => (
+  <details key={key} className="group overflow-hidden rounded-lg border border-slate-200 bg-white">
+    <summary className="cursor-pointer list-none px-3 py-2 text-sm transition-colors hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <span className="font-medium text-blue-700">{dateString}</span>
+          <span className="text-slate-500"> · </span>
+          <span className="text-slate-700">{typeLabel}</span>
+        </div>
+        <span className="shrink-0 text-xs text-slate-400 transition-transform group-open:rotate-180">
+          <ArrowDown className="h-4 w-4" />
+        </span>
+      </div>
+    </summary>
+    <div className="border-t border-slate-100 px-3 py-2 text-sm leading-relaxed text-slate-600">
+      {body}
+    </div>
+  </details>
+)
+
+const InfoWindow = ({
+  content,
+  marker,
+  city,
+  userData,
+  onEditClick,
+  onDeleteClick,
+  mapType,
+  onBeforeReport,
+  idMarker,
+  variant = "popup",
+  onClose,
+  onSetParentClick,
+  onClearParentClick,
+  topologyPower = null,
+}) => {
+  // Prop mantenuta per compatibilità API caller; Elimina non è più in UI primaria
+  void onDeleteClick
   const handleToggleStreetView = () => {
-    if (mapType === "maplibre"){
-      window.open(`https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${marker.lat},${marker.lng}`, "_blank")
+    if (mapType === "maplibre") {
+      window.open(
+        `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${marker.lat},${marker.lng}`,
+        "_blank",
+      )
     }
     if (typeof window.toggleStreetView === "function") {
       window.toggleStreetView(marker.lat, marker.lng)
@@ -32,10 +154,10 @@ const InfoWindow = ({ content, marker, city, userData, onEditClick, onDeleteClic
     if (onBeforeReport) {
       onBeforeReport({
         city,
-        id:idMarker
-      });
+        id: idMarker,
+      })
     } else {
-      window.reportPoint(city, idMarker);
+      window.reportPoint(city, idMarker)
     }
   }
 
@@ -51,299 +173,313 @@ const InfoWindow = ({ content, marker, city, userData, onEditClick, onDeleteClic
     }
   }
 
-  // Calcolo i bottoni visibili
-  const buttons = [
-    {
-      key: 'streetview',
-      visible: true,
-      onClick: handleToggleStreetView,
-      className: 'bg-secondary text-secondary-foreground border border-secondary hover:bg-secondary/80',
-      title: 'Visualizza in Street View',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="black" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
-        </svg>
-      ),
-      label: 'Street view',
-    },
-    {
-      key: 'goto',
-      visible: true,
-      onClick: handleNavigateToLocation,
-      className: 'bg-accent text-accent-foreground border border-accent hover:bg-accent/80',
-      title: 'Naviga verso questo punto',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="black" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-        </svg>
-      ),
-      label: 'Vai al punto',
-    },
-    {
-      key: 'risolvi',
-      visible: userData?.user_type !== 'DEFAULT_USER',
-      onClick: handleStartOperation,
-      className: 'bg-primary text-primary-foreground border border-primary hover:bg-primary/80',
-      title: "Avvia un'operazione per risolvere la segnalazione",
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="#16a34a" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.563 9.75a12.014 12.014 0 00-3.427 5.136L9 12.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      ),
-      label: 'Risolvi',
-    },
-    {
-      key: 'segnala',
-      visible: true,
-      onClick: handleReportPoint,
-      className: 'bg-destructive text-destructive-foreground border border-destructive hover:bg-destructive/80',
-      title: 'Segnala questo punto',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="#dc2626" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-        </svg>
-      ),
-      label: 'Segnala',
-    },
-    {
-      key: 'modifica',
-      visible: userData?.user_type === 'SUPER_ADMIN',
-      onClick: handleEditClick,
-      className: 'bg-secondary text-secondary-foreground border border-secondary hover:bg-secondary/80',
-      title: 'Modifica questo punto luce',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="black" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-        </svg>
-      ),
-      label: 'Modifica',
-    },
-    {
-      key: 'elimina',
-      visible: userData?.user_type === 'SUPER_ADMIN',
-      onClick: handleDeleteClick,
-      className: 'bg-destructive text-destructive-foreground border border-destructive hover:bg-destructive/80',
-      title: 'Elimina questo punto luce',
-      icon: (
-        <svg xmlns="http://www.w3.org/2000/svg" className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="black" strokeWidth="2">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-        </svg>
-      ),
-      label: 'Elimina',
-    },
-  ];
-  const visibleButtons = buttons.filter(b => b.visible);
-
-  // Calcolo la larghezza minima in base al numero di bottoni (dimensione fissa 72px per bottone + gap)
-  const minButtonCount = visibleButtons.length > 0 ? visibleButtons.length : 3;
-  const minWidth = `${minButtonCount * 72 + (minButtonCount - 1) * 8}px`;
-  const widthClass = marker.marker === "QE"
-    ? `w-full min-w-[${minWidth}] max-w-lg`
-    : `w-full min-w-[${minWidth}] max-w-md`;
-
-  // Responsive: padding-bottom fisso per non sovrapporre mai il testo ai pulsanti
-  const contentPaddingBottom = 90;
-
-  // Se non ci sono dati, mostra un messaggio di fallback
-  if (!content || Object.keys(content).length === 0) {
-    return (
-      <div className={`p-4 rounded-lg shadow-lg border border-black relative ${widthClass}`} style={{
-        minWidth,
-        background: '#fff',
-        color: '#111'
-      }}>
-        <div className="text-center text-muted-foreground py-8">Nessun dato disponibile</div>
-        <div className="sticky bottom-0 left-0 right-0 rounded-b-lg p-0 z-10" style={{
-          background: '#fff',
-          borderBottom: 'none'
-        }}>
-          <div className="flex w-full gap-2 justify-center">
-            {visibleButtons.map(btn => (
-              <button
-                key={btn.key}
-                onClick={btn.onClick}
-                className={`flex flex-col items-center justify-center p-2 rounded-lg border border-black text-xs font-medium transition-colors duration-200 min-w-[72px] min-h-[56px] bg-white text-black`}
-                title={btn.title}
-                style={{flex: `0 0 72px`}}
-              >
-                {btn.icon}
-                <span className="mt-1 whitespace-nowrap">{btn.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
+  const handleSetParent = () => {
+    if (onSetParentClick) onSetParentClick(marker)
   }
 
-  return (
-    <div className={`p-2 md:p-4 pb-0 rounded-lg shadow-lg border  relative w-full max-w-xs md:max-w-md`} style={{
-      minWidth: '200px',
-      background: '#fff',
-      color: '#111',
-      maxHeight: '100vh',
-    }}>
-      {/* Main content area */}
-      <div
-        className="overflow-y-auto mb-4 custom-scrollbar h-250 md:h-150"
-        style={{
-          paddingBottom: contentPaddingBottom,
-          //maxHeight: '600vh',
-        }}
-      >
-        {Object.entries(content)
-          .filter(([_key, value]) => !Array.isArray(value) || value.length > 0)
-          .map(([key, value]) => {
-            if (Array.isArray(value)) {
-              return (
-                <div className="mb-4" key={key}>
-                  <strong className="text-blue-900">{key.replace(/_/g, " ")}:</strong>
-                  <ul className="mt-2 space-y-1">
-                    {value.reverse().map((item, index) => {
-                      if (item.report_type) {
-                        const dateString = transformDateToIT(item.report_date)
-                        return (
-                          <details className="mb-2" key={`${key}-report-${index}`}>
-                            <summary className="cursor-pointer p-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200">
-                              <span className="text-blue-600">{dateString}</span> -{" "}
-                              {translateString(item.report_type).replace(/_/g, " ")}
-                            </summary>
-                            <div className="mt-2 pl-4 text-gray-700">{item.description}</div>
-                          </details>
-                        )
-                      } else if (item.operation_type) {
-                        const dateString = transformDateToIT(item.operation_date)
-                        return (
-                          <details className="mb-2" key={`${key}-op-${index}`}>
-                            <summary className="cursor-pointer p-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors duration-200">
-                              <span className="text-blue-600">{dateString}</span> -{" "}
-                              {translateString(item.operation_type).replace(/_/g, " ")}
-                            </summary>
-                            <div className="mt-2 pl-4 text-gray-700">{item.note}</div>
-                          </details>
-                        )
-                      } else {
-                        return (
-                          <li className="p-2 bg-gray-100 rounded-lg mb-1" key={`${key}-item-${index}`}>
-                            {translateString(item).replace(/_/g, " ")}
-                          </li>
-                        )
-                      }
-                    })}
-                  </ul>
-                </div>
-              )
-            } else {
-              // Handling non-array fields
-              if (marker.marker === "PL") {
-                if (listIgnoratedFieldsPL.includes(key)) return null
-                if (key === "marker"){
-                  value = "Punto luce"
-                  return (
-                  <div className="mb-2" key={key}>
-                    <strong className="text-blue-800 text-xl">{value}</strong>
-                  </div>
-                )}else if (key === "data_creazione"){
-                  return (
-                  <div className="mb-2" key={key}>
-                    <strong className="text-blue-800">{key.replace(/_/g, " ")}:</strong> {transformDateToIT(value) || "N.D."}
-                  </div>
-                )
-                }
-                return (
-                  <div className="mb-2" key={key}>
-                    <strong className="text-blue-800">{key.replace(/_/g, " ")}:</strong> {value || "N.D."}
-                  </div>
-                )
-              } else {
-                if (listIgnoratedFieldsQE.includes(key)) return null
-                if (key === "marker"){
-                  value = "Quadro elettrico"
-                  return (
-                  <div className="mb-2" key={key}>
-                    <strong className="text-blue-800 text-xl">{value}</strong>
-                  </div>
-                )}else if (key === "data_creazione"){
-                  return (
-                  <div className="mb-2" key={key}>
-                    <strong className="text-blue-800">{key.replace(/_/g, " ")}:</strong> {transformDateToIT(value) || "N.D."}
-                  </div>
-                )
-                }
-                if (key === "numero_palo"){
-                  key = "Numero quadro"
-                  return (
-                  <div className="mb-2" key={key}>
-                    <strong className="text-blue-800">{key.replace(/_/g, " ")}:</strong> {value || "N.D."}
-                  </div>
-                )}else{
-                return (
-                  <div className="mb-2" key={key}>
-                    <strong className="text-blue-800">{key.replace(/_/g, " ")}:</strong> {value || "N.D."}
-                  </div>
-                )}
-              }
-            }
-          })}
-      </div>
+  const handleClearParent = () => {
+    if (onClearParentClick) onClearParentClick(marker)
+  }
 
-      {/* Button bar sticky in basso */}
-      <div
-        className="sticky bottom-0 left-0 right-0 rounded-b-lg p-0 z-10"
-        style={{
-          background: '#fff',
-          borderBottom: 'none',
-        }}
-      >
-        <div
-          className="flex w-full gap-1 justify-center flex-nowrap px-1 md:px-4 overflow-x-auto md:overflow-x-visible"
-          style={{minWidth: 0}}
-        >
-          {visibleButtons.map(btn => (
-            <button
-              key={btn.key}
-              onClick={btn.onClick}
-              className={`flex flex-col items-center justify-center rounded-lg border border-black font-medium transition-colors duration-200 bg-white text-black min-w-[36px] md:min-w-17.5 min-h-[36px] text-[10px] md:p-2 flex-none md:flex-1`}
-              title={btn.title}
-              style={{}}
-            >
-              {React.cloneElement(btn.icon, { className: 'w-5 h-5' })}
-              <span className="mt-1 whitespace-nowrap leading-tight md:text-xs">{btn.label}</span>
-            </button>
-          ))}
-        </div>
+  const handlers = {
+    operazione: handleStartOperation,
+    segnala: handleReportPoint,
+    streetview: handleToggleStreetView,
+    goto: handleNavigateToLocation,
+    modifica: handleEditClick,
+    elimina: handleDeleteClick,
+    set_parent: handleSetParent,
+    clear_parent: handleClearParent,
+  }
+
+  const icons = {
+    operazione: <CheckCircle2 className={iconClass} strokeWidth={2} aria-hidden="true" />,
+    segnala: <AlertTriangle className={iconClass} strokeWidth={2} aria-hidden="true" />,
+    streetview: <MapPin className={iconClass} strokeWidth={2} aria-hidden="true" />,
+    goto: <Navigation className={iconClass} strokeWidth={2} aria-hidden="true" />,
+    modifica: <Pencil className={iconClass} strokeWidth={2} aria-hidden="true" />,
+    elimina: <Trash className={iconClass} strokeWidth={2} aria-hidden="true" />,
+    set_parent: <Cable className={iconClass} strokeWidth={2} aria-hidden="true" />,
+    clear_parent: <Unplug className={iconClass} strokeWidth={2} aria-hidden="true" />,
+  }
+
+  const userRole = userData?.user_type
+  const showUnlinkedNote =
+    canSeeTopologyAnomalies(userData) &&
+    marker?.marker === "PL" &&
+    !marker?.is_differente_group &&
+    !toIdString(marker?.parent ?? content?.parent)
+  const visibleActions = getVisibleActions(INFO_WINDOW_ACTIONS, userRole, marker)
+  const primaryAction = getPrimaryAction(visibleActions, userRole)
+  const secondaryActions = getSecondaryActions(visibleActions, primaryAction)
+  const overflowActions = getOverflowActions(
+    visibleActions,
+    primaryAction,
+    secondaryActions,
+  )
+
+  const toRenderable = (action, styleOverride) => ({
+    ...action,
+    onClick: handlers[action.id],
+    icon: icons[action.id],
+    className: styleOverride || ACTION_STYLES[action.id],
+  })
+
+  const primaryBtn = primaryAction ? toRenderable(primaryAction) : null
+  const secondaryBtns = secondaryActions.map((a) =>
+    toRenderable(a, SECONDARY_STYLE),
+  )
+  const overflowItems = overflowActions.map((a) => toRenderable(a))
+
+  const renderActionBar = () => (
+    <div className="border-t border-slate-200 bg-white p-2 sm:p-2.5">
+      <div className="flex items-stretch gap-2">
+        {primaryBtn && (
+          <button
+            type="button"
+            onClick={primaryBtn.onClick}
+            title={primaryBtn.title}
+            className={cn(
+              "inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
+              primaryBtn.className,
+            )}
+          >
+            {primaryBtn.icon}
+            <span>{primaryBtn.label}</span>
+          </button>
+        )}
+        {secondaryBtns.map((btn) => (
+          <button
+            key={btn.id}
+            type="button"
+            onClick={btn.onClick}
+            title={btn.title}
+            className={cn(
+              "inline-flex min-h-11 min-w-11 flex-1 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500",
+              btn.className,
+            )}
+          >
+            {btn.icon}
+            <span>{btn.label}</span>
+          </button>
+        ))}
+        <InfoWindowOverflowMenu items={overflowItems} />
       </div>
-      <style>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 8px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: #e5e7eb;
-          border-radius: 8px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: #f9fafb;
-          border-radius: 8px;
-        }
-        .custom-scrollbar {
-          scrollbar-width: thin;
-          scrollbar-color: #e5e7eb #f9fafb;
-        }
-        @media (min-width: 768px) {
-          .custom-scrollbar {
-            max-height: 60vh !important;
+    </div>
+  )
+
+  const renderContentFields = () =>
+    orderInfoWindowEntries(content)
+      .filter(([, value]) => !Array.isArray(value) || value.length > 0)
+      .map(([key, value]) => {
+        if (Array.isArray(value)) {
+          return (
+            <div className="space-y-2" key={key}>
+              <p className={LABEL_CLASS}>{key.replace(/_/g, " ")}</p>
+              <ul className="space-y-2">
+                {value.reverse().map((item, index) => {
+                  if (item.report_type) {
+                    const dateString = transformDateToIT(item.report_date)
+                    return (
+                      <li key={`${key}-report-${index}`}>
+                        {renderHistoryDetails(
+                          `${key}-report-${index}`,
+                          dateString,
+                          translateString(item.report_type).replace(/_/g, " "),
+                          item.description,
+                        )}
+                      </li>
+                    )
+                  } else if (item.operation_type) {
+                    const dateString = transformDateToIT(item.operation_date)
+                    return (
+                      <li key={`${key}-op-${index}`}>
+                        {renderHistoryDetails(
+                          `${key}-op-${index}`,
+                          dateString,
+                          translateString(item.operation_type).replace(/_/g, " "),
+                          item.note,
+                        )}
+                      </li>
+                    )
+                  } else {
+                    return (
+                      <li
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                        key={`${key}-item-${index}`}
+                      >
+                        {translateString(item).replace(/_/g, " ")}
+                      </li>
+                    )
+                  }
+                })}
+              </ul>
+            </div>
+          )
+        } else {
+          if (marker.marker === "PL") {
+            if (listIgnoratedFieldsPL.includes(key)) return null
+            if (key === "marker") {
+              value = "Punto luce"
+              return renderFieldRow(key, null, value, true)
+            } else if (key === "data_creazione") {
+              return renderFieldRow(
+                key,
+                key.replace(/_/g, " "),
+                transformDateToIT(value) || "N.D.",
+              )
+            }
+            return renderFieldRow(key, key.replace(/_/g, " "), value || "N.D.")
+          } else {
+            if (listIgnoratedFieldsQE.includes(key)) return null
+            if (key === "marker") {
+              value = "Quadro elettrico"
+              return renderFieldRow(key, null, value, true)
+            } else if (key === "data_creazione") {
+              return renderFieldRow(
+                key,
+                key.replace(/_/g, " "),
+                transformDateToIT(value) || "N.D.",
+              )
+            }
+            if (key === "numero_palo") {
+              key = "Numero quadro"
+              return renderFieldRow(key, key.replace(/_/g, " "), value || "N.D.")
+            } else {
+              return renderFieldRow(key, key.replace(/_/g, " "), value || "N.D.")
+            }
           }
         }
-        @media (max-width: 640px) {
-          .custom-scrollbar::-webkit-scrollbar {
-            display: none;
-          }
-          .custom-scrollbar {
-            scrollbar-width: none;
-          }
-        }
-      `}</style>
+      })
+
+  const isSheet = variant === "sheet"
+  const [sheetOffsetY, setSheetOffsetY] = useState(0)
+  const [sheetExpanded, setSheetExpanded] = useState(false)
+  const [isDraggingSheet, setIsDraggingSheet] = useState(false)
+  const isDraggingSheetRef = useRef(false)
+  const sheetDragStartY = useRef(0)
+  const sheetDragStartOffset = useRef(0)
+
+  const handleSheetDragStart = (event) => {
+    isDraggingSheetRef.current = true
+    setIsDraggingSheet(true)
+    sheetDragStartY.current = event.clientY
+    sheetDragStartOffset.current = sheetOffsetY
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const handleSheetDragMove = (event) => {
+    if (!isDraggingSheetRef.current) return
+    const delta = event.clientY - sheetDragStartY.current
+    const maxUp = sheetExpanded ? -24 : SHEET_MAX_DRAG_UP
+    const nextOffset = Math.max(maxUp, sheetDragStartOffset.current + delta)
+    setSheetOffsetY(nextOffset)
+  }
+
+  const handleSheetDragEnd = () => {
+    if (!isDraggingSheetRef.current) return
+    isDraggingSheetRef.current = false
+    setIsDraggingSheet(false)
+
+    if (sheetOffsetY > SHEET_DISMISS_THRESHOLD) {
+      setSheetOffsetY(window.innerHeight)
+      window.setTimeout(() => onClose?.(), 220)
+      return
+    }
+
+    if (sheetOffsetY < SHEET_EXPAND_THRESHOLD) {
+      setSheetExpanded(true)
+      setSheetOffsetY(0)
+      return
+    }
+
+    setSheetExpanded(false)
+    setSheetOffsetY(0)
+  }
+
+  const shellClass = isSheet
+    ? cn(SHEET_SHELL, sheetExpanded ? "max-h-[94vh]" : "max-h-[85vh]")
+    : POPUP_SHELL
+  const scrollClass = isSheet ? SHEET_SCROLL_CLASS : POPUP_SCROLL_CLASS
+  const hasContent = content && Object.keys(content).length > 0
+
+  return (
+    <div
+      className={shellClass}
+      style={
+        isSheet
+          ? {
+              transform: `translateY(${sheetOffsetY}px)`,
+              transition: isDraggingSheet
+                ? "none"
+                : "transform 0.25s ease-out, max-height 0.25s ease-out",
+            }
+          : undefined
+      }
+    >
+      {isSheet && (
+        <div
+          className="relative flex shrink-0 touch-none cursor-grab items-center justify-center px-3 py-2 active:cursor-grabbing"
+          onPointerDown={handleSheetDragStart}
+          onPointerMove={handleSheetDragMove}
+          onPointerUp={handleSheetDragEnd}
+          onPointerCancel={handleSheetDragEnd}
+          aria-label="Trascina per spostare il pannello"
+        >
+          <div className="mx-auto h-1.5 w-10 rounded-full bg-slate-300" aria-hidden="true" />
+          {onClose && (
+            <button
+              type="button"
+              aria-label="Chiudi dettagli"
+              onClick={onClose}
+              onPointerDown={(event) => event.stopPropagation()}
+              className="absolute right-2 top-2 inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          )}
+        </div>
+      )}
+      <div
+        className={cn(
+          scrollClass,
+          !hasContent && "flex items-center justify-center",
+          hasContent && "space-y-2 sm:space-y-2.5",
+        )}
+      >
+        {hasContent ? (
+          <>
+            {showUnlinkedNote && (
+              <>
+              
+              <div
+                className="rounded-lg border border-orange-300/70 bg-orange-50 px-3 py-2 text-sm text-orange-900 flex items-center gap-2"
+                role="status"
+              >
+              <TriangleAlert className="h-5 w-5 text-orange-500 " />
+                Nessuna linea elettrica collegata.
+              </div>
+              </>
+            )}
+            {canSeeTopologyAnomalies(userData) && topologyPower && !showUnlinkedNote && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 space-y-1">
+                <p>
+                  <span className={LABEL_CLASS}>Potenza locale</span>
+                  <span className="ml-2 font-medium">{topologyPower.local ?? 0} W</span>
+                </p>
+                <p>
+                  <span className={LABEL_CLASS}>Potenza a valle</span>
+                  <span className="ml-2 font-medium">{topologyPower.subtree ?? 0} W</span>
+                </p>
+              </div>
+            )}
+            {renderContentFields()}
+          </>
+        ) : (
+          <p className="py-8 text-center text-sm text-slate-500">Nessun dato disponibile</p>
+        )}
+      </div>
+      {renderActionBar()}
     </div>
   )
 }

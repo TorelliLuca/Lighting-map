@@ -8,12 +8,18 @@ import Dashboard from "./pages/Dashboard";
 import Report from "./pages/Report";
 import Operation from "./pages/Operation";
 import { UserProvider, UserContext } from "./context/UserContext";
+import { PwaProvider } from "./context/PwaContext";
+import { PushNotificationsProvider } from "./context/PushNotificationsContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ConfirmEmail from "./pages/ConfirmEmail";
 import ResetPassword from "./pages/ResetPassword";
 import MyOrganization from "./pages/MyOrganization";
 import OrganizationManagement from "./pages/OrganizationManagement";
 import NotFound from "./pages/NotFound";
+import Manual from "./pages/Manual";
+import { PwaBootstrap } from "./components/PwaBootstrap";
+
+const basePath = import.meta.env.VITE_PUBLIC_URL || "";
 
 // Mappatura delle rotte con i titoli corrispondenti
 const routeTitles = {
@@ -27,6 +33,7 @@ const routeTitles = {
     "/operation": "Operazioni | Lighting Map",
     "/my-organization": "La mia Organizzazione | Lighting Map",
     "/organization-management": "Gestione Organizzazioni | Lighting Map",
+    "/manual": "Manuale | Lighting Map",
 };
 
 // Hook per gestire dinamicamente il titolo della pagina
@@ -42,14 +49,17 @@ const usePageTitle = () => {
 const useFavicon = () => {
     useEffect(() => {
         const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-        const link = document.querySelector("link[rel*='icon']") || document.createElement('link');
-        link.rel = 'shortcut icon';
+        let link = document.querySelector("link[rel='icon']");
+        if (!link) {
+            link = document.createElement('link');
+            link.rel = 'icon';
+            document.head.appendChild(link);
+        }
         link.type = 'image/png';
-        document.head.appendChild(link);
 
         const updateFavicon = (isDark) => {
-            const basePath = import.meta.env.VITE_PUBLIC_URL || "";
-            link.href = isDark ? `${basePath}/faviconWhite.png` : `${basePath}/faviconDark.png`;
+            const basePath = import.meta.env.BASE_URL || '/';
+            link.href = isDark ? `${basePath}faviconWhite.png` : `${basePath}faviconDark.png`;
         };
 
         const handleChange = (e) => updateFavicon(e.matches);
@@ -67,9 +77,13 @@ function App() {
     useFavicon();
 
     return (
-        <BrowserRouter basename="/LIGHTING-MAP">
+        <BrowserRouter basename={basePath}>
             <UserProvider>
-                <AppContent />
+                <PwaProvider>
+                    <PushNotificationsProvider>
+                        <AppContent />
+                    </PushNotificationsProvider>
+                </PwaProvider>
             </UserProvider>
         </BrowserRouter>
     );
@@ -82,12 +96,14 @@ const AppContent = () => {
 
     return (
         <div className="min-h-screen bg-gradient-to-b from-gray-900 to-black text-white">
+            <PwaBootstrap />
             <Routes>
                 <Route path="/" element={<Login />} />
                 <Route path="/login" element={<Login />} />
                 <Route path="/signin" element={<SignIn />} />
                 <Route path="/confirm-email" element={<ConfirmEmail />} />
                 <Route path="/reset-password" element={<ResetPassword />} />
+                <Route path="/manual" element={<Manual />} />
                 
                 {/* Rotte protette */}
                 <Route element={<ProtectedRoute />}>

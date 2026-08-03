@@ -1,0 +1,18 @@
+---
+description: "Componenti React e UI shadcn"
+globs: ["src/components/**/*.{jsx,tsx}", "src/**/*.jsx"]
+alwaysApply: false
+---
+
+- Usa i primitivi shadcn/ui esistenti in src/components/ui invece di
+  ricrearli da zero (Button, Dialog, Select, ecc.).
+- I componenti in src/components/ui restano puramente presentazionali:
+  nessuna chiamata axios o logica di business al loro interno.
+- Stile solo con classi utility Tailwind; usa clsx + tailwind-merge (cn())
+  per classi condizionali, come già fatto nel resto del progetto.
+- Animazioni: usa framer-motion in modo coerente con gli usi esistenti,
+  evita di introdurre altre librerie di animazione.
+- Per grafici/dashboard usa recharts (già in uso), non aggiungere altre
+  librerie di charting.
+- Componenti responsive: verifica sempre il comportamento su mobile/tablet/
+  desktop, il progetto è dichiarato fully responsive.

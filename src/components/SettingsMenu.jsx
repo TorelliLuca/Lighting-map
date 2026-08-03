@@ -1,11 +1,40 @@
 import { useState, useRef, useEffect } from "react"
-import { SlidersHorizontal, X, Info, Download, Plus, HelpCircle } from "lucide-react"
+import { SlidersHorizontal, X, Info, Download, HelpCircle, Printer, AlertTriangle, DownloadCloud } from "lucide-react"
+import toast from "react-hot-toast"
 import InfoTooltip from "./ui/InfoTooltip"
+import { usePrintAvailability, PRINT_DISABLED_MESSAGE } from "../hooks/usePrintAvailability"
+import { usePwa } from "../context/PwaContext"
+import PrintExportSideWindow from "./PrintControl"
 
-function SettingsMenu({ showPanelNumber, onTogglePanelNumber, showStreetLampNumber, onToggleStreetLampNumber, onShowStats, onDownloadReport, onAddPoint, onShowFaq, onShowIlluminazionePubblica, isSuperAdmin, visualizationMode, onToggleVisualizationMode, isComplexAllowed, isLoadingCityLightPoints }) {
+function SettingsMenu({
+  showPanelNumber,
+  onTogglePanelNumber,
+  showStreetLampNumber,
+  onToggleStreetLampNumber,
+  showTopologyLines,
+  onToggleTopologyLines,
+  onShowStats,
+  onDownloadReport,
+  onAddPoint,
+  onShowFaq,
+  onShowIlluminazionePubblica,
+  isSuperAdmin,
+  visualizationMode,
+  onToggleVisualizationMode,
+  isComplexAllowed,
+  isLoadingCityLightPoints,
+  map,
+  selectedCity,
+  interactionsDisabled = false,
+}) {
   const [isExpanded, setIsExpanded] = useState(false)
+  const [isPrintPanelOpen, setIsPrintPanelOpen] = useState(false)
+  const [showPrintDisabledHint, setShowPrintDisabledHint] = useState(false)
   const menuRef = useRef(null)
   const buttonRef = useRef(null)
+  const { isPrintAvailable, tooltipMessage } = usePrintAvailability(visualizationMode)
+  const { canInstall, isInstalled, isIosSafari, promptInstall } = usePwa()
+  const [showIosInstallHelp, setShowIosInstallHelp] = useState(false)
 
   // Stato per gestire la nuvoletta warning e la sua animazione
   const [showWarning, setShowWarning] = useState(false);
@@ -46,6 +75,36 @@ function SettingsMenu({ showPanelNumber, onTogglePanelNumber, showStreetLampNumb
   }, [showComplexTooltip]);
 
   useEffect(() => {
+    if (!isPrintAvailable) {
+      setIsPrintPanelOpen(false)
+    }
+  }, [isPrintAvailable])
+
+  const handlePrintMapClick = () => {
+    if (!isPrintAvailable) {
+      setShowPrintDisabledHint(true)
+      toast.error(PRINT_DISABLED_MESSAGE)
+      setTimeout(() => setShowPrintDisabledHint(false), 2500)
+      return
+    }
+    setIsExpanded(false)
+    setIsPrintPanelOpen(true)
+  }
+
+  const handleInstallApp = async () => {
+    try {
+      const result = await promptInstall()
+      if (result === "ios-manual") {
+        setShowIosInstallHelp((prev) => !prev)
+        return
+      }
+      if (result) toast.success("Installazione avviata")
+    } catch {
+      toast.error("Installazione non disponibile")
+    }
+  }
+
+  useEffect(() => {
     function handleClickOutside(event) {
       if (
         isExpanded &&
@@ -67,11 +126,13 @@ function SettingsMenu({ showPanelNumber, onTogglePanelNumber, showStreetLampNumb
   }, [isExpanded])
 
   return (
-    <div className="fixed bottom-24 left-6 z-3">
+    <div className={`fixed bottom-24 left-6 z-3 ${interactionsDisabled ? "opacity-50" : ""}`}>
       <button
         ref={buttonRef}
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="p-3 bg-black/70 hover:bg-blue-900/70 text-blue-400 rounded-full backdrop-blur-xl border border-blue-500/40 shadow-[0_0_15px_rgba(59,130,246,0.3)] transition-all duration-300 hover:scale-110"
+        onClick={() => !interactionsDisabled && setIsExpanded(!isExpanded)}
+        disabled={interactionsDisabled}
+        title={interactionsDisabled ? "Disponibile al termine del caricamento" : undefined}
+        className="p-3 bg-black/70 hover:bg-blue-900/70 text-blue-400 rounded-full backdrop-blur-xl border border-blue-500/40 shadow-[0_0_15px_rgba(59,130,246,0.3)] transition-all duration-300 hover:scale-110 disabled:cursor-not-allowed disabled:hover:scale-100"
         aria-label={isExpanded ? "Chiudi impostazioni" : "Apri impostazioni"}
       >
         {isExpanded ? <X className="h-5 w-5" /> : <SlidersHorizontal className="h-5 w-5" />}
@@ -89,7 +150,7 @@ function SettingsMenu({ showPanelNumber, onTogglePanelNumber, showStreetLampNumb
             <div>
               <div className="flex items-center gap-1">
                 <div className="text-blue-300 font-semibold text-xs uppercase mb-2">Azioni</div>
-                <InfoTooltip text="Visualizza statistiche dell'impianto, grafici o scarica il file .csv di resoconto delle segnalazioni" />
+                <InfoTooltip text="Visualizza statistiche dell'impianto, esporta la mappa o scarica il file .csv di resoconto delle segnalazioni" />
               </div>
               <button
                 onClick={onShowStats}
@@ -105,6 +166,41 @@ function SettingsMenu({ showPanelNumber, onTogglePanelNumber, showStreetLampNumb
                 <Download className="h-4 w-4" />
                 Scarica report
               </button>
+              <div className="relative mt-2">
+                <button
+                  type="button"
+                  onClick={handlePrintMapClick}
+                  onMouseEnter={() => {
+                    if (!isPrintAvailable) setShowPrintDisabledHint(true)
+                  }}
+                  onMouseLeave={() => setShowPrintDisabledHint(false)}
+                  onTouchStart={() => {
+                    if (!isPrintAvailable) setShowPrintDisabledHint(true)
+                  }}
+                  onTouchEnd={() => {
+                    if (!isPrintAvailable) setTimeout(() => setShowPrintDisabledHint(false), 2000)
+                  }}
+                  aria-disabled={!isPrintAvailable}
+                  title={tooltipMessage}
+                  className={`flex items-center gap-2 px-4 py-2 border rounded-lg transition-colors w-full ${
+                    isPrintAvailable
+                      ? "text-blue-200 hover:text-white hover:bg-blue-700/30 border-blue-500/30 hover:border-blue-500/50 cursor-pointer"
+                      : "text-blue-200/50 border-blue-500/20 opacity-70 cursor-not-allowed"
+                  } ${isPrintPanelOpen && isPrintAvailable ? "bg-blue-700/30 border-blue-500/50" : ""}`}
+                >
+                  <Printer className="h-4 w-4" />
+                  Stampa mappa
+                </button>
+                {!isPrintAvailable && showPrintDisabledHint && (
+                  <div
+                    role="tooltip"
+                    className="absolute left-full ml-2 top-1/2 -translate-y-1/2 w-52 rounded-lg border border-yellow-400/60 bg-yellow-100 px-3 py-2 text-[11px] text-yellow-900 shadow-lg flex items-start gap-2 z-30 pointer-events-none"
+                  >
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-yellow-600 mt-0.5" />
+                    <span>{PRINT_DISABLED_MESSAGE}</span>
+                  </div>
+                )}
+              </div>
 
             </div>
             {/* Supporto */}
@@ -118,7 +214,7 @@ function SettingsMenu({ showPanelNumber, onTogglePanelNumber, showStreetLampNumb
                 className="flex items-center gap-2 px-4 py-2 text-blue-200 hover:text-white hover:bg-blue-700/30 border border-blue-500/30 hover:border-blue-500/50 rounded-lg transition-colors w-full"
               >
                 <HelpCircle className="h-4 w-4" />
-                FAQ
+                Manuale operativo
               </button>
               <button
                 onClick={onShowIlluminazionePubblica}
@@ -132,7 +228,7 @@ function SettingsMenu({ showPanelNumber, onTogglePanelNumber, showStreetLampNumb
             <div>
               <div className="flex items-center gap-1">
                 <div className="text-blue-300 font-semibold text-xs uppercase mb-2">Preferenze</div>
-                <InfoTooltip text="Mostra il numero del quadro e il numero del palo sotto ai marker." />
+                <InfoTooltip text="Mostra il numero del quadro e del palo, e le linee elettriche della rete radiale sul comune." />
               </div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-blue-200 text-sm font-medium">Mostra numero quadro</span>
@@ -160,6 +256,53 @@ function SettingsMenu({ showPanelNumber, onTogglePanelNumber, showStreetLampNumb
                   />
                 </button>
               </div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-blue-200 text-sm font-medium">Mostra linee elettriche</span>
+                <button
+                  onClick={onToggleTopologyLines}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${showTopologyLines ? 'bg-blue-600' : 'bg-gray-400'}`}
+                  aria-pressed={showTopologyLines}
+                >
+                  <span className="sr-only">Attiva/disattiva linee elettriche</span>
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${showTopologyLines ? 'translate-x-6' : 'translate-x-1'}`}
+                  />
+                </button>
+              </div>
+              {canInstall && !isInstalled && (
+                <div className="mb-3 w-full">
+                  <button
+                    type="button"
+                    onClick={handleInstallApp}
+                    className="flex items-center gap-2 px-4 py-2 text-blue-200 hover:text-white hover:bg-blue-700/30 border border-blue-500/30 hover:border-blue-500/50 rounded-lg transition-colors w-full"
+                  >
+                    <DownloadCloud className="h-4 w-4" />
+                    Installa app
+                  </button>
+                  {showIosInstallHelp && (
+                    <div className="mt-2 px-3 py-2 rounded-lg bg-blue-950/80 border border-blue-500/30 text-blue-100 text-xs leading-relaxed">
+                      {!isIosSafari ? (
+                        <p>
+                          Apri questa pagina in <span className="font-semibold text-white">Safari</span>,
+                          poi usa Condividi → Aggiungi a Home.
+                        </p>
+                      ) : (
+                        <ol className="list-decimal list-inside space-y-1">
+                          <li>
+                            Tocca <span className="font-semibold text-white">Condividi</span>{" "}
+                            (icona con la freccia in alto)
+                          </li>
+                          <li>
+                            Scorri e tocca{" "}
+                            <span className="font-semibold text-white">Aggiungi a Home</span>
+                          </li>
+                          <li>Conferma con Aggiungi</li>
+                        </ol>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               {/* Modalità visualizzazione: slider custom con "Semplice" e "Complessa" */}
               <div className="flex items-center gap-1">
                 <div className="text-blue-300 font-semibold text-xs uppercase mb-2">Visualizzazione</div>
@@ -243,6 +386,14 @@ function SettingsMenu({ showPanelNumber, onTogglePanelNumber, showStreetLampNumb
           </div>
         </div>
       </div>
+
+      <PrintExportSideWindow
+        isOpen={isPrintPanelOpen && isPrintAvailable}
+        onClose={() => setIsPrintPanelOpen(false)}
+        map={map}
+        visualizationMode={visualizationMode}
+        selectedCity={selectedCity}
+      />
     </div>
   )
 }

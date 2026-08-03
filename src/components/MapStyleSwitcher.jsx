@@ -1,3 +1,4 @@
+import { Mountain, Satellite } from 'lucide-react';
 import React from 'react';
 
 const MapStyleSwitcher = ({ map, initialStyleUrl, satelliteStyleUrl, isSatellite, onModeChange }) => {
@@ -22,13 +23,11 @@ const MapStyleSwitcher = ({ map, initialStyleUrl, satelliteStyleUrl, isSatellite
       >
         <span className="inline-flex h-5 w-5 items-center justify-center">
           {isSatellite ? (
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
-              <path d="M3 5h18v6H3z" /><path d="M3 13h18v6H3z" opacity=".4" />
-            </svg>
+            <Satellite className="h-5 w-5" />
           ) : (
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
-              <path d="M21 3 9 15l-4-4-4 4v6h22V3z" />
-            </svg>
+            <Mountain
+              className="h-5 w-5"
+            />
           )}
         </span>
         <span className="text-sm font-medium">

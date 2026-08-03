@@ -1,14 +1,13 @@
 "use client"
 
 import { useState } from "react"
-import { Link, useNavigate } from "react-router-dom"
-import { Eye, EyeOff, Mail, Lock, User, CheckCircle, Shield, Check, X, AlertCircle } from "lucide-react"
+import { Link } from "react-router-dom"
+import { Eye, EyeOff, Mail, Lock, CheckCircle, Shield, Check, X, AlertCircle, Info, FileText } from "lucide-react"
 import { LightbulbLoader } from "../components/lightbulb-loader"
 import Logo from "../components/Logo"
+import TownhallAutocomplete from "../components/TownhallAutocomplete"
 import axios from "axios"
 import { capitalizeString, validateName } from "../utils/utils"
-
-const BASE_URL = import.meta.env.VITE_SERVER_URL
 
 export default function SignIn() {
   const [formData, setFormData] = useState({
@@ -17,6 +16,8 @@ export default function SignIn() {
     email: "",
     password: "",
     confirmPassword: "",
+    requested_townhall: "",
+    requested_townhall_notes: "",
   })
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
@@ -25,7 +26,6 @@ export default function SignIn() {
   const [isSuccess, setIsSuccess] = useState(false)
   const [nameError, setNameError] = useState("");
   const [surnameError, setSurnameError] = useState("");
-  const navigate = useNavigate()
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -94,8 +94,15 @@ export default function SignIn() {
 
 const validateForm = () => {
   // Esegui la validazione finale al submit
-  if (!formData.name.trim() || !formData.surname.trim() || !formData.email.trim() || !formData.password.trim() || !formData.confirmPassword.trim()) {
-    setError("Per favore, compila tutti i campi.");
+  if (
+    !formData.name.trim() ||
+    !formData.surname.trim() ||
+    !formData.email.trim() ||
+    !formData.password.trim() ||
+    !formData.confirmPassword.trim() ||
+    !formData.requested_townhall.trim()
+  ) {
+    setError("Per favore, compila tutti i campi, incluso il comune richiesto.");
     return false;
   }
   
@@ -155,8 +162,10 @@ const validateForm = () => {
         surname: capitalizeString(formData.surname),
         email: formData.email,
         password: formData.password,
+        requested_townhall: formData.requested_townhall,
+        requested_townhall_notes: formData.requested_townhall_notes,
       }
-      const response = await axios.post(`${import.meta.env.VITE_SERVER_URL}/addPendingUser`, dataToSend)
+      await axios.post(`${import.meta.env.VITE_SERVER_URL}/addPendingUser`, dataToSend)
       await sendMailToAdmin(formData.name, formData.surname)
       setIsSuccess(true)
     } catch (error) {
@@ -213,15 +222,15 @@ const validateForm = () => {
         {/* Glass effect container */}
         <div className="relative z-10 p-8 backdrop-blur-xl bg-black/40 border border-blue-500/20">
           <div className="flex justify-center">
-            <Logo className="w-64" />
+            <Logo />
           </div>
 
-          <h2 className="mt-6 text-center text-3xl font-bold text-white">Crea un account</h2>
+          <h2 className="mt-3 text-center text-3xl font-bold text-white">Crea un account</h2>
           <p className="mt-2 text-center text-sm text-blue-200/70">
-            Unisciti alla nostra piattaforma di gestione dell'illuminazione pubblica
+            Unisciti alla nostra piattaforma di gestione dell&apos;illuminazione pubblica
           </p>
 
-          <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+          <form className="mt-4 space-y-6" onSubmit={handleSubmit}>
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="relative">
@@ -300,6 +309,50 @@ const validateForm = () => {
                     bg-blue-900/20 text-white placeholder-blue-300/50 backdrop-blur-sm
                     focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
                     placeholder="you@example.com"
+                  />
+                </div>
+              </div>
+
+              {/* Comune Richiesto */}
+              <div className="relative">
+                <label htmlFor="requested_townhall" className="block text-sm font-medium text-blue-200 mb-2">
+                  Comune richiesto
+                </label>
+                <TownhallAutocomplete
+                  value={formData.requested_townhall}
+                  onChange={(townhallName) => {
+                    if (error) setError("")
+                    setFormData((prev) => ({ ...prev, requested_townhall: townhallName }))
+                  }}
+                  placeholder="Cerca un comune italiano..."
+                />
+                <p className="mt-2 text-xs text-blue-300/70 flex items-start space-x-1.5 leading-relaxed bg-blue-950/40 p-2.5 rounded-lg border border-blue-500/15">
+                  <Info className="h-4 w-4 text-blue-400 flex-shrink-0 mt-0.5" />
+                  <span>
+                    Nota: L&apos;associazione definitiva del comune verrà eseguita solo in fase di accettazione della richiesta.
+                  </span>
+                </p>
+              </div>
+
+              {/* Note per la richiesta del comune */}
+              <div className="relative">
+                <label htmlFor="requested_townhall_notes" className="block text-sm font-medium text-blue-200 mb-2">
+                  Note per la richiesta del comune <span className="text-xs text-blue-300/60 font-normal">(Opzionale)</span>
+                </label>
+                <div className="relative">
+                  <div className="absolute top-3 left-3 flex items-start pointer-events-none text-blue-400">
+                    <FileText className="h-5 w-5" />
+                  </div>
+                  <textarea
+                    id="requested_townhall_notes"
+                    name="requested_townhall_notes"
+                    rows={3}
+                    value={formData.requested_townhall_notes}
+                    onChange={handleChange}
+                    className="block w-full pl-10 pr-3 py-3 rounded-xl border border-blue-500/30
+                    bg-blue-900/20 text-white placeholder-blue-300/50 backdrop-blur-sm
+                    focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 text-sm resize-none"
+                    placeholder="Inserisci eventuali note o motivazioni per l'amministratore..."
                   />
                 </div>
               </div>

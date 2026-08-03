@@ -2,6 +2,7 @@
 import { useState } from "react"
 import { ChevronLeft, Save, MapPin, ChevronDown } from "lucide-react"
 import toast from "react-hot-toast"
+import { prepareLightPointPayload } from "../utils/utils"
 
 const AddLightPointForm = ({ onSave, onBack, tempPosition, selectedCity, electricPanels = [] }) => {
   const [formData, setFormData] = useState({
@@ -11,10 +12,15 @@ const AddLightPointForm = ({ onSave, onBack, tempPosition, selectedCity, electri
     proprieta: "",
     tipo_apparecchio: "",
     tipo_apparecchio_altro: "",
-    lampada: "",
-    potenza: "",
+    armatura: "",
+    marca_apparecchio: "",
+    modello_apparecchio: "",
+    numero_apparecchi: "",
+    tipo_lampada: "",
+    potenza_lampada: "",
     tipo_sostegno: "",
     tipo_sostegno_altro: "",
+    altezza_sostegno: "",
     tipo_linea: "",
     promiscuita: "",
     quadro: "",
@@ -71,7 +77,7 @@ const AddLightPointForm = ({ onSave, onBack, tempPosition, selectedCity, electri
       { value: "Mancante", label: "Mancante" },
       { value: "Altro", label: "Altro" },
     ],
-    lampada: [
+    tipo_lampada: [
       { value: "FLUO", label: "FLUO" },
       { value: "HG", label: "HG" },
       { value: "LED", label: "LED" },
@@ -216,16 +222,7 @@ const AddLightPointForm = ({ onSave, onBack, tempPosition, selectedCity, electri
     setIsSaving(true)
 
     try {
-      const dataToSend = { ...formData }
-
-      if (formData.lampada || formData.potenza) {
-        const lampada = formData.lampada || ""
-        const potenza = formData.potenza || ""
-        dataToSend.lampada_potenza = `${lampada} ${potenza}`.trim()
-
-        delete dataToSend.lampada
-        delete dataToSend.potenza
-      }
+      const dataToSend = prepareLightPointPayload({ ...formData })
 
       if (formData.tipo_apparecchio === "Altro" && formData.tipo_apparecchio_altro) {
         dataToSend.tipo_apparecchio = formData.tipo_apparecchio_altro
@@ -314,25 +311,25 @@ const AddLightPointForm = ({ onSave, onBack, tempPosition, selectedCity, electri
         <div className="space-y-3">{renderField("numero_palo", "Numero Palo", "text", true)}</div>
       </div>
 
-      {/* Lampada e Potenza */}
+      {/* Tipo lampada e potenza */}
       <div className="p-4 bg-blue-900/20 border border-blue-500/30 rounded-lg">
         <h4 className="text-sm font-medium text-blue-200 mb-3">Lampada e Potenza</h4>
         <div className={`grid ${isMobile ? "grid-cols-1 gap-3" : "grid-cols-2 gap-3"}`}>
           <div>
-            <label className="block text-sm font-medium text-blue-300 mb-1">Lampada</label>
+            <label className="block text-sm font-medium text-blue-300 mb-1">Tipo lampada</label>
             <CustomSelect
-              value={formData.lampada || ""}
-              onChange={(value) => handleInputChange("lampada", value)}
-              options={selectOptions.lampada}
-              placeholder="Seleziona lampada"
+              value={formData.tipo_lampada || ""}
+              onChange={(value) => handleInputChange("tipo_lampada", value)}
+              options={selectOptions.tipo_lampada}
+              placeholder="Seleziona tipo lampada"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-blue-300 mb-1">Potenza</label>
+            <label className="block text-sm font-medium text-blue-300 mb-1">Potenza lampada</label>
             <input
               type="number"
-              value={formData.potenza || ""}
-              onChange={(e) => handleInputChange("potenza", e.target.value)}
+              value={formData.potenza_lampada || ""}
+              onChange={(e) => handleInputChange("potenza_lampada", e.target.value)}
               className="w-full px-3 py-3 bg-blue-900/40 text-white border border-blue-500/40 rounded-lg focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-colors placeholder-blue-400/50 min-h-[44px]"
               placeholder="W"
             />
@@ -351,9 +348,12 @@ const AddLightPointForm = ({ onSave, onBack, tempPosition, selectedCity, electri
             )
           }
           {renderField("tipo_apparecchio", "Tipo Apparecchio")}
+          {renderField("armatura", "Armatura")}
+          {renderField("marca_apparecchio", "Marca Apparecchio")}
+          {renderField("modello_apparecchio", "Modello Apparecchio")}
           {renderField("tipo_sostegno", "Tipo Sostegno")}
+          {renderField("altezza_sostegno", "Altezza Sostegno")}
           {renderField("tipo_linea", "Tipo Linea")}
-          {renderField("modello", "Modello Apparecchio")}
         </div>
       </div>
 
@@ -406,6 +406,7 @@ const AddLightPointForm = ({ onSave, onBack, tempPosition, selectedCity, electri
               options={[
                 { value: "unknown", label: "Quadro Ignoto" },
                 { value: "new", label: "Quadro da Caricare" },
+                { value: "FC", label: "FC" },
                 ...electricPanels.map((panel) => ({ value: panel, label: panel })),
               ]}
               placeholder="Seleziona un quadro"

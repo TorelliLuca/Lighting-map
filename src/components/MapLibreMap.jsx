@@ -9,11 +9,29 @@ import { UserContext, api } from "../context/UserContext"
 import MapStyleSwitcher from "./MapStyleSwitcher";
 import MapButton from "./MapButton";
 import { LocateFixed } from "lucide-react";
+import {
+  isMobileInfoWindowViewport,
+  getMapLibrePopupPlacement,
+} from "../utils/infoWindowActions";
+import { normalizeLightPointForDisplay } from "../utils/utils";
+import { selectFeatureIdsInPolygon } from "../utils/pointInPolygon";
 
 
 
 const DEFAULT_CENTER = [12.4964, 41.9028]; // Roma, [lng, lat]
 const DEFAULT_ZOOM = 12;
+const LASSO_SOURCE_ID = "lasso-draw";
+const LASSO_LINE_LAYER_ID = "lasso-draw-line";
+const LASSO_FILL_LAYER_ID = "lasso-draw-fill";
+const LASSO_SELECTION_SOURCE_ID = "lasso-selection";
+const LASSO_SELECTION_LAYER_ID = "lasso-selection-layer";
+const LASSO_MAX_POINTS = 500;
+const TOPOLOGY_SOURCE_ID = "topology-lines";
+const TOPOLOGY_LAYER_ID = "topology-lines-line";
+const TOPOLOGY_LAYER_DASHED_ID = "topology-lines-line-dashed";
+const TOPOLOGY_ARROW_LAYER_ID = "topology-lines-arrow";
+const TOPOLOGY_ARROW_IMAGE_ID = "topology-arrow";
+const EMPTY_TOPOLOGY_FC = { type: "FeatureCollection", features: [] };
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_API; 
 const MAPTILER_STYLE = `https://api.maptiler.com/maps/streets/style.json?key=${MAPTILER_KEY}`;
@@ -45,6 +63,21 @@ const MapLibreMap = forwardRef(({
   onBeforeReportCleanupTrigger,
   onAfterCleanup,
   onMarkerSelect, // Callback per notificare la selezione di un marker
+  isLassoActive = false,
+  selectedLassoIds = [],
+  onLassoSelect,
+  onLassoGroupMove,
+  lassoLinkParentMode = false,
+  onLassoLinkParent,
+  lassoScaleMode = false,
+  lassoRotateMode = false,
+  showTopologyLines = false,
+  topologyGeojson = EMPTY_TOPOLOGY_FC,
+  isTopologyEditMode = false,
+  onTopologyPointPick,
+  onSetParentClick,
+  onClearParentClick,
+  getTopologyPower,
 }, ref) => {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
@@ -67,6 +100,86 @@ const MapLibreMap = forwardRef(({
   const svgLoadingMap = useRef(new Map());
   // Ref per sapere se la mappa è ancora attiva
   const isMapActive = useRef(true);
+  const isLassoActiveRef = useRef(false);
+  const lassoLinkParentModeRef = useRef(false);
+  const lassoScaleModeRef = useRef(false);
+  const lassoRotateModeRef = useRef(false);
+  const isTopologyEditModeRef = useRef(false);
+  const onTopologyPointPickRef = useRef(onTopologyPointPick);
+  const onSetParentClickRef = useRef(onSetParentClick);
+  const onClearParentClickRef = useRef(onClearParentClick);
+  const getTopologyPowerRef = useRef(getTopologyPower);
+  const selectedLassoIdsRef = useRef([]);
+  const geojsonDataRef = useRef(geojsonData);
+  const onLassoSelectRef = useRef(onLassoSelect);
+  const onLassoGroupMoveRef = useRef(onLassoGroupMove);
+  const onLassoLinkParentRef = useRef(onLassoLinkParent);
+  const topologyGeojsonRef = useRef(topologyGeojson);
+  const showTopologyLinesRef = useRef(showTopologyLines);
+
+  useEffect(() => {
+    isLassoActiveRef.current = isLassoActive;
+  }, [isLassoActive]);
+
+  useEffect(() => {
+    lassoLinkParentModeRef.current = lassoLinkParentMode;
+  }, [lassoLinkParentMode]);
+
+  useEffect(() => {
+    lassoScaleModeRef.current = lassoScaleMode;
+  }, [lassoScaleMode]);
+
+  useEffect(() => {
+    lassoRotateModeRef.current = lassoRotateMode;
+  }, [lassoRotateMode]);
+
+  useEffect(() => {
+    isTopologyEditModeRef.current = isTopologyEditMode;
+  }, [isTopologyEditMode]);
+
+  useEffect(() => {
+    onTopologyPointPickRef.current = onTopologyPointPick;
+  }, [onTopologyPointPick]);
+
+  useEffect(() => {
+    onSetParentClickRef.current = onSetParentClick;
+  }, [onSetParentClick]);
+
+  useEffect(() => {
+    onClearParentClickRef.current = onClearParentClick;
+  }, [onClearParentClick]);
+
+  useEffect(() => {
+    getTopologyPowerRef.current = getTopologyPower;
+  }, [getTopologyPower]);
+
+  useEffect(() => {
+    selectedLassoIdsRef.current = selectedLassoIds;
+  }, [selectedLassoIds]);
+
+  useEffect(() => {
+    geojsonDataRef.current = geojsonData;
+  }, [geojsonData]);
+
+  useEffect(() => {
+    onLassoSelectRef.current = onLassoSelect;
+  }, [onLassoSelect]);
+
+  useEffect(() => {
+    onLassoGroupMoveRef.current = onLassoGroupMove;
+  }, [onLassoGroupMove]);
+
+  useEffect(() => {
+    onLassoLinkParentRef.current = onLassoLinkParent;
+  }, [onLassoLinkParent]);
+
+  useEffect(() => {
+    topologyGeojsonRef.current = topologyGeojson || EMPTY_TOPOLOGY_FC;
+  }, [topologyGeojson]);
+
+  useEffect(() => {
+    showTopologyLinesRef.current = showTopologyLines;
+  }, [showTopologyLines]);
   
 
   useEffect(() => {
@@ -76,6 +189,7 @@ const MapLibreMap = forwardRef(({
       style: styleUrl,
       center,
       zoom,
+      preserveDrawingBuffer: true,
     });
 
     mapRef.current.addControl(new maplibregl.NavigationControl(), "top-right");
@@ -368,6 +482,7 @@ const MapLibreMap = forwardRef(({
     function safeHandleClusterClick(e) {
       try {
         if (!isMapActive.current || !mapRef.current) return;
+        if (isLassoActiveRef.current) return;
         const features = mapRef.current.queryRenderedFeatures(e.point, { layers: ["clusters", "clusters-static"] });
         if (!features.length) return;
         const clusterId = features[0].properties.cluster_id;
@@ -399,7 +514,7 @@ const MapLibreMap = forwardRef(({
 
 
     function cleanAndNormalizeProps(props) {
-      let content = { ...props };
+      let content = normalizeLightPointForDisplay(props);
       [
         'color', 'lat', 'lng', '__v', '_id', 'segnalazioni_in_corso_length'
       ].forEach(key => delete content[key]);
@@ -412,7 +527,7 @@ const MapLibreMap = forwardRef(({
       return content;
     }
     function cleanAndNormalizeContent(props) {
-      let content = { ...props };
+      let content = normalizeLightPointForDisplay(props);
       [
         'color', , '__v', 'segnalazioni_in_corso_length'
       ].forEach(key => delete content[key]);
@@ -425,9 +540,21 @@ const MapLibreMap = forwardRef(({
       return content;
     }
 
+    function parseDifferenteGroupMembers(rawValue) {
+      if (Array.isArray(rawValue)) return rawValue;
+      if (typeof rawValue !== "string") return [];
+      try {
+        const parsed = JSON.parse(rawValue);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+
     function safeHandleMarkerClick(e) {
       try {
         if (!isMapActive.current || !mapRef.current) return;
+        if (isLassoActiveRef.current) return;
         const feature = e.features[0];
         if (!feature || !feature.properties) return;
         const coordinates = feature.geometry.coordinates.slice();
@@ -436,12 +563,59 @@ const MapLibreMap = forwardRef(({
           lat: feature.geometry.coordinates[1],
           lng: feature.geometry.coordinates[0]
         };
-        //const selectedCity = localStorage.getItem(STORAGE_KEYS.SELECTED_CITY)
-        const popupDiv = document.createElement('div');
         const content = cleanAndNormalizeProps(props);
         props = cleanAndNormalizeContent(props)
 
+        if (isTopologyEditModeRef.current && typeof onTopologyPointPickRef.current === 'function') {
+          onTopologyPointPickRef.current(props);
+          return;
+        }
 
+        // Chiudi popup precedente se presente
+        if (popupRef.current) {
+          try { popupRef.current.remove(); } catch { /* ignore */ }
+          popupRef.current = null;
+        }
+
+        const isDifferenteGroup =
+          props.is_differente_group === true ||
+          props.is_differente_group === "true";
+        if (isDifferenteGroup) {
+          const members = parseDifferenteGroupMembers(props.differente_group_members_json);
+          if (onMarkerSelect) {
+            onMarkerSelect({
+              ...props,
+              lat: coordinates[1],
+              lng: coordinates[0],
+              is_differente_group: true,
+              differente_group_members: members,
+            });
+          }
+          return;
+        }
+
+        // Mobile: bottom sheet gestito da Dashboard
+        if (isMobileInfoWindowViewport()) {
+          if (onMarkerSelect) {
+            onMarkerSelect(props);
+          }
+          return;
+        }
+
+        const popupDiv = document.createElement('div');
+        const { anchor, mapOffset, popupOffset } = getMapLibrePopupPlacement(mapRef.current);
+
+        mapRef.current.easeTo({
+          center: [props.lng, props.lat],
+          offset: mapOffset,
+          duration: 350,
+          essential: true,
+        });
+
+        const power =
+          typeof getTopologyPowerRef.current === 'function'
+            ? getTopologyPowerRef.current(props)
+            : null;
 
         ReactDOM.createRoot(popupDiv).render(
           <InfoWindow
@@ -450,27 +624,33 @@ const MapLibreMap = forwardRef(({
             city={selectedCity}
             userData={userData}
             mapType="maplibre"
-            style={{ maxWidth: '420px', minWidth: '220px' }}
             onEditClick={onEditClick}
             onDeleteClick={onDeleteClick}
             onBeforeReport={onBeforeReport}
             idMarker={props._id}
+            variant="popup"
+            onSetParentClick={(m) => onSetParentClickRef.current?.(m)}
+            onClearParentClick={(m) => onClearParentClickRef.current?.(m)}
+            topologyPower={power}
           />
         );
-        // AGGIUNTA: salva la popup nella ref
         if (mapRef.current && typeof maplibregl.Popup === 'function') {
-          const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: true, maxWidth: 'none' })
+          const popup = new maplibregl.Popup({
+            closeButton: true,
+            closeOnClick: true,
+            maxWidth: 'none',
+            anchor,
+            offset: popupOffset,
+          })
             .setLngLat(coordinates)
             .setDOMContent(popupDiv)
             .addTo(mapRef.current);
           popupRef.current = popup;
           
-          // Notifica al parent il marker selezionato
           if (onMarkerSelect) {
             onMarkerSelect(props);
           }
 
-          // Aggiungi listener per la deselezione
           popup.on('close', () => {
             if (onMarkerSelect) {
               onMarkerSelect(null);
@@ -485,6 +665,7 @@ const MapLibreMap = forwardRef(({
 
     // Click su marker
     mapRef.current.on('click', 'unclustered-point-pl', safeHandleMarkerClick);
+    mapRef.current.on('click', 'unclustered-point-pl-diff', safeHandleMarkerClick);
     mapRef.current.on('click', 'unclustered-point-qe', safeHandleMarkerClick);
 
     // Cambia il cursore sui marker
@@ -514,14 +695,28 @@ const MapLibreMap = forwardRef(({
     };
     mapRef.current.on('mouseenter', 'unclustered-point-pl', safeMouseEnterPL);
     mapRef.current.on('mouseleave', 'unclustered-point-pl', safeMouseLeavePL);
+    mapRef.current.on('mouseenter', 'unclustered-point-pl-diff', safeMouseEnterPL);
+    mapRef.current.on('mouseleave', 'unclustered-point-pl-diff', safeMouseLeavePL);
     mapRef.current.on('mouseenter', 'unclustered-point-qe', safeMouseEnterQE);
     mapRef.current.on('mouseleave', 'unclustered-point-qe', safeMouseLeaveQE);
 
-
-
-    // Cleanup
+    // Cleanup obbligatorio: altrimenti i listener si accumulano a ogni update geojson
     return () => {
-
+      const map = mapRef.current;
+      if (!map) return;
+      try {
+        map.off('click', 'unclustered-point-pl', safeHandleMarkerClick);
+        map.off('click', 'unclustered-point-pl-diff', safeHandleMarkerClick);
+        map.off('click', 'unclustered-point-qe', safeHandleMarkerClick);
+        map.off('mouseenter', 'unclustered-point-pl', safeMouseEnterPL);
+        map.off('mouseleave', 'unclustered-point-pl', safeMouseLeavePL);
+        map.off('mouseenter', 'unclustered-point-pl-diff', safeMouseEnterPL);
+        map.off('mouseleave', 'unclustered-point-pl-diff', safeMouseLeavePL);
+        map.off('mouseenter', 'unclustered-point-qe', safeMouseEnterQE);
+        map.off('mouseleave', 'unclustered-point-qe', safeMouseLeaveQE);
+      } catch {
+        // ignore
+      }
     };
     
   }, [geojsonData, mapLoaded, userData, editingMarkerId, isSatellite]);
@@ -620,12 +815,37 @@ const MapLibreMap = forwardRef(({
     return ctx.getImageData(0, 0, size, size);
   }
 
-  // Layer marker: PL = cerchio
+  function createTriangleImage(color, size = 48) {
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, size, size);
+    const pad = 3;
+    ctx.beginPath();
+    ctx.moveTo(size / 2, pad);
+    ctx.lineTo(size - pad, size - pad);
+    ctx.lineTo(pad, size - pad);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    return ctx.getImageData(0, 0, size, size);
+  }
+
+  const isDifferenteGroupFilter = [
+    'any',
+    ['==', ['get', 'is_differente_group'], true],
+    ['==', ['get', 'is_differente_group'], 'true'],
+  ];
+
+  // Layer marker: PL = cerchio (esclusi gruppi differente)
   useEffect(() => {
     const map = mapRef.current;
     if (!isMapActive.current || !map || !geojsonData || !mapLoaded) return;
 
-    // PL: cerchio
     if (map && typeof map.getLayer === 'function' && map.getLayer('unclustered-point-pl')) {
       map.removeLayer('unclustered-point-pl');
     }
@@ -633,19 +853,91 @@ const MapLibreMap = forwardRef(({
       id: 'unclustered-point-pl',
       type: 'circle',
       source: 'markers',
-      filter: ['all', ['!', ['has', 'point_count']], ['==', ['get', 'marker'], 'PL']],
+      filter: [
+        'all',
+        ['!', ['has', 'point_count']],
+        ['==', ['get', 'marker'], 'PL'],
+        ['!', isDifferenteGroupFilter],
+      ],
       paint: {
         'circle-color': ['get', 'color'],
         'circle-radius': 6,
-        'circle-stroke-width': 1,
-        'circle-stroke-color': '#fff'
+        'circle-stroke-width': [
+          'case',
+          ['==', ['get', 'topology_unlinked'], true],
+          2.5,
+          1
+        ],
+        'circle-stroke-color': [
+          'case',
+          ['==', ['get', 'topology_unlinked'], true],
+          '#f97316',
+          '#fff'
+        ]
       }
     });
-    // Cleanup PL
     return () => {
       if (!isMapActive.current || !map) return;
       if (map && typeof map.getLayer === 'function' && map.getLayer('unclustered-point-pl')) {
         map.removeLayer('unclustered-point-pl');
+      }
+    };
+  }, [geojsonData, mapLoaded, editingMarkerId, isSatellite]);
+
+  // Layer marker: gruppi "differente" = triangoli grandi
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!isMapActive.current || !map || !geojsonData || !mapLoaded) return;
+
+    const diffColors = Array.from(new Set(
+      (geojsonData.features || [])
+        .filter((f) => {
+          const props = f.properties || {};
+          const isDiff = props.is_differente_group === true || props.is_differente_group === 'true';
+          return isDiff && props.marker === 'PL' && typeof props.color === 'string';
+        })
+        .map((f) => f.properties.color)
+    ));
+
+    diffColors.forEach((color) => {
+      const iconId = `triangle-diff-${color.replace('#', '')}`;
+      if (!map || typeof map.hasImage !== 'function') return;
+      if (map.hasImage(iconId)) {
+        try { map.removeImage(iconId); } catch { /* ignore */ }
+      }
+      map.addImage(iconId, createTriangleImage(color), { pixelRatio: 2 });
+    });
+
+    if (map.getLayer('unclustered-point-pl-diff')) {
+      map.removeLayer('unclustered-point-pl-diff');
+    }
+
+    map.addLayer({
+      id: 'unclustered-point-pl-diff',
+      type: 'symbol',
+      source: 'markers',
+      filter: [
+        'all',
+        ['!', ['has', 'point_count']],
+        ['==', ['get', 'marker'], 'PL'],
+        isDifferenteGroupFilter,
+      ],
+      layout: {
+        'icon-image': [
+          'concat',
+          'triangle-diff-',
+          ['slice', ['get', 'color'], 1],
+        ],
+        'icon-size': 1.05,
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+      },
+    });
+
+    return () => {
+      if (!isMapActive.current || !map) return;
+      if (map.getLayer('unclustered-point-pl-diff')) {
+        map.removeLayer('unclustered-point-pl-diff');
       }
     };
   }, [geojsonData, mapLoaded, editingMarkerId, isSatellite]);
@@ -886,9 +1178,12 @@ const MapLibreMap = forwardRef(({
             map.off("click", "clusters");
             map.off("click", "clusters-static");
             map.off('click', 'unclustered-point-pl');
+            map.off('click', 'unclustered-point-pl-diff');
             map.off('click', 'unclustered-point-qe');
             map.off('mouseenter', 'unclustered-point-pl');
             map.off('mouseleave', 'unclustered-point-pl');
+            map.off('mouseenter', 'unclustered-point-pl-diff');
+            map.off('mouseleave', 'unclustered-point-pl-diff');
             map.off('mouseenter', 'unclustered-point-qe');
             map.off('mouseleave', 'unclustered-point-qe');
           }
@@ -900,6 +1195,7 @@ const MapLibreMap = forwardRef(({
             "clusters-pulse-bg",
             "unclustered-point-qe",
             "unclustered-point-pl",
+            "unclustered-point-pl-diff",
             "reported-symbol",
             "marker-label-qe",
             "marker-label-pl"
@@ -975,7 +1271,6 @@ const MapLibreMap = forwardRef(({
       'fill-opacity': 0.1 // Molto trasparente
     }
   }, layerId); // Inserito sotto il layer del contorno
-
   // Layer opzionale per il nome del comune
   if (borderData.properties && borderData.properties.comune) {
     map.addLayer({
@@ -1024,6 +1319,176 @@ const MapLibreMap = forwardRef(({
 
   fetchTownhallsBorders();
 }, [selectedCity, mapLoaded, isSatellite]);
+
+  // Linee topologiche (sempre tutte; niente filtro viewport/cluster)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!isMapActive.current || !map || !mapLoaded) return undefined;
+
+    const ensureArrowImage = () => {
+      if (typeof map.hasImage === 'function' && map.hasImage(TOPOLOGY_ARROW_IMAGE_ID)) {
+        try { map.removeImage(TOPOLOGY_ARROW_IMAGE_ID); } catch { /* ignore */ }
+      }
+      const size = 64;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, size, size);
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.moveTo(size * 0.15, size * 0.2);
+      ctx.lineTo(size * 0.85, size * 0.5);
+      ctx.lineTo(size * 0.15, size * 0.8);
+      ctx.closePath();
+      ctx.fill();
+      const imageData = ctx.getImageData(0, 0, size, size);
+      map.addImage(TOPOLOGY_ARROW_IMAGE_ID, imageData, { pixelRatio: 2, sdf: true });
+    };
+
+    const lineWidthExpr = [
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      10, 1.2,
+      14, 2.2,
+      17, 3.5,
+    ];
+    const lineColorExpr = ['coalesce', ['get', 'color'], '#64748b'];
+
+    const syncTopologyData = () => {
+      const source = map.getSource(TOPOLOGY_SOURCE_ID);
+      if (!source) return;
+      const full = topologyGeojsonRef.current || EMPTY_TOPOLOGY_FC;
+      source.setData(showTopologyLinesRef.current ? full : EMPTY_TOPOLOGY_FC);
+    };
+
+    const setLayerVisibility = (layerId, visibility) => {
+      if (map.getLayer(layerId)) {
+        map.setLayoutProperty(layerId, 'visibility', visibility);
+      }
+    };
+
+    try {
+      ensureArrowImage();
+
+      if (!map.getSource(TOPOLOGY_SOURCE_ID)) {
+        map.addSource(TOPOLOGY_SOURCE_ID, {
+          type: 'geojson',
+          data: EMPTY_TOPOLOGY_FC,
+        });
+      }
+
+      const beforeId = map.getLayer('clusters')
+        ? 'clusters'
+        : map.getLayer('unclustered-point-pl')
+          ? 'unclustered-point-pl'
+          : undefined;
+
+      const visibility = showTopologyLines ? 'visible' : 'none';
+
+      if (!map.getLayer(TOPOLOGY_LAYER_ID)) {
+        map.addLayer({
+          id: TOPOLOGY_LAYER_ID,
+          type: 'line',
+          source: TOPOLOGY_SOURCE_ID,
+          filter: ['!=', ['get', 'dashed'], 1],
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round',
+            visibility,
+          },
+          paint: {
+            'line-color': lineColorExpr,
+            'line-opacity': 0.85,
+            'line-width': lineWidthExpr,
+          },
+        }, beforeId);
+      } else {
+        setLayerVisibility(TOPOLOGY_LAYER_ID, visibility);
+        map.setFilter(TOPOLOGY_LAYER_ID, ['!=', ['get', 'dashed'], 1]);
+        map.setPaintProperty(TOPOLOGY_LAYER_ID, 'line-color', lineColorExpr);
+        map.setPaintProperty(TOPOLOGY_LAYER_ID, 'line-width', lineWidthExpr);
+      }
+
+      if (!map.getLayer(TOPOLOGY_LAYER_DASHED_ID)) {
+        map.addLayer({
+          id: TOPOLOGY_LAYER_DASHED_ID,
+          type: 'line',
+          source: TOPOLOGY_SOURCE_ID,
+          filter: ['==', ['get', 'dashed'], 1],
+          layout: {
+            'line-cap': 'butt',
+            'line-join': 'round',
+            visibility,
+          },
+          paint: {
+            'line-color': lineColorExpr,
+            'line-opacity': 0.85,
+            'line-width': lineWidthExpr,
+            'line-dasharray': [2, 1.6],
+          },
+        }, beforeId);
+      } else {
+        setLayerVisibility(TOPOLOGY_LAYER_DASHED_ID, visibility);
+        map.setFilter(TOPOLOGY_LAYER_DASHED_ID, ['==', ['get', 'dashed'], 1]);
+        map.setPaintProperty(TOPOLOGY_LAYER_DASHED_ID, 'line-color', lineColorExpr);
+        map.setPaintProperty(TOPOLOGY_LAYER_DASHED_ID, 'line-width', lineWidthExpr);
+        map.setPaintProperty(TOPOLOGY_LAYER_DASHED_ID, 'line-dasharray', [2, 1.6]);
+      }
+
+      if (!map.getLayer(TOPOLOGY_ARROW_LAYER_ID)) {
+        map.addLayer({
+          id: TOPOLOGY_ARROW_LAYER_ID,
+          type: 'symbol',
+          source: TOPOLOGY_SOURCE_ID,
+          layout: {
+            'symbol-placement': 'line',
+            'symbol-spacing': 56,
+            'icon-image': TOPOLOGY_ARROW_IMAGE_ID,
+            'icon-size': 0.45,
+            'icon-allow-overlap': true,
+            'icon-ignore-placement': true,
+            'icon-rotation-alignment': 'map',
+            'icon-pitch-alignment': 'map',
+            visibility,
+          },
+          paint: {
+            'icon-color': lineColorExpr,
+            'icon-opacity': 0.9,
+          },
+        }, beforeId);
+      } else {
+        setLayerVisibility(TOPOLOGY_ARROW_LAYER_ID, visibility);
+        map.setPaintProperty(TOPOLOGY_ARROW_LAYER_ID, 'icon-color', lineColorExpr);
+      }
+
+      syncTopologyData();
+    } catch (err) {
+      console.error('Errore layer topologia:', err);
+    }
+
+    return undefined;
+  }, [mapLoaded, isSatellite, topologyGeojson, showTopologyLines]);
+
+  // Cleanup topologia al cambio stile / unmount (isSatellite ricrea tutto)
+  useEffect(() => {
+    return () => {
+      const map = mapRef.current;
+      if (!map) return;
+      try {
+        if (map.getLayer(TOPOLOGY_ARROW_LAYER_ID)) map.removeLayer(TOPOLOGY_ARROW_LAYER_ID);
+        if (map.getLayer(TOPOLOGY_LAYER_DASHED_ID)) map.removeLayer(TOPOLOGY_LAYER_DASHED_ID);
+        if (map.getLayer(TOPOLOGY_LAYER_ID)) map.removeLayer(TOPOLOGY_LAYER_ID);
+        if (map.getSource(TOPOLOGY_SOURCE_ID)) map.removeSource(TOPOLOGY_SOURCE_ID);
+        if (typeof map.hasImage === 'function' && map.hasImage(TOPOLOGY_ARROW_IMAGE_ID)) {
+          map.removeImage(TOPOLOGY_ARROW_IMAGE_ID);
+        }
+      } catch {
+        // ignore
+      }
+    };
+  }, [isSatellite]);
 // Aggiungi questo useEffect dopo la creazione della mappa
 useEffect(() => {
   const map = mapRef.current;
@@ -1123,6 +1588,521 @@ useEffect(() => {
       }
     };
   }, []);
+
+  const ensureLassoLayers = (map) => {
+    if (!map.getSource(LASSO_SOURCE_ID)) {
+      map.addSource(LASSO_SOURCE_ID, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+    }
+    if (!map.getLayer(LASSO_FILL_LAYER_ID)) {
+      map.addLayer({
+        id: LASSO_FILL_LAYER_ID,
+        type: "fill",
+        source: LASSO_SOURCE_ID,
+        paint: {
+          "fill-color": "#3b82f6",
+          "fill-opacity": 0.15,
+        },
+      });
+    }
+    if (!map.getLayer(LASSO_LINE_LAYER_ID)) {
+      map.addLayer({
+        id: LASSO_LINE_LAYER_ID,
+        type: "line",
+        source: LASSO_SOURCE_ID,
+        paint: {
+          "line-color": "#60a5fa",
+          "line-width": 2,
+          "line-dasharray": [2, 1],
+        },
+      });
+    }
+    if (!map.getSource(LASSO_SELECTION_SOURCE_ID)) {
+      map.addSource(LASSO_SELECTION_SOURCE_ID, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      });
+    }
+    if (!map.getLayer(LASSO_SELECTION_LAYER_ID)) {
+      map.addLayer({
+        id: LASSO_SELECTION_LAYER_ID,
+        type: "circle",
+        source: LASSO_SELECTION_SOURCE_ID,
+        paint: {
+          "circle-radius": 10,
+          "circle-color": "#f59e0b",
+          "circle-opacity": 0.35,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#fbbf24",
+        },
+      });
+    }
+    // Mantieni i layer lazo sopra i marker
+    try {
+      if (map.getLayer(LASSO_FILL_LAYER_ID)) map.moveLayer(LASSO_FILL_LAYER_ID);
+      if (map.getLayer(LASSO_LINE_LAYER_ID)) map.moveLayer(LASSO_LINE_LAYER_ID);
+      if (map.getLayer(LASSO_SELECTION_LAYER_ID)) map.moveLayer(LASSO_SELECTION_LAYER_ID);
+    } catch { /* ignore */ }
+  };
+
+  const clearLassoDraw = (map) => {
+    const source = map.getSource(LASSO_SOURCE_ID);
+    if (source) {
+      source.setData({ type: "FeatureCollection", features: [] });
+    }
+  };
+
+  const buildSelectionGeojson = (ids, sourceGeojson) => {
+    const idSet = new Set(ids);
+    const features = (sourceGeojson?.features || [])
+      .filter((f) => idSet.has(f.properties?._id))
+      .map((f) => ({
+        type: "Feature",
+        geometry: f.geometry,
+        properties: { _id: f.properties._id },
+      }));
+    return { type: "FeatureCollection", features };
+  };
+
+  // Evidenzia i punti selezionati dal lazo
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+    try {
+      ensureLassoLayers(map);
+      const selectionSource = map.getSource(LASSO_SELECTION_SOURCE_ID);
+      if (selectionSource) {
+        selectionSource.setData(buildSelectionGeojson(selectedLassoIds, geojsonData));
+      }
+    } catch (err) {
+      console.error("Errore aggiornamento selezione lazo:", err);
+    }
+  }, [selectedLassoIds, geojsonData, mapLoaded, isSatellite]);
+
+  // Modalità lazo: disegno, drag, scala/ruota, pan tasto destro
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return;
+
+    if (!isLassoActive) {
+      try {
+        map.dragPan.enable();
+        try { map.dragRotate.enable(); } catch { /* ignore */ }
+        try { map.touchZoomRotate?.enableRotation?.(); } catch { /* ignore */ }
+        if (map.boxZoom) map.boxZoom.enable();
+        map.scrollZoom.enable();
+        map.getCanvas().style.cursor = "";
+        clearLassoDraw(map);
+      } catch { /* ignore */ }
+      return undefined;
+    }
+
+    ensureLassoLayers(map);
+    map.dragPan.disable();
+    try { map.dragRotate.disable(); } catch { /* ignore */ }
+    try { map.touchZoomRotate?.disableRotation?.(); } catch { /* ignore */ }
+    if (map.boxZoom) map.boxZoom.disable();
+    const transformMode = lassoScaleMode || lassoRotateMode;
+    if (transformMode) {
+      try { map.scrollZoom.disable(); } catch { /* ignore */ }
+    } else {
+      try { map.scrollZoom.enable(); } catch { /* ignore */ }
+    }
+    map.getCanvas().style.cursor = lassoLinkParentMode
+      ? "pointer"
+      : lassoScaleMode
+        ? "ns-resize"
+        : lassoRotateMode
+          ? "grab"
+          : selectedLassoIds.length > 0
+            ? "move"
+            : "crosshair";
+
+    if (popupRef.current) {
+      try { popupRef.current.remove(); } catch { /* ignore */ }
+      popupRef.current = null;
+    }
+
+    let isDrawing = false;
+    let drawPoints = [];
+    let isGroupDragging = false;
+    let dragStartLngLat = null;
+    let dragBasePositions = null;
+    let isRightPanning = false;
+    let rightPanLastPoint = null;
+
+    const MARKER_HIT_LAYERS = [
+      "unclustered-point-pl",
+      "unclustered-point-pl-diff",
+      "unclustered-point-qe",
+      "reported-symbol",
+    ].filter((layerId) => map.getLayer(layerId));
+
+    const pickMarkerAtPoint = (point) => {
+      if (!MARKER_HIT_LAYERS.length) return null;
+      const features = map.queryRenderedFeatures(point, { layers: MARKER_HIT_LAYERS });
+      const feature = features.find((f) => f?.properties?._id);
+      if (!feature) return null;
+      return {
+        ...feature.properties,
+        lat: feature.geometry?.coordinates?.[1],
+        lng: feature.geometry?.coordinates?.[0],
+      };
+    };
+
+    const setDrawGeojson = (points, closed = false) => {
+      const source = map.getSource(LASSO_SOURCE_ID);
+      if (!source) return;
+      if (!points.length) {
+        source.setData({ type: "FeatureCollection", features: [] });
+        return;
+      }
+      const ring = closed && points.length >= 3 ? [...points, points[0]] : points;
+      const features = [
+        {
+          type: "Feature",
+          properties: {},
+          geometry: {
+            type: points.length >= 3 && closed ? "Polygon" : "LineString",
+            coordinates: points.length >= 3 && closed ? [ring] : ring,
+          },
+        },
+      ];
+      source.setData({ type: "FeatureCollection", features });
+    };
+
+    const applyPreviewPositions = (positionMap) => {
+      const base = geojsonDataRef.current;
+      if (!base?.features || !map.getSource("markers")) return;
+
+      const updatedFeatures = base.features.map((f) => {
+        const id = f.properties?._id;
+        if (!positionMap.has(id)) return f;
+        const pos = positionMap.get(id);
+        return {
+          ...f,
+          geometry: {
+            ...f.geometry,
+            coordinates: [pos.lng, pos.lat],
+          },
+          properties: {
+            ...f.properties,
+            lat: pos.lat,
+            lng: pos.lng,
+          },
+        };
+      });
+      const updated = { type: "FeatureCollection", features: updatedFeatures };
+      map.getSource("markers").setData(
+        editingMarkerId ? removeMarkerById(updated, editingMarkerId) : updated
+      );
+
+      const selectionSource = map.getSource(LASSO_SELECTION_SOURCE_ID);
+      if (selectionSource) {
+        selectionSource.setData(buildSelectionGeojson([...positionMap.keys()], updated));
+      }
+    };
+
+    const commitPositionUpdates = (updates) => {
+      const preview = new Map(updates.map((u) => [u._id, { lat: u.lat, lng: u.lng }]));
+      applyPreviewPositions(preview);
+
+      const baseFeatures = geojsonDataRef.current?.features || [];
+      if (baseFeatures.length) {
+        const byId = new Map(updates.map((u) => [String(u._id), u]));
+        geojsonDataRef.current = {
+          ...geojsonDataRef.current,
+          features: baseFeatures.map((f) => {
+            const u = byId.get(String(f.properties?._id));
+            if (!u) return f;
+            return {
+              ...f,
+              geometry: { ...f.geometry, coordinates: [u.lng, u.lat] },
+              properties: { ...f.properties, lat: u.lat, lng: u.lng },
+            };
+          }),
+        };
+      }
+
+      if (onLassoGroupMoveRef.current) {
+        onLassoGroupMoveRef.current(updates);
+      }
+    };
+
+    const collectSelectedPositions = () => {
+      const selected = selectedLassoIdsRef.current;
+      if (!selected?.length) return [];
+      const idSet = new Set(selected.map(String));
+      const positions = [];
+      for (const f of geojsonDataRef.current?.features || []) {
+        const id = f.properties?._id;
+        if (!idSet.has(String(id))) continue;
+        const lng = Number(f.geometry?.coordinates?.[0]);
+        const lat = Number(f.geometry?.coordinates?.[1]);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          positions.push({ id, lat, lng });
+        }
+      }
+      return positions;
+    };
+
+    const onMouseDown = (e) => {
+      if (!isLassoActiveRef.current) return;
+      if (e.originalEvent?.target?.closest?.(".maplibregl-ctrl, button, a")) return;
+
+      // Tasto destro: pan mappa
+      if (e.originalEvent?.button === 2) {
+        isRightPanning = true;
+        rightPanLastPoint = e.point;
+        isDrawing = false;
+        isGroupDragging = false;
+        map.getCanvas().style.cursor = "grabbing";
+        return;
+      }
+
+      if (e.originalEvent?.button !== 0) return;
+
+      if (lassoLinkParentModeRef.current) {
+        const marker = pickMarkerAtPoint(e.point);
+        if (marker && onLassoLinkParentRef.current) {
+          onLassoLinkParentRef.current(marker);
+        }
+        return;
+      }
+
+      if (lassoScaleModeRef.current || lassoRotateModeRef.current) return;
+
+      const selected = selectedLassoIdsRef.current;
+      if (selected.length > 0) {
+        isGroupDragging = true;
+        dragStartLngLat = e.lngLat;
+        dragBasePositions = new Map();
+        const base = geojsonDataRef.current;
+        const idSet = new Set(selected);
+        for (const f of base?.features || []) {
+          const id = f.properties?._id;
+          if (!idSet.has(id)) continue;
+          const lng = Number(f.geometry?.coordinates?.[0]);
+          const lat = Number(f.geometry?.coordinates?.[1]);
+          if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            dragBasePositions.set(id, { lat, lng });
+          }
+        }
+        map.getCanvas().style.cursor = "grabbing";
+        return;
+      }
+
+      isDrawing = true;
+      drawPoints = [[e.lngLat.lng, e.lngLat.lat]];
+      setDrawGeojson(drawPoints, false);
+    };
+
+    const onMouseMove = (e) => {
+      if (isRightPanning && rightPanLastPoint) {
+        const dx = e.point.x - rightPanLastPoint.x;
+        const dy = e.point.y - rightPanLastPoint.y;
+        map.panBy([-dx, -dy], { animate: false });
+        rightPanLastPoint = e.point;
+        return;
+      }
+
+      if (lassoLinkParentModeRef.current || lassoScaleModeRef.current || lassoRotateModeRef.current) return;
+
+      if (isGroupDragging && dragStartLngLat && dragBasePositions) {
+        const dLng = e.lngLat.lng - dragStartLngLat.lng;
+        const dLat = e.lngLat.lat - dragStartLngLat.lat;
+        const next = new Map();
+        for (const [id, pos] of dragBasePositions.entries()) {
+          next.set(id, { lat: pos.lat + dLat, lng: pos.lng + dLng });
+        }
+        applyPreviewPositions(next);
+        return;
+      }
+
+      if (!isDrawing) return;
+      drawPoints.push([e.lngLat.lng, e.lngLat.lat]);
+      if (drawPoints.length > 2) {
+        const prev = drawPoints[drawPoints.length - 2];
+        const curr = drawPoints[drawPoints.length - 1];
+        const dx = curr[0] - prev[0];
+        const dy = curr[1] - prev[1];
+        if (dx * dx + dy * dy < 1e-10) {
+          drawPoints.pop();
+          return;
+        }
+      }
+      setDrawGeojson(drawPoints, false);
+    };
+
+    const endRightPan = () => {
+      if (!isRightPanning) return;
+      isRightPanning = false;
+      rightPanLastPoint = null;
+      map.getCanvas().style.cursor = lassoLinkParentModeRef.current
+        ? "pointer"
+        : lassoScaleModeRef.current
+          ? "ns-resize"
+          : lassoRotateModeRef.current
+            ? "grab"
+            : selectedLassoIdsRef.current.length > 0
+              ? "move"
+              : "crosshair";
+    };
+
+    const onMouseUp = (e) => {
+      if (e.originalEvent?.button === 2 || isRightPanning) {
+        endRightPan();
+        return;
+      }
+
+      if (lassoLinkParentModeRef.current || lassoScaleModeRef.current || lassoRotateModeRef.current) return;
+
+      if (isGroupDragging && dragBasePositions && dragStartLngLat) {
+        const dLng = e.lngLat.lng - dragStartLngLat.lng;
+        const dLat = e.lngLat.lat - dragStartLngLat.lat;
+        const updates = [];
+        for (const [id, pos] of dragBasePositions.entries()) {
+          updates.push({
+            _id: id,
+            lat: pos.lat + dLat,
+            lng: pos.lng + dLng,
+          });
+        }
+        isGroupDragging = false;
+        dragStartLngLat = null;
+        dragBasePositions = null;
+        map.getCanvas().style.cursor = "move";
+        if (updates.length && onLassoGroupMoveRef.current) {
+          onLassoGroupMoveRef.current(updates);
+        }
+        return;
+      }
+
+      if (!isDrawing) return;
+      isDrawing = false;
+      drawPoints.push([e.lngLat.lng, e.lngLat.lat]);
+
+      if (drawPoints.length < 3) {
+        clearLassoDraw(map);
+        drawPoints = [];
+        return;
+      }
+
+      setDrawGeojson(drawPoints, true);
+      const ids = selectFeatureIdsInPolygon(
+        geojsonDataRef.current,
+        drawPoints,
+        { max: LASSO_MAX_POINTS }
+      );
+
+      window.setTimeout(() => {
+        try { clearLassoDraw(map); } catch { /* ignore */ }
+      }, 250);
+
+      drawPoints = [];
+      if (onLassoSelectRef.current) {
+        onLassoSelectRef.current(ids);
+      }
+    };
+
+    const onContextMenu = (e) => {
+      e.preventDefault?.();
+      if (e.originalEvent) e.originalEvent.preventDefault?.();
+    };
+
+    const onKeyDown = (ev) => {
+      if (ev.key === "Escape" && isDrawing) {
+        isDrawing = false;
+        drawPoints = [];
+        clearLassoDraw(map);
+      }
+    };
+
+    const onWheel = (e) => {
+      const scaleOn = lassoScaleModeRef.current;
+      const rotateOn = lassoRotateModeRef.current;
+      if ((!scaleOn && !rotateOn) || !isLassoActiveRef.current) return;
+
+      const positions = collectSelectedPositions();
+      if (positions.length < 2) return;
+
+      e.preventDefault?.();
+      if (e.originalEvent) {
+        e.originalEvent.preventDefault?.();
+        e.originalEvent.stopPropagation?.();
+      }
+
+      const delta = e.originalEvent?.deltaY ?? e.deltaY ?? 0;
+      if (!delta) return;
+
+      let sumLat = 0;
+      let sumLng = 0;
+      for (const p of positions) {
+        sumLat += p.lat;
+        sumLng += p.lng;
+      }
+      const cLat = sumLat / positions.length;
+      const cLng = sumLng / positions.length;
+      const cosLat = Math.cos((cLat * Math.PI) / 180) || 1;
+
+      let updates;
+      if (scaleOn) {
+        const factor = delta < 0 ? 1.06 : 0.94;
+        updates = positions.map((p) => ({
+          _id: p.id,
+          lat: cLat + (p.lat - cLat) * factor,
+          lng: cLng + (p.lng - cLng) * factor,
+        }));
+      } else {
+        // rotella su = antiorario, giù = orario (~4°)
+        const angle = ((delta < 0 ? 4 : -4) * Math.PI) / 180;
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        updates = positions.map((p) => {
+          const dLat = p.lat - cLat;
+          const dLngAdj = (p.lng - cLng) * cosLat;
+          const newDLngAdj = dLngAdj * cos - dLat * sin;
+          const newDLat = dLngAdj * sin + dLat * cos;
+          return {
+            _id: p.id,
+            lat: cLat + newDLat,
+            lng: cLng + newDLngAdj / cosLat,
+          };
+        });
+      }
+
+      commitPositionUpdates(updates);
+    };
+
+    map.on("mousedown", onMouseDown);
+    map.on("mousemove", onMouseMove);
+    map.on("mouseup", onMouseUp);
+    map.on("wheel", onWheel);
+    map.getCanvas().addEventListener("contextmenu", onContextMenu);
+    window.addEventListener("mouseup", endRightPan);
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      map.off("mousedown", onMouseDown);
+      map.off("mousemove", onMouseMove);
+      map.off("mouseup", onMouseUp);
+      map.off("wheel", onWheel);
+      map.getCanvas().removeEventListener("contextmenu", onContextMenu);
+      window.removeEventListener("mouseup", endRightPan);
+      window.removeEventListener("keydown", onKeyDown);
+      try {
+        map.dragPan.enable();
+        try { map.dragRotate.enable(); } catch { /* ignore */ }
+        try { map.touchZoomRotate?.enableRotation?.(); } catch { /* ignore */ }
+        if (map.boxZoom) map.boxZoom.enable();
+        map.scrollZoom.enable();
+        map.getCanvas().style.cursor = "";
+        clearLassoDraw(map);
+      } catch { /* ignore */ }
+    };
+  }, [isLassoActive, selectedLassoIds.length, lassoLinkParentMode, lassoScaleMode, lassoRotateMode, mapLoaded, isSatellite, editingMarkerId]);
 
 
   return (

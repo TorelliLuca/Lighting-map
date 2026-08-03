@@ -14,6 +14,7 @@ function MapControls({
   cities,
   selectedProprietaFilter,
   setSelectedProprietaFilter,
+  interactionsDisabled = false,
 }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const menuRef = useRef(null)
@@ -42,11 +43,13 @@ function MapControls({
   }, [isExpanded])
 
   return (
-    <div className="fixed bottom-6 left-6 z-20">
+    <div className={`fixed bottom-6 left-6 z-20 ${interactionsDisabled ? "opacity-50" : ""}`}>
       <button
         ref={buttonRef}
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="p-3 bg-black/70 hover:bg-blue-900/70 text-blue-400 rounded-full backdrop-blur-xl border border-blue-500/40 shadow-[0_0_15px_rgba(59,130,246,0.3)] transition-all duration-300 hover:scale-110"
+        onClick={() => !interactionsDisabled && setIsExpanded(!isExpanded)}
+        disabled={interactionsDisabled}
+        title={interactionsDisabled ? "Disponibile al termine del caricamento" : undefined}
+        className="p-3 bg-black/70 hover:bg-blue-900/70 text-blue-400 rounded-full backdrop-blur-xl border border-blue-500/40 shadow-[0_0_15px_rgba(59,130,246,0.3)] transition-all duration-300 hover:scale-110 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:bg-black/70"
         aria-label={isExpanded ? "Close controls" : "Open controls"}
       >
         {isExpanded ? <X className="h-5 w-5" /> : <Filter className="h-5 w-5" />}

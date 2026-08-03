@@ -37,20 +37,34 @@ export const clearBlanket = (str) => {
     "punti_luce",
     "tipo",
     "__v",
-    "city"
+    "city",
+    "parent",
+    // Campi legacy sostituiti dallo schema aggiornato
+    "lampada_potenza",
+    "lampada_e_potenza",
+    "modello",
+    "modello_armatura",
+    "lampada",
   ];
   
   export const listIgnoratedFieldsQE = [
     "_id",
+    "parent",
     "composizione_punto",
     "lotto",
     "quadro",
     "proprieta",
     "tipo_apparecchio",
+    "armatura",
+    "marca_apparecchio",
     "modello",
+    "modello_apparecchio",
     "numero_apparecchi",
     "lampada_potenza",
+    "tipo_lampada",
+    "potenza_lampada",
     "tipo_sostegno",
+    "altezza_sostegno",
     "tipo_linea",
     "promiscuita",
     "note",
@@ -58,6 +72,122 @@ export const clearBlanket = (str) => {
     "__v",
     "city"
   ];
+
+  /** Ordine di visualizzazione campi InfoWindow (allineato allo schema lightPoints). */
+  export const INFO_WINDOW_FIELD_ORDER = [
+    "marker",
+    "numero_palo",
+    "composizione_punto",
+    "numero_apparecchi",
+    "indirizzo",
+    "lotto",
+    "quadro",
+    "proprieta",
+    "tipo_apparecchio",
+    "marca_apparecchio",
+    "modello_apparecchio",
+    "altezza_sostegno",
+    "armatura",
+    "tipo_lampada",
+    "potenza_lampada",
+    "tipo_sostegno",
+    "tipo_linea",
+    "promiscuita",
+    "note",
+    "garanzia",
+    "pod",
+    "numero_contatore",
+    "alimentazione",
+    "potenza_contratto",
+    "potenza",
+    "punti_luce",
+    "tipo",
+    "data_creazione",
+    "segnalazioni_in_corso",
+    "segnalazioni_risolte",
+    "operazioni_effettuate",
+  ];
+
+  export const orderInfoWindowEntries = (content) => {
+    if (!content || typeof content !== "object") return []
+    const keys = Object.keys(content)
+    const ordered = INFO_WINDOW_FIELD_ORDER.filter((key) => keys.includes(key))
+    const rest = keys.filter((key) => !INFO_WINDOW_FIELD_ORDER.includes(key))
+    return [...ordered, ...rest].map((key) => [key, content[key]])
+  };
+
+  /** Tipo lampada: campo dedicato o fallback da lampada_potenza legacy. */
+  export const getTipoLampada = (data) => {
+    if (!data) return ""
+    if (data.tipo_lampada) return String(data.tipo_lampada).trim()
+    return (data.lampada_potenza || "").split(/\s+/)[0] || ""
+  }
+
+  /** Potenza lampada: campo dedicato o fallback da lampada_potenza legacy. */
+  export const getPotenzaLampada = (data) => {
+    if (!data) return ""
+    if (data.potenza_lampada != null && data.potenza_lampada !== "") {
+      return String(data.potenza_lampada).trim()
+    }
+    const parts = (data.lampada_potenza || "").split(/\s+/)
+    return parts.slice(1).join(" ") || ""
+  }
+
+  /** Campi legacy da non mostrare dopo la migrazione in visualizzazione. */
+  export const LEGACY_LIGHT_POINT_FIELDS = [
+    "lampada_potenza",
+    "lampada_e_potenza",
+    "modello",
+    "modello_armatura",
+    "lampada",
+    "potenza",
+  ]
+
+  /** Migra campi legacy per form/modifica. */
+  export const migrateLegacyLightPointFields = (data) => {
+    const migrated = { ...data }
+    if (!migrated.tipo_lampada && migrated.lampada_potenza) {
+      const parts = String(migrated.lampada_potenza).trim().split(/\s+/)
+      migrated.tipo_lampada = parts[0] || ""
+      migrated.potenza_lampada = parts.slice(1).join(" ") || ""
+    }
+    if (!migrated.modello_apparecchio && migrated.modello) {
+      migrated.modello_apparecchio = migrated.modello
+    }
+    if (!migrated.armatura && migrated.modello_armatura) {
+      migrated.armatura = migrated.modello_armatura
+    }
+    return migrated
+  }
+
+  /**
+   * Normalizza un punto luce per la visualizzazione:
+   * copia i valori legacy nei campi nuovi (se vuoti) e rimuove i campi obsoleti.
+   */
+  export const normalizeLightPointForDisplay = (data) => {
+    if (!data || typeof data !== "object") return {}
+    const normalized = migrateLegacyLightPointFields({ ...data })
+    for (const key of LEGACY_LIGHT_POINT_FIELDS) {
+      delete normalized[key]
+    }
+    return normalized
+  }
+
+  /** Prepara payload salvataggio con i campi schema aggiornati. */
+  export const prepareLightPointPayload = (formData) => {
+    const dataToSend = { ...formData }
+    if (dataToSend.lampada != null || dataToSend.potenza != null) {
+      dataToSend.tipo_lampada = dataToSend.tipo_lampada || dataToSend.lampada || ""
+      dataToSend.potenza_lampada = dataToSend.potenza_lampada ?? dataToSend.potenza ?? ""
+      delete dataToSend.lampada
+      delete dataToSend.potenza
+    }
+    delete dataToSend.lampada_potenza
+    delete dataToSend.modello
+    delete dataToSend.modello_armatura
+    delete dataToSend.lampada_e_potenza
+    return dataToSend
+  }
   
   // Translation dictionary
   export const translation_report_type = {
@@ -91,6 +221,8 @@ export const translateUserType = (userType) => {
       return 'Amministratore';
     case 'SUPER_ADMIN':
       return 'Super Amministratore';
+    case 'SURVEYOR':
+      return 'Rilevatore';
     default:
       return 'Utente';
   }

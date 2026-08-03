@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react"
 import { BookOpen, X } from "lucide-react"
-import { DEFAULT_COLOR } from "../utils/ColorGenerator"
+import { DEFAULT_COLOR, FC_QUADRO_COLOR, isFcQuadro } from "../utils/ColorGenerator"
 
 function LegendGlass({ highlightOption, legendColorMap }) {
   const [open, setOpen] = useState(false)
@@ -49,7 +49,10 @@ function LegendGlass({ highlightOption, legendColorMap }) {
         { label: "Altro", color: "#6b7280" },
       ]
   } else if (highlightOption === "MARKER" && legendColorMap.quadro) {
-    legendItems = Object.entries(legendColorMap.quadro).map(([label, color]) => ({ label, color }))
+    legendItems = Object.entries(legendColorMap.quadro).map(([label, color]) => ({
+      label,
+      color: isFcQuadro(label) ? FC_QUADRO_COLOR : color,
+    }))
   } else if (highlightOption === "LOTTO" && legendColorMap.lotto) {
     legendItems = Object.entries(legendColorMap.lotto).map(([label, color]) => ({ label, color }))
   } else if (highlightOption === "TIPO_LAMPADA" && legendColorMap.tipo_lampada) {
