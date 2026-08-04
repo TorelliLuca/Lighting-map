@@ -1,138 +1,266 @@
-import { useState, useEffect, useRef } from "react"
-import { BookOpen, X } from "lucide-react"
+import { useMemo, useState, useEffect, useRef } from "react"
+import { BookOpen, Search, X } from "lucide-react"
 import { DEFAULT_COLOR, FC_QUADRO_COLOR, isFcQuadro } from "../utils/ColorGenerator"
+import MapFabBottomSheet from "./ui/MapFabBottomSheet"
+import { useMediaQuery } from "../hooks/useMediaQuery"
+import { INFO_WINDOW_MOBILE_MQ } from "../utils/infoWindowActions"
+
+const HIGHLIGHT_TITLES = {
+  PROPRIETA: "Proprietà",
+  MARKER: "Quadro",
+  LOTTO: "Lotto",
+  TIPO_LAMPADA: "Tipo lampada",
+  TIPO_APPARECCHIO: "Tipo apparecchio",
+}
+
+const SEARCH_THRESHOLD = 8
+
+function buildLegendItems(highlightOption, legendColorMap = {}) {
+  if (highlightOption === "PROPRIETA" && legendColorMap.proprieta) {
+    return [
+      { label: "Comune", color: "#3b82f6" },
+      { label: "EnelSole", color: "#ef4444" },
+      { label: "Altro", color: "#6b7280" },
+    ]
+  }
+  if (highlightOption === "MARKER" && legendColorMap.quadro) {
+    return Object.entries(legendColorMap.quadro).map(([label, color]) => ({
+      label,
+      color: isFcQuadro(label) ? FC_QUADRO_COLOR : color,
+    }))
+  }
+  if (highlightOption === "LOTTO" && legendColorMap.lotto) {
+    return Object.entries(legendColorMap.lotto).map(([label, color]) => ({
+      label,
+      color,
+    }))
+  }
+  if (highlightOption === "TIPO_LAMPADA" && legendColorMap.tipo_lampada) {
+    return [
+      { label: "PC", color: "#3b82f6" },
+      ...Object.entries(legendColorMap.tipo_lampada)
+        .map(([label, color]) => ({ label: label.split(" ")[0], color }))
+        .filter((item) => item.label !== "PC"),
+    ]
+  }
+  if (highlightOption === "TIPO_APPARECCHIO" && legendColorMap.tipo_apparecchio) {
+    return Object.entries(legendColorMap.tipo_apparecchio).map(([label, color]) => ({
+      label,
+      color,
+    }))
+  }
+  return [
+    { label: "Segnalazione aperta", color: "#FFCC00" },
+    { label: "Nessuna segnalazione", color: DEFAULT_COLOR },
+  ]
+}
+
+function getLegendSubtitle(highlightOption) {
+  return HIGHLIGHT_TITLES[highlightOption] || "Segnalazioni"
+}
+
+const LegendList = ({ items, dense = false, columns = 1 }) => {
+  if (items.length === 0) {
+    return <p className="text-blue-300/80 text-sm py-2">Nessun dato disponibile</p>
+  }
+
+  return (
+    <ul
+      className={`${dense ? "gap-y-1.5" : "gap-y-2"} grid ${
+        columns === 2 ? "grid-cols-2 gap-x-4" : "grid-cols-1"
+      }`}
+    >
+      {items.map((item, idx) => (
+        <li
+          key={`${item.label}-${idx}`}
+          className="flex items-center gap-2.5 min-w-0 rounded-md px-1.5 py-1 -mx-1.5 hover:bg-blue-900/30 transition-colors"
+        >
+          <span
+            className="inline-block shrink-0 rounded-full border border-blue-400/50 shadow-sm"
+            style={{
+              width: dense ? 14 : 16,
+              height: dense ? 14 : 16,
+              background: item.color,
+            }}
+            aria-hidden
+          />
+          <span
+            className={`text-white truncate ${dense ? "text-xs" : "text-sm"} font-medium`}
+            title={item.label}
+          >
+            {item.label}
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
 
 function LegendGlass({ highlightOption, legendColorMap }) {
   const [open, setOpen] = useState(false)
-  const [isMobile, setIsMobile] = useState(false)
-  const legendRef = useRef(null)
+  const [query, setQuery] = useState("")
+  const isMobile = useMediaQuery(INFO_WINDOW_MOBILE_MQ)
+  const panelRef = useRef(null)
   const buttonRef = useRef(null)
+  const searchRef = useRef(null)
 
-  // Responsive: chiudi su mobile
+  const legendItems = useMemo(
+    () => buildLegendItems(highlightOption, legendColorMap),
+    [highlightOption, legendColorMap],
+  )
+
+  const subtitle = getLegendSubtitle(highlightOption)
+  const title = `Legenda · ${subtitle}`
+  const showSearch = !isMobile && legendItems.length >= SEARCH_THRESHOLD
+
+  const filteredItems = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return legendItems
+    return legendItems.filter((item) => item.label.toLowerCase().includes(q))
+  }, [legendItems, query])
+
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth <= 640)
-    checkMobile()
-    window.addEventListener("resize", checkMobile)
-    return () => window.removeEventListener("resize", checkMobile)
-  }, [])
-  useEffect(() => {
-    if (isMobile) setOpen(false)
+    setOpen(false)
+    setQuery("")
   }, [isMobile])
 
-  // Chiudi la legenda se clicco fuori (UX migliorata)
   useEffect(() => {
+    setQuery("")
+  }, [highlightOption])
+
+  useEffect(() => {
+    if (isMobile || !open) return undefined
+
     function handleClickOutside(event) {
       if (
-        open &&
-        legendRef.current &&
-        !legendRef.current.contains(event.target) &&
+        panelRef.current &&
+        !panelRef.current.contains(event.target) &&
         buttonRef.current &&
         !buttonRef.current.contains(event.target)
       ) {
         setOpen(false)
       }
     }
+
+    function handleKey(event) {
+      if (event.key === "Escape") setOpen(false)
+    }
+
     document.addEventListener("mousedown", handleClickOutside)
-    document.addEventListener("touchstart", handleClickOutside)
+    document.addEventListener("keydown", handleKey)
     return () => {
       document.removeEventListener("mousedown", handleClickOutside)
-      document.removeEventListener("touchstart", handleClickOutside)
+      document.removeEventListener("keydown", handleKey)
     }
-  }, [open])
+  }, [open, isMobile])
 
-  // Semplificato: prendo direttamente la mappa colori passata come prop
-  let legendItems = []
-  if (highlightOption === "PROPRIETA" && legendColorMap.proprieta) {
-    legendItems = [
-        { label: "Comune", color: "#3b82f6" },
-        { label: "EnelSole", color: "#ef4444" },
-        { label: "Altro", color: "#6b7280" },
-      ]
-  } else if (highlightOption === "MARKER" && legendColorMap.quadro) {
-    legendItems = Object.entries(legendColorMap.quadro).map(([label, color]) => ({
-      label,
-      color: isFcQuadro(label) ? FC_QUADRO_COLOR : color,
-    }))
-  } else if (highlightOption === "LOTTO" && legendColorMap.lotto) {
-    legendItems = Object.entries(legendColorMap.lotto).map(([label, color]) => ({ label, color }))
-  } else if (highlightOption === "TIPO_LAMPADA" && legendColorMap.tipo_lampada) {
-    legendItems = [
-      { label: "PC", color: "#3b82f6" },
-      ...Object.entries(legendColorMap.tipo_lampada)
-        .map(([label, color]) => ({ label: label.split(" ")[0], color }))
-        .filter(item => item.label !== "PC")
-    ]
-  } else if (highlightOption === "TIPO_APPARECCHIO" && legendColorMap.tipo_apparecchio) {
-    legendItems = Object.entries(legendColorMap.tipo_apparecchio).map(([label, color]) => ({ label, color }))
-  } else {
-    legendItems = [
-      { label: "Segnalazione aperta", color: "#FFCC00" },
-      { label: "Nessuna segnalazione", color: DEFAULT_COLOR },
-    ]
+  useEffect(() => {
+    if (open && showSearch) {
+      const t = window.setTimeout(() => searchRef.current?.focus(), 80)
+      return () => window.clearTimeout(t)
+    }
+  }, [open, showSearch, highlightOption])
+
+  const closeMenu = () => setOpen(false)
+
+  const fabButton = (
+    <button
+      ref={buttonRef}
+      type="button"
+      aria-label={open ? "Chiudi legenda" : "Apri legenda"}
+      aria-expanded={open}
+      onClick={() => setOpen((v) => !v)}
+      className={`flex items-center justify-center w-12 h-12 rounded-full border border-blue-500/40 bg-black/70 text-blue-300 shadow-[0_0_15px_rgba(59,130,246,0.3)] backdrop-blur-xl transition-all duration-300 hover:scale-110 focus:outline-none focus:ring-2 focus:ring-blue-500/50 ${
+        open ? "ring-2 ring-blue-500/60" : ""
+      }`}
+    >
+      {open ? <X className="h-5 w-5" /> : <BookOpen className="h-5 w-5" />}
+    </button>
+  )
+
+  // —— Mobile: FAB + bottom sheet ——
+  if (isMobile) {
+    return (
+      <div className="fixed bottom-42 left-6 z-4 select-none">
+        {fabButton}
+        <MapFabBottomSheet isOpen={open} onClose={closeMenu} title={title} tall>
+          <LegendList items={legendItems} dense />
+        </MapFabBottomSheet>
+      </div>
+    )
   }
+
+  // —— Desktop: FAB + pannello laterale più ampio ——
+  const useTwoColumns = filteredItems.length > 6
 
   return (
     <div className="fixed bottom-42 left-6 z-4 select-none">
-      {/* Bottone palette */}
-      <button
-        ref={buttonRef}
-        aria-label={open ? "Chiudi legenda" : "Apri legenda"}
-        onClick={() => setOpen((v) => !v)}
-        className={`flex items-center justify-center w-12 h-12 rounded-full border border-blue-500/40 bg-black/70 text-blue-300 shadow-lg backdrop-blur-xl transition-all duration-300 hover:scale-110 focus:outline-none focus:ring-2 focus:ring-blue-500/50 ${open ? "ring-2 ring-blue-500/60" : ""}`}
-        style={{ boxShadow: "0 0 15px rgba(59,130,246,0.3)" }}
-      >
-        {open ? <X className="h-6 w-6" /> : <BookOpen className="h-6 w-6" />}
-      </button>
-      {/* Legenda espansa, ora scorribile e con scrollbar custom */}
+      {fabButton}
+
       <div
-        ref={legendRef}
-        className={`fixed left-6 bottom-60 z-[9999] bg-black/70 backdrop-blur-xl border border-blue-500/40 rounded-xl shadow-[0_0_25px_rgba(0,149,255,0.15)] p-6 space-y-6 min-w-[260px] transition-all duration-300 overflow-hidden ${open ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"} scrollbar-thin scrollbar-thumb-blue-700/70 scrollbar-track-blue-950/40`}
-        style={{
-          backdropFilter: "blur(16px)",
-          WebkitBackdropFilter: "blur(16px)",
-          minWidth: "220px",
-          maxHeight: isMobile ? "10rem" : "15rem",
-          overflowY: "auto",
-        }}
+        ref={panelRef}
+        role="dialog"
+        aria-label={title}
+        className={`absolute bottom-0 left-16 origin-bottom-left transition-all duration-200 ${
+          open
+            ? "opacity-100 scale-100 pointer-events-auto translate-x-0"
+            : "opacity-0 scale-95 pointer-events-none -translate-x-1"
+        }`}
       >
-        <h4 className="text-blue-200 text-lg font-semibold mb-3 flex items-center gap-2">
-          <BookOpen className="h-5 w-5" />
-          Legenda
-        </h4>
-        <ul className="space-y-2">
-          {legendItems.length === 0 && (
-            <li className="text-blue-300 text-sm">Nessun dato disponibile</li>
+        <div className="w-[min(420px,calc(100vw-7rem))] max-h-[min(52vh,440px)] flex flex-col rounded-2xl border border-blue-500/40 bg-black/80 backdrop-blur-xl shadow-[0_0_30px_rgba(0,149,255,0.18)] overflow-hidden">
+          <div className="shrink-0 flex items-start gap-3 px-4 pt-3.5 pb-2.5 border-b border-blue-500/25">
+            <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-lg bg-blue-900/50 border border-blue-500/30">
+              <BookOpen className="h-4 w-4 text-blue-300" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-sm font-semibold text-white truncate">{title}</h2>
+              <p className="text-[11px] text-blue-300/80 mt-0.5">
+                {legendItems.length === 0
+                  ? "Nessuna voce"
+                  : `${legendItems.length} ${legendItems.length === 1 ? "voce" : "voci"}`}
+                {query.trim() && filteredItems.length !== legendItems.length
+                  ? ` · ${filteredItems.length} trovate`
+                  : ""}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={closeMenu}
+              aria-label="Chiudi legenda"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-blue-300 hover:bg-blue-800/50 hover:text-white transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {showSearch && (
+            <div className="shrink-0 px-3 pt-2.5 pb-1">
+              <label className="relative block">
+                <span className="sr-only">Cerca nella legenda</span>
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-blue-400/80" />
+                <input
+                  ref={searchRef}
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Cerca…"
+                  className="w-full rounded-lg border border-blue-500/30 bg-blue-950/50 py-2 pl-9 pr-3 text-sm text-white placeholder:text-blue-400/50 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                />
+              </label>
+            </div>
           )}
-          {legendItems.map((item, idx) => (
-            <li key={item.label + idx} className="flex items-center gap-3 animate-fadein">
-              <span
-                className="inline-block rounded-full border border-blue-400 shadow"
-                style={{ width: 22, height: 22, background: item.color }}
-              ></span>
-              <span className="text-white text-base font-medium truncate" title={item.label}>{item.label}</span>
-            </li>
-          ))}
-        </ul>
+
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 scrollbar-thin">
+            {filteredItems.length === 0 && legendItems.length > 0 ? (
+              <p className="text-blue-300/80 text-sm py-4 text-center">Nessun risultato</p>
+            ) : (
+              <LegendList items={filteredItems} dense columns={useTwoColumns ? 2 : 1} />
+            )}
+          </div>
+        </div>
       </div>
+
       <style>{`
-        @media (max-width: 640px) {
-          .fixed.top-40.right-4 {
-            top: 1rem;
-            right: 1rem;
-          }
-          .w-64 {
-            width: 90vw !important;
-            min-width: 0 !important;
-          }
-        }
-        .animate-fadein {
-          animation: fadein 0.5s;
-        }
-        @keyframes fadein {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        /* Scrollbar custom per Chrome/Edge */
         .scrollbar-thin::-webkit-scrollbar {
           width: 6px;
         }
@@ -148,4 +276,4 @@ function LegendGlass({ highlightOption, legendColorMap }) {
   )
 }
 
-export default LegendGlass 
+export default LegendGlass

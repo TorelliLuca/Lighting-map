@@ -118,7 +118,8 @@ const AddElectricPanelForm = ({ onSave, onBack, tempPosition, selectedCity, elec
   }
 
   const handleSubmit = async (e) => {
-    e.preventDefault()
+    e?.preventDefault?.()
+    if (isSaving) return
     setIsSaving(true)
 
     try {
@@ -404,7 +405,8 @@ const AddElectricPanelForm = ({ onSave, onBack, tempPosition, selectedCity, elec
           Indietro
         </button>
         <button
-          type="submit"
+          type="button"
+          onClick={handleSubmit}
           disabled={isSaving || !formData.numero_palo}
           className={`${isMobile ? "w-full" : "flex-1"} flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors min-h-[44px]`}
         >

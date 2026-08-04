@@ -112,16 +112,17 @@ function filterMarkers(markers, filterType, selectedProprietaFilter) {
       if (!selectedProprietaFilter) {
         filteredMarkers = [];
       } else {
-        const selectedProprieta = selectedProprietaFilter.toLowerCase();
+        const selectedProprieta = selectedProprietaFilter.toLowerCase().trim();
         filteredMarkers = markers.filter((marker) => {
-          const prop = (marker.proprieta || '').toLowerCase();
+          const prop = (marker.proprieta || '').toLowerCase().trim();
           if (selectedProprieta === 'municipale') {
             return prop === 'comune' || prop === 'municipale';
           }
           if (selectedProprieta === 'enelsole') {
             return prop === 'enelsole';
           }
-          return false;
+          // Fallback generico per tutti gli altri valori (es. progetto, altro, ecc.)
+          return prop === selectedProprieta;
         });
       }
       break;
@@ -180,19 +181,30 @@ function markersToGeoJSON(markers, highlightOption) {
 
   return {
     type: 'FeatureCollection',
-    features: markersForMap.map((m) => ({
-      type: 'Feature',
-      geometry: {
-        type: 'Point',
-        coordinates: [parseFloat(m.lng), parseFloat(m.lat)],
-      },
-      properties: { 
-        ...m, 
-        color: getMarkerColor(m, highlightOption, colorMappings),
-        segnalazioni_in_corso_length: m.segnalazioni_in_corso ? m.segnalazioni_in_corso.length : 0,
-        city: m.city // aggiungo city se presente
-      },
-    })),
+    features: markersForMap
+      .map((m) => {
+        const lat = parseFloat(String(m.lat ?? '').replace(',', '.'));
+        const lng = parseFloat(String(m.lng ?? '').replace(',', '.'));
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        return {
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [lng, lat],
+          },
+          properties: { 
+            ...m,
+            // MapLibre: proprietà flat (niente oggetti annidati non serializzabili)
+            _id: m._id != null ? String(m._id) : m._id,
+            lat,
+            lng,
+            color: getMarkerColor(m, highlightOption, colorMappings),
+            segnalazioni_in_corso_length: m.segnalazioni_in_corso ? m.segnalazioni_in_corso.length : 0,
+            city: m.city
+          },
+        };
+      })
+      .filter(Boolean),
   };
 }
 

@@ -4,7 +4,14 @@ import { ChevronLeft, Save, MapPin, ChevronDown } from "lucide-react"
 import toast from "react-hot-toast"
 import { prepareLightPointPayload } from "../utils/utils"
 
-const AddLightPointForm = ({ onSave, onBack, tempPosition, selectedCity, electricPanels = [] }) => {
+const AddLightPointForm = ({
+  onSave,
+  onBack,
+  tempPosition,
+  selectedCity,
+  electricPanels = [],
+  existingPoleNumbers = new Set(),
+}) => {
   const [formData, setFormData] = useState({
     numero_palo: "",
     indirizzo: "",
@@ -30,6 +37,10 @@ const AddLightPointForm = ({ onSave, onBack, tempPosition, selectedCity, electri
   })
   const [isSaving, setIsSaving] = useState(false)
   const [isFetchingAddress, setIsFetchingAddress] = useState(false)
+
+  const normalizedNumeroPalo = String(formData.numero_palo || "").trim().toLowerCase()
+  const isNumeroPaloDuplicate =
+    normalizedNumeroPalo.length > 0 && existingPoleNumbers.has(normalizedNumeroPalo)
 
   // Detect mobile device
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768
@@ -218,7 +229,12 @@ const AddLightPointForm = ({ onSave, onBack, tempPosition, selectedCity, electri
   }
 
   const handleSubmit = async (e) => {
-    e.preventDefault()
+    e?.preventDefault?.()
+    if (isSaving) return
+    if (isNumeroPaloDuplicate) {
+      toast.error(`Il numero palo "${formData.numero_palo}" è già presente nel comune ${selectedCity}.`)
+      return
+    }
     setIsSaving(true)
 
     try {
@@ -308,7 +324,14 @@ const AddLightPointForm = ({ onSave, onBack, tempPosition, selectedCity, electri
       {/* Campi obbligatori */}
       <div className="p-4 bg-blue-900/20 border border-blue-500/30 rounded-lg">
         <h4 className="text-sm font-medium text-blue-200 mb-3">Campi Obbligatori</h4>
-        <div className="space-y-3">{renderField("numero_palo", "Numero Palo", "text", true)}</div>
+        <div className="space-y-3">
+          {renderField("numero_palo", "Numero Palo", "text", true)}
+          {isNumeroPaloDuplicate && (
+            <p className="text-sm text-red-300">
+              Numero palo gia` presente in questo comune. Inserisci un valore univoco.
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Tipo lampada e potenza */}
@@ -468,8 +491,9 @@ const AddLightPointForm = ({ onSave, onBack, tempPosition, selectedCity, electri
           Indietro
         </button>
         <button
-          type="submit"
-          disabled={isSaving || !formData.numero_palo}
+          type="button"
+          onClick={handleSubmit}
+          disabled={isSaving || !formData.numero_palo || isNumeroPaloDuplicate}
           className={`${isMobile ? "w-full" : "flex-1"} flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors min-h-[44px]`}
         >
           <Save className="h-4 w-4" />

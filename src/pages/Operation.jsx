@@ -48,6 +48,10 @@ export default function Operation() {
       navigate("/")
       return
     }
+    if (userData.user_type === "SURVEYOR") {
+      navigate("/dashboard")
+      return
+    }
 
     // Parse query parameters
     const params = new URLSearchParams(location.search)

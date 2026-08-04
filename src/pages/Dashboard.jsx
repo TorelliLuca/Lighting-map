@@ -21,6 +21,7 @@ import ErrorBoundary from "../components/ErrorBoundary.jsx"
 import InfoWindowMobileSheet from "../components/InfoWindowMobileSheet.jsx"
 import DifferenteGroupSideWindow from "../components/DifferenteGroupSideWindow.jsx"
 import { LassoToolbar } from "../components/LassoToolbar.jsx"
+import ConfirmDialog from "../components/ui/ConfirmDialog.jsx"
 import { useMediaQuery } from "../hooks/useMediaQuery.js"
 
 import { translateString, transformDateToIT } from "../utils/utils"
@@ -51,6 +52,7 @@ const BASE_URL = import.meta.env.VITE_SERVER_URL
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API
 const BATCH_PAGE_SIZE = 500
 const BATCH_THRESHOLD = 500
+const SURVEYOR_EDIT_ROLES = new Set(["SUPER_ADMIN", "SURVEYOR"])
 
 const STORAGE_KEY_PREFIX = "lighting-map-"
 const STORAGE_KEYS = {
@@ -59,6 +61,25 @@ const STORAGE_KEYS = {
   FILTER_OPTION: `${STORAGE_KEY_PREFIX}filter-option`,
   MAP_CENTER: `${STORAGE_KEY_PREFIX}map-center`,
   MAP_ZOOM: `${STORAGE_KEY_PREFIX}map-zoom`,
+  VISUALIZATION_MODE: `${STORAGE_KEY_PREFIX}visualization-mode`,
+}
+
+function readStoredVisualizationMode() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEYS.VISUALIZATION_MODE)
+    if (stored === "semplice" || stored === "complessa") return stored
+  } catch (_) {
+    /* ignore */
+  }
+  return "semplice"
+}
+
+function readStoredSelectedCity() {
+  try {
+    return localStorage.getItem(STORAGE_KEYS.SELECTED_CITY) || ""
+  } catch (_) {
+    return ""
+  }
 }
 
 function Dashboard() {
@@ -85,7 +106,7 @@ function Dashboard() {
   const userLocationCircleRef = useRef(null)
   const [map, setMap] = useState(null)
   const [activeMarkers, setActiveMarkers] = useState([])
-  const [selectedCity, setSelectedCity] = useState("")
+  const [selectedCity, setSelectedCity] = useState(readStoredSelectedCity)
   const [highlightOption, setHighlightOption] = useState("")
   const [filterOption, setFilterOption] = useState("SELECT")
   const [showInfoPanel, setShowInfoPanel] = useState(false)
@@ -111,7 +132,16 @@ function Dashboard() {
   const [loaderVariant, setLoaderVariant] = useState("fullscreen")
   // Progresso loader isolato (aggiornato via ref → non re-renderizza il Dashboard)
   const mapLoadOverlayRef = useRef(null)
-  const mapLoadAbortRef = useRef(0)
+  // Abort token separati: semplice e complessa non devono invalidarsi a vicenda
+  const simpleLoadAbortRef = useRef(0)
+  const complexLoadAbortRef = useRef(0)
+  const mapLoadAbortRef = complexLoadAbortRef // alias legacy per cleanupAndLoadMapData
+  const getTownhallGeojsonRef = useRef(getTownhallGeojson)
+  const getTownhallGeojsonPageRef = useRef(getTownhallGeojsonPage)
+  const getTownhallMetaRef = useRef(getTownhallMeta)
+  getTownhallGeojsonRef.current = getTownhallGeojson
+  getTownhallGeojsonPageRef.current = getTownhallGeojsonPage
+  getTownhallMetaRef.current = getTownhallMeta
   const [allMarkersData, setAllMarkersData] = useState([])
   // Add state to track the current city's data loading status
   const [cityDataLoaded, setCityDataLoaded] = useState(false)
@@ -162,7 +192,8 @@ function Dashboard() {
   const [showUnlinkedChip, setShowUnlinkedChip] = useState(false)
 
   // Stato per la modalità di visualizzazione ("semplice" o "complessa")
-  const [visualizationMode, setVisualizationMode] = useState("complessa")
+  // Init da localStorage per evitare flash "complessa" → Google Maps che invalida il load semplice
+  const [visualizationMode, setVisualizationMode] = useState(readStoredVisualizationMode)
   const [isComplexAllowed, setIsComplexAllowed] = useState(true)
 
   // Nuovo stato per markers semplici (modalità MapLibre)
@@ -188,6 +219,15 @@ function Dashboard() {
   const [isLassoLinking, setIsLassoLinking] = useState(false)
   const [lassoScaleMode, setLassoScaleMode] = useState(false)
   const [lassoRotateMode, setLassoRotateMode] = useState(false)
+  const [confirmDialogState, setConfirmDialogState] = useState({
+    open: false,
+    title: "",
+    description: "",
+    confirmLabel: "Conferma",
+    cancelLabel: "Annulla",
+    variant: "danger",
+  })
+  const confirmResolverRef = useRef(null)
   // Ref per gestire il poligono dei confini del comune su Google Maps
   const townhallBorderRef = useRef(null)
   const townhallBorderFeaturesRef = useRef([])
@@ -200,7 +240,7 @@ function Dashboard() {
     }
 
     let cancelled = false
-    const loadId = ++mapLoadAbortRef.current
+    const loadId = ++simpleLoadAbortRef.current
 
     const toActiveFormat = (markers) =>
       markers.map((m) => {
@@ -231,15 +271,15 @@ function Dashboard() {
       })
 
       try {
-        const metaRes = await getTownhallMeta(selectedCity)
-        if (cancelled || loadId !== mapLoadAbortRef.current) return
+        const metaRes = await getTownhallMetaRef.current(selectedCity)
+        if (cancelled || loadId !== simpleLoadAbortRef.current) return
 
         const total = metaRes?.data?.total ?? expectedTotal
         mapLoadOverlayRef.current?.update({ total, processed: null })
 
         if (total <= BATCH_THRESHOLD) {
-          const res = await getTownhallGeojson(selectedCity)
-          if (cancelled || loadId !== mapLoadAbortRef.current) return
+          const res = await getTownhallGeojsonRef.current(selectedCity)
+          if (cancelled || loadId !== simpleLoadAbortRef.current) return
           if (res?.data?.features) {
             const features = res.data.features
             const nextSimpleMarkers = features.map((f) => {
@@ -280,12 +320,12 @@ function Dashboard() {
         const acc = []
         let offset = 0
         while (offset < total) {
-          const pageRes = await getTownhallGeojsonPage(
+          const pageRes = await getTownhallGeojsonPageRef.current(
             selectedCity,
             offset,
             BATCH_PAGE_SIZE,
           )
-          if (cancelled || loadId !== mapLoadAbortRef.current) return
+          if (cancelled || loadId !== simpleLoadAbortRef.current) return
 
           const features = pageRes?.data?.features || []
           const pageTotal = pageRes?.data?.total ?? total
@@ -310,7 +350,7 @@ function Dashboard() {
           })
         }
 
-        if (cancelled || loadId !== mapLoadAbortRef.current) return
+        if (cancelled || loadId !== simpleLoadAbortRef.current) return
 
         const activeMarkersFormat = toActiveFormat(acc)
         setActiveMarkers(activeMarkersFormat)
@@ -341,13 +381,7 @@ function Dashboard() {
     return () => {
       cancelled = true
     }
-  }, [
-    visualizationMode,
-    selectedCity,
-    getTownhallGeojson,
-    getTownhallGeojsonPage,
-    getTownhallMeta,
-  ])
+  }, [visualizationMode, selectedCity])
 
   useEffect(()=>{
     const activeMarkersFormat = simpleMarkers.map(m => {
@@ -759,6 +793,14 @@ function Dashboard() {
     return allMarkersData.map((m) => m.data).filter(Boolean)
   }, [visualizationMode, simpleMarkers, allMarkersData])
 
+  const existingPoleNumbers = useMemo(() => {
+    return new Set(
+      topologySourceMarkers
+        .map((marker) => String(marker?.numero_palo || "").trim().toLowerCase())
+        .filter(Boolean),
+    )
+  }, [topologySourceMarkers])
+
   const topologyGeojson = useMemo(
     () => buildTopologyLineFeatures(topologySourceMarkers),
     [topologySourceMarkers],
@@ -836,7 +878,7 @@ function Dashboard() {
     localStorage.setItem("lighting-map-show-panel-number", JSON.stringify(showPanelNumber))
     localStorage.setItem("lighting-map-show-streetlamp-number", JSON.stringify(showStreetLampNumber))
     localStorage.setItem("lighting-map-show-topology-lines", JSON.stringify(showTopologyLines))
-    localStorage.setItem("lighting-map-visualization-mode", visualizationMode)
+    localStorage.setItem(STORAGE_KEYS.VISUALIZATION_MODE, visualizationMode)
     // Save map position if available
     if (map) {
       const center = map.getCenter()
@@ -867,7 +909,7 @@ function Dashboard() {
     const storedShowPanelNumber = localStorage.getItem("lighting-map-show-panel-number")
     const storedShowStreetLampNumber = localStorage.getItem("lighting-map-show-streetlamp-number")
     const storedShowTopologyLines = localStorage.getItem("lighting-map-show-topology-lines")
-    const storedVisualizationMode = localStorage.getItem("lighting-map-visualization-mode")
+    const storedVisualizationMode = localStorage.getItem(STORAGE_KEYS.VISUALIZATION_MODE)
 
     // Only restore city if it's in the user's allowed cities
     if (storedCity && userData?.town_halls_list?.some((city) => city.name === storedCity)) {
@@ -903,22 +945,9 @@ function Dashboard() {
       navigate("/")
       return
     }
-
-    if (userData.town_halls_list && userData.town_halls_list.length > 0) {
-      setSelectedCity(userData.town_halls_list[0].name)
-    }
-
-  }, [userData, navigate])
-
-
-
-  // Add a new useEffect to restore state when the component mounts
-  // Add this after the useEffect that initializes userData
-  useEffect(() => {
-    if (userData) {
-      restoreStateFromStorage()
-    }
-  }, [userData, restoreStateFromStorage])
+    // Un solo init: restore da storage (o fallback al primo comune), evita Alba→stored che abortisce il load
+    restoreStateFromStorage()
+  }, [userData, navigate, restoreStateFromStorage])
 
   // Effetto separato per l'inizializzazione della mappa (eseguito solo una volta)
   useEffect(() => {
@@ -1032,8 +1061,9 @@ function Dashboard() {
     }
   }, [visualizationMode])
 
-  // Effect to load map data when map is ready and city is selected
+  // Effect to load map data when map is ready and city is selected (solo modalità complessa)
   useEffect(() => {
+    if (visualizationMode !== "complessa") return
     if (map && selectedCity) {
       // Reset city data loaded flag
       setCityDataLoaded(false)
@@ -1041,7 +1071,7 @@ function Dashboard() {
       // Clean up previous data and load new data
       cleanupAndLoadMapData()
     }
-  }, [map, selectedCity])
+  }, [map, selectedCity, visualizationMode])
 
   // Effetto per caricare e mostrare i confini del comune in modalità "complessa"
   useEffect(() => {
@@ -1149,12 +1179,13 @@ function Dashboard() {
 
   // Quando cambia showPanelNumber o showStreetLampNumber, forza il cleanup e il rerender dei marker
   useEffect(() => {
+    if (visualizationMode !== "complessa") return
     if (map && selectedCity && cityDataLoaded) {
       cleanupMapResources();
       // Ricarica i marker con il nuovo stato showPanelNumber/showStreetLampNumber
       cleanupAndLoadMapData();
     }
-  }, [showPanelNumber, showStreetLampNumber]);
+  }, [showPanelNumber, showStreetLampNumber, visualizationMode]);
 
   // Monitora i cambiamenti di editingMarker
   useEffect(() => {
@@ -1342,11 +1373,11 @@ function Dashboard() {
 
   // Function to clean up previous data and load new data
   const cleanupAndLoadMapData = async () => {
-    const loadId = ++mapLoadAbortRef.current
+    if (visualizationMode !== "complessa" || !selectedCity || !map) return
+
+    const loadId = ++complexLoadAbortRef.current
 
     try {
-      if (!selectedCity || !map) return
-
       setIsMapDataComplete(false)
       setIsMapLoading(true)
       setLoaderVariant("fullscreen")
@@ -1407,6 +1438,7 @@ function Dashboard() {
           editingMarkerId,
           handleMarkerDragEnd,
           handleDeleteMarker,
+          handleDuplicateElement,
           showPanelNumber,
           showStreetLampNumber,
           setSelectedMarkerForInfo,
@@ -1774,7 +1806,7 @@ function Dashboard() {
             setStreetViewVisible(true)
           } else {
             console.error("Street View not available at this location")
-            alert("Street View non disponibile in questa posizione")
+            toast.error("Street View non disponibile in questa posizione")
           }
         })
       } catch (error) {
@@ -1890,10 +1922,32 @@ function Dashboard() {
     }
   }
 
+  const requestConfirm = useCallback((config = {}) => {
+    return new Promise((resolve) => {
+      confirmResolverRef.current = resolve
+      setConfirmDialogState({
+        open: true,
+        title: config.title || "Conferma azione",
+        description: config.description || "Sei sicuro di voler continuare?",
+        confirmLabel: config.confirmLabel || "Conferma",
+        cancelLabel: config.cancelLabel || "Annulla",
+        variant: config.variant || "danger",
+      })
+    })
+  }, [])
+
+  const resolveConfirmDialog = useCallback((answer) => {
+    setConfirmDialogState((prev) => ({ ...prev, open: false }))
+    if (confirmResolverRef.current) {
+      confirmResolverRef.current(answer)
+      confirmResolverRef.current = null
+    }
+  }, [])
+
   const handleSearch = (query) => {
     if (!isMapDataCompleteRef.current) return
     if (!searchQuery && !query) {
-      alert("Please enter a search value")
+      toast.error("Inserisci un valore di ricerca")
       return
     }
 
@@ -1904,7 +1958,7 @@ function Dashboard() {
     if (visualizationMode === "semplice") {
       // Cerca tra le features del GeoJSON
       if (!simpleGeojsonData || !simpleGeojsonData.features) {
-        alert("Nessun dato disponibile per la ricerca")
+        toast.error("Nessun dato disponibile per la ricerca")
         return
       }
       switch (searchFilter) {
@@ -1928,7 +1982,7 @@ function Dashboard() {
       }
 
       if (results.length === 0) {
-        alert("No results found")
+        toast("Nessun risultato trovato")
         return
       }
 
@@ -1979,7 +2033,7 @@ function Dashboard() {
     }
 
     if (results.length === 0) {
-      alert("No results found")
+      toast("Nessun risultato trovato")
       return
     }
 
@@ -2294,15 +2348,21 @@ function Dashboard() {
   }, [map])
 
   // Funzioni per la modalità di modifica
-  const handleEditClick = (marker) => {
+  const handleEditClick = async (marker) => {
     if (!isMapDataCompleteRef.current) return
-    if (userData?.user_type === "SUPER_ADMIN") {
+    if (SURVEYOR_EDIT_ROLES.has(userData?.user_type)) {
 
       
       // Se c'è già un marker in modifica, chiedi conferma
       if (editingMarkerRef.current && editingMarkerRef.current._id !== marker._id) {
         if (hasChangesInCurrentMarker()) {
-          const shouldSave = window.confirm('Ci sono modifiche non salvate. Vuoi salvare prima di modificare un altro punto?')
+          const shouldSave = await requestConfirm({
+            title: "Modifiche non salvate",
+            description: "Vuoi salvare prima di modificare un altro punto?",
+            confirmLabel: "Salva e continua",
+            cancelLabel: "Scarta e continua",
+            variant: "default",
+          })
           if (shouldSave) {
             // Salva le modifiche correnti
             handleSaveCurrentMarker().then(() => {
@@ -2337,9 +2397,14 @@ function Dashboard() {
     setIsEditModalOpen(true)
     setIsDragging(true)
     
-    // Chiudi l'InfoWindow se aperto
+    // Chiudi InfoWindow (popup / sheet) se aperto
+    setSelectedMarkerForInfo(null)
     if (currentInfoWindow) {
-      currentInfoWindow.close()
+      try {
+        currentInfoWindow.close()
+      } catch {
+        /* ignore */
+      }
       setCurrentInfoWindow(null)
     }
   }
@@ -2528,21 +2593,25 @@ function Dashboard() {
   // Funzioni per l'aggiunta di nuovi elementi
   const handleAddNewElement = () => {
     if (!isMapDataCompleteRef.current) return
-    if (userData?.user_type === "SUPER_ADMIN") {
+    if (SURVEYOR_EDIT_ROLES.has(userData?.user_type)) {
       setIsAddModalOpen(true)
     }
   }
-  const handleDuplicateElement = async () => {
+  const handleDuplicateElement = async (markerToDuplicate = null) => {
     if (!isMapDataCompleteRef.current) return
-    if (userData?.user_type !== "SUPER_ADMIN") return;
+    if (!SURVEYOR_EDIT_ROLES.has(userData?.user_type)) return;
+    const sourceMarker = markerToDuplicate || selectedMarkerForInfo
+    if (sourceMarker) {
+      setSelectedMarkerForInfo(sourceMarker)
+    }
 
-    if (!selectedMarkerForInfo) {
+    if (!sourceMarker) {
       toast.error("Seleziona un punto luce o un quadro sulla mappa prima di duplicare.");
       return;
     }
 
     try {
-      const originalData = selectedMarkerForInfo;
+      const originalData = sourceMarker;
       const duplicatedData = JSON.parse(JSON.stringify(originalData));
 
       // Rimuovo l'ID e suggerisco un nuovo nome
@@ -2571,7 +2640,6 @@ function Dashboard() {
         town_hall: selectedCity,
         return_object: true
       };
-      console.log(dataToSend);
 
       const response = await addLightPoint(dataToSend);
       if (response.status === 201) {
@@ -2607,6 +2675,12 @@ function Dashboard() {
   };
 
   const handleSaveNewElement = async (formData) => {
+    const parseCoord = (value) => {
+      if (typeof value === "number") return value
+      if (value == null || value === "") return NaN
+      return parseFloat(String(value).replace(",", "."))
+    }
+
     if (visualizationMode === "semplice") {
       try {
         const dataToSend = {
@@ -2619,50 +2693,65 @@ function Dashboard() {
         
         if (response.status === 201) {
           toast.success("Elemento aggiunto con successo!");
-          const newMarker = response.data;
-          
-          setSimpleMarkers(prev => [...prev, newMarker]);
-
-          if (mapLibreRef.current && newMarker.lat && newMarker.lng) {
-            const latNum = parseFloat(newMarker.lat);
-            const lngNum = parseFloat(newMarker.lng);
-            if (!isNaN(latNum) && !isNaN(lngNum)) {
-              mapLibreRef.current.flyTo({ center: [lngNum, latNum], zoom: localStorage.getItem(STORAGE_KEYS.MAP_ZOOM) });
-            }
+          const raw = response.data || {}
+          const latNum = parseCoord(raw.lat ?? formData.lat)
+          const lngNum = parseCoord(raw.lng ?? formData.lng)
+          // Stesso shape dei marker caricati da geojson (lat/lng numerici)
+          const newMarker = {
+            ...raw,
+            _id: raw._id != null ? String(raw._id) : raw._id,
+            lat: Number.isFinite(latNum) ? latNum : raw.lat,
+            lng: Number.isFinite(lngNum) ? lngNum : raw.lng,
+            city: raw.city || selectedCity,
+            segnalazioni_in_corso: raw.segnalazioni_in_corso || [],
+            segnalazioni_risolte: raw.segnalazioni_risolte || [],
+            operazioni_effettuate: raw.operazioni_effettuate || [],
           }
-        } else {
-            toast.error(response.data?.message || "Errore durante l'aggiunta dell'elemento");
+
+          setSimpleMarkers((prev) => [...prev, newMarker])
+
+          return true
         }
+
+        toast.error(response.data?.message || response.data || "Errore durante l'aggiunta dell'elemento");
+        return false
       } catch (error) {
         console.error("Errore durante l'aggiunta dell'elemento:", error);
-        toast.error(error.response?.data?.message || "Errore durante l'aggiunta dell'elemento");
+        toast.error(error.response?.data?.message || error.response?.data || "Errore durante l'aggiunta dell'elemento");
+        return false
       }
-    } else { // Modalità "complessa"
-      try {
-        const dataToSend = {
-          light_point: {...formData},
-          town_hall: selectedCity
-        };
-        
-        const response = await addLightPoint(dataToSend);
-        if (response.status === 201) {
-          toast.success(response.data);
-          
-          await cleanupAndLoadMapData();
+    }
 
-          if (map && formData.lat && formData.lng) {
-            const latNum = parseFloat(formData.lat);
-            const lngNum = parseFloat(formData.lng);
-            if (!isNaN(latNum) && !isNaN(lngNum)) {
-              map.setCenter(new window.google.maps.LatLng(latNum, lngNum));
-              map.setZoom(localStorage.getItem(STORAGE_KEYS.MAP_ZOOM) || 18);
-            }
+    // Modalità "complessa"
+    try {
+      const dataToSend = {
+        light_point: {...formData},
+        town_hall: selectedCity
+      };
+      
+      const response = await addLightPoint(dataToSend);
+      if (response.status === 201) {
+        toast.success(response.data);
+        
+        await cleanupAndLoadMapData();
+
+        if (map && formData.lat && formData.lng) {
+          const latNum = parseCoord(formData.lat);
+          const lngNum = parseCoord(formData.lng);
+          if (!isNaN(latNum) && !isNaN(lngNum)) {
+            map.setCenter(new window.google.maps.LatLng(latNum, lngNum));
+            map.setZoom(localStorage.getItem(STORAGE_KEYS.MAP_ZOOM) || 18);
           }
         }
-      } catch (error) {
-        console.error('Errore durante l\'aggiunta dell\'elemento:', error);
-        toast.error('Errore durante l\'aggiunta dell\'elemento');
+        return true
       }
+
+      toast.error(response.data?.message || response.data || "Errore durante l'aggiunta dell'elemento");
+      return false
+    } catch (error) {
+      console.error('Errore durante l\'aggiunta dell\'elemento:', error);
+      toast.error(error.response?.data?.message || error.response?.data || 'Errore durante l\'aggiunta dell\'elemento');
+      return false
     }
   }
 
@@ -2672,10 +2761,14 @@ function Dashboard() {
 
   // Funzione per gestire l'eliminazione di un marker
   const handleDeleteMarker = async (marker) => {
-    // Mostra un popup di conferma
-    const isConfirmed = window.confirm(
-      `Sei sicuro di voler eliminare il ${marker.marker === "QE" ? "quadro elettrico" : "punto luce"} "${marker.numero_palo}"?\n\nQuesta azione non può essere annullata.`
-    )
+    if (!SURVEYOR_EDIT_ROLES.has(userData?.user_type)) return
+    const isConfirmed = await requestConfirm({
+      title: "Conferma eliminazione",
+      description: `Sei sicuro di voler eliminare il ${marker.marker === "QE" ? "quadro elettrico" : "punto luce"} "${marker.numero_palo}"? Questa azione non può essere annullata.`,
+      confirmLabel: "Elimina",
+      cancelLabel: "Annulla",
+      variant: "danger",
+    })
 
     if (!isConfirmed) {
       return
@@ -2730,6 +2823,17 @@ function Dashboard() {
   // Funzione per gestire l'edit in modalità semplice (MapLibre)
   const handleEditSimpleClick = (marker) => {
     if (!isMapDataCompleteRef.current) return
+    if (!SURVEYOR_EDIT_ROLES.has(userData?.user_type)) return
+    // Chiudi InfoWindow (popup desktop / sheet mobile) prima del FAB modifica
+    setSelectedMarkerForInfo(null)
+    if (currentInfoWindow) {
+      try {
+        currentInfoWindow.close()
+      } catch {
+        /* ignore */
+      }
+      setCurrentInfoWindow(null)
+    }
     setEditingSimpleMarker(marker);
     setOriginalSimpleData({ ...marker });
     setIsEditSimpleModalOpen(true);
@@ -2754,9 +2858,14 @@ function Dashboard() {
 
   // Funzione per gestire l'eliminazione in modalità semplice (MapLibre)
   const handleDeleteSimpleMarker = async (marker) => {
-    const isConfirmed = window.confirm(
-      `Sei sicuro di voler eliminare il ${marker.marker === "QE" ? "quadro elettrico" : "punto luce"} "${marker.numero_palo}"?\n\nQuesta azione non può essere annullata.`
-    );
+    if (!SURVEYOR_EDIT_ROLES.has(userData?.user_type)) return
+    const isConfirmed = await requestConfirm({
+      title: "Conferma eliminazione",
+      description: `Sei sicuro di voler eliminare il ${marker.marker === "QE" ? "quadro elettrico" : "punto luce"} "${marker.numero_palo}"? Questa azione non può essere annullata.`,
+      confirmLabel: "Elimina",
+      cancelLabel: "Annulla",
+      variant: "danger",
+    })
     if (!isConfirmed) return;
     try {
       await deleteLightPoint(marker._id);
@@ -3238,6 +3347,7 @@ function Dashboard() {
               topologyGeojson={topologyGeojson}
               onEditClick={handleEditSimpleClick}
               onDeleteClick={handleDeleteSimpleMarker}
+              onDuplicateClick={handleDuplicateElement}
               editingMarkerId={editingSimpleMarker ? editingSimpleMarker._id : null}
               onMarkerPositionChange={handleSimpleMarkerPositionChange}
               selectedCity={selectedCity}
@@ -3274,7 +3384,11 @@ function Dashboard() {
         )}
         {/* Legenda glass in alto a destra */}
         <div className="fixed left-6 bottom-60 z-3">
-          <LegendGlass highlightOption={highlightOption} activeMarkers={activeMarkers} legendColorMap={legendColorMap} />
+          <LegendGlass
+            highlightOption={highlightOption}
+            activeMarkers={activeMarkers}
+            legendColorMap={legendColorMap}
+          />
         </div>
         {showUnlinkedChip && seeTopologyAnomalies && unlinkedLightPoints.length > 0 && (
           <div className="pointer-events-none absolute top-4 left-1/2 z-20 -translate-x-1/2 rounded-lg border border-orange-400/50 bg-black/80 px-3 py-1.5 text-sm text-orange-100 backdrop-blur-md">
@@ -3319,16 +3433,17 @@ function Dashboard() {
             
           </>
         )}
-        {showInfoPanel && (
-          <InfoPanel
-            activeMarkers={allMarkersData}
-            onClose={() => setShowInfoPanel(false)}
-            townhallName={selectedCity}
-            onNavigateToPoint={handleNavigateToPointFromPanel}
-          />
-        )}
         <Toaster position="top-right" />
       </div>
+
+      {showInfoPanel && (
+        <InfoPanel
+          activeMarkers={allMarkersData}
+          onClose={() => setShowInfoPanel(false)}
+          townhallName={selectedCity}
+          onNavigateToPoint={handleNavigateToPointFromPanel}
+        />
+      )}
 
       <MapControls
         selectedCity={selectedCity}
@@ -3353,15 +3468,15 @@ function Dashboard() {
         setSelectedProprietaFilter={setSelectedProprietaFilter}
         interactionsDisabled={!isMapDataComplete}
       />
-      {/* FAB rilievo: SUPER_ADMIN (tutti gli strumenti) o SURVEYOR (solo linee) */}
+      {/* FAB rilievo: SUPER_ADMIN o SURVEYOR */}
       {(userData?.user_type === "SUPER_ADMIN" || userData?.user_type === "SURVEYOR") && (
         <AddMenu
           onAddPoint={handleAddNewElement}
           onDuplicatePoint={handleDuplicateElement}
           onToggleLasso={handleToggleLasso}
           isLassoActive={isLassoActive}
-          showLasso={userData?.user_type === "SUPER_ADMIN" && isDesktop && visualizationMode === "semplice"}
-          showAddTools={userData?.user_type === "SUPER_ADMIN"}
+          showLasso={isDesktop && visualizationMode === "semplice"}
+          showAddTools
           showTopologyEdit={canEditTopo}
           isTopologyEditActive={isTopologyEditMode}
           onToggleTopologyEdit={handleToggleTopologyEdit}
@@ -3401,10 +3516,6 @@ function Dashboard() {
         onToggleTopologyLines={() => setShowTopologyLines((prev) => !prev)}
         onShowStats={() => setShowInfoPanel(true)}
         onDownloadReport={handleDownloadReport}
-        onAddPoint={handleAddNewElement}
-        onShowFaq={() => navigate("/manual")}
-        onShowIlluminazionePubblica={() => window.open("https://www.torellistudio.com/studio/category/illuminazione-pubblica/", "_blank")}
-        isSuperAdmin={userData?.role === "superadmin"}
         visualizationMode={visualizationMode}
         onToggleVisualizationMode={handleToggleVisualizationMode}
         isComplexAllowed={isComplexAllowed}
@@ -3435,6 +3546,7 @@ function Dashboard() {
         onClose={() => setSelectedMarkerForInfo(null)}
         onEditClick={visualizationMode === "semplice" ? handleEditSimpleClick : handleEditClick}
         onDeleteClick={visualizationMode === "semplice" ? handleDeleteSimpleMarker : handleDeleteMarker}
+        onDuplicateClick={handleDuplicateElement}
         onBeforeReport={visualizationMode === "semplice" ? handleBeforeReport : undefined}
         mapType={visualizationMode === "semplice" ? "maplibre" : undefined}
         onSetParentClick={handleSetParentFromInfo}
@@ -3459,16 +3571,18 @@ function Dashboard() {
         map={map}
         allMarkersData={allMarkersData}
         electricPanels={electricPanels}
+        onRequestConfirm={requestConfirm}
       />
       <AddLightPointModal
         isOpen={isAddModalOpen}
         onClose={handleCloseAddModal}
         onSave={handleSaveNewElement}
-        map={visualizationMode === "complessa" ? map : mapLibreRef.current}
+        map={visualizationMode === "complessa" ? map : mapLibreInstance}
         selectedCity={selectedCity}
         userData={userData}
         visualizationMode={visualizationMode}
         electricPanels={electricPanels}
+        existingPoleNumbers={existingPoleNumbers}
       />
       <EditLightPointModal
         isOpen={isEditSimpleModalOpen}
@@ -3482,6 +3596,17 @@ function Dashboard() {
         map={null} // non serve per MapLibre
         allMarkersData={simpleMarkers}
         electricPanels={electricPanels}
+        onRequestConfirm={requestConfirm}
+      />
+      <ConfirmDialog
+        isOpen={confirmDialogState.open}
+        title={confirmDialogState.title}
+        description={confirmDialogState.description}
+        confirmLabel={confirmDialogState.confirmLabel}
+        cancelLabel={confirmDialogState.cancelLabel}
+        variant={confirmDialogState.variant}
+        onConfirm={() => resolveConfirmDialog(true)}
+        onCancel={() => resolveConfirmDialog(false)}
       />
       <style jsx="true">{`
         :root {

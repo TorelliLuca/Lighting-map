@@ -13,6 +13,8 @@ import {
   Building2,
   Users,
   CheckCheck,
+  HelpCircle,
+  Info,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
@@ -122,7 +124,7 @@ const NotificationsPanel = ({ onBack, unreadCount, setUnreadCount }) => {
 
   return (
     <div className="flex flex-col max-h-[min(70vh,420px)]">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-blue-500/20">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-blue-500/20 ">
         <button
           type="button"
           onClick={onBack}
@@ -178,7 +180,7 @@ const NotificationsPanel = ({ onBack, unreadCount, setUnreadCount }) => {
         </div>
       )}
 
-      <div className="overflow-y-auto flex-1 py-1">
+      <div className="overflow-y-auto flex-1 py-1 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-black-950 [&::-webkit-scrollbar-thumb]:bg-blue-500 [&::-webkit-scrollbar-thumb]:rounded-full">
         {loading && (
           <p className="px-4 py-6 text-center text-sm text-blue-300/70">Caricamento…</p>
         )}
@@ -235,11 +237,15 @@ const NotificationsPanel = ({ onBack, unreadCount, setUnreadCount }) => {
   );
 };
 
+const ILLUMINAZIONE_PUBBLICA_URL =
+  "https://www.torellistudio.com/studio/category/illuminazione-pubblica/";
+
 const UserMenu = ({
   userData,
   handleLogout,
   handleMyOrganizationsClick,
 }) => {
+  const navigate = useNavigate();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [view, setView] = useState("main"); // 'main' | 'notifications'
   const [unreadCount, setUnreadCount] = useState(0);
@@ -273,13 +279,13 @@ const UserMenu = ({
   return (
     <div className="relative" ref={userMenuRef}>
       <button
-        className="relative flex items-center space-x-2 bg-blue-900/20 p-1.5 rounded-full border border-blue-500/30 hover:bg-blue-900/40 transition-colors duration-200 focus:outline-none"
+        className="relative flex items-center space-x-2 bg-transparent p-1.5 rounded-xl border border-transparent hover:bg-blue-900/40 transition-colors duration-200 focus:outline-none"
         onClick={() => setIsUserMenuOpen((open) => !open)}
         aria-haspopup="true"
         aria-expanded={isUserMenuOpen}
       >
         <User className="h-5 w-5 text-blue-400" />
-        <div className="flex flex-col items-start">
+        <div className="flex flex-col">
           <span className="text-sm font-medium text-white">
             {userData?.name} {userData?.surname}
           </span>
@@ -343,6 +349,32 @@ const UserMenu = ({
                 </li>
                 <li className="border-t border-blue-500/10 mt-2 pt-2">
                   <button
+                    type="button"
+                    className="w-full text-left px-4 py-2 hover:bg-blue-900/30 text-white flex items-center gap-2"
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      navigate("/manual");
+                    }}
+                  >
+                    <HelpCircle className="h-4 w-4" />
+                    Manuale operativo
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    className="w-full text-left px-4 py-2 hover:bg-blue-900/30 text-white flex items-center gap-2"
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      window.open(ILLUMINAZIONE_PUBBLICA_URL, "_blank", "noopener,noreferrer");
+                    }}
+                  >
+                    <Info className="h-4 w-4" />
+                    Scopri di più
+                  </button>
+                </li>
+                <li className="border-t border-blue-500/10 mt-2 pt-2">
+                  <button
                     className="w-full text-left px-4 py-2 text-red-400 hover:bg-red-900/30 flex items-center gap-2"
                     onClick={handleLogout}
                   >
@@ -373,7 +405,7 @@ const CityOrganizationsMenu = ({ selectedCity, handleOrganizzazioniClick, isUser
 
   if (!isUserAdmin) {
     return (
-      <div className="flex items-center space-x-2 bg-blue-900/20 px-3 py-1.5 rounded-lg border border-blue-500/30">
+      <div className="flex items-center space-x-2 bg-transparent px-3  rounded-xl border-transparent">
         <MapPin className="h-4 w-4 text-blue-400" />
         <span className="text-sm text-blue-300">{selectedCity}</span>
       </div>
@@ -383,13 +415,13 @@ const CityOrganizationsMenu = ({ selectedCity, handleOrganizzazioniClick, isUser
   return (
     <div className="relative" ref={cityMenuRef}>
       <button
-        className="flex items-center space-x-2 bg-blue-900/20 px-3 py-1.5 rounded-lg border border-blue-500/30 hover:bg-blue-900/40 transition-colors duration-200 focus:outline-none"
+        className="flex items-center space-x-2 bg-transparent px-3 rounded-xl  border-transparent hover:bg-blue-900/40 transition-colors duration-200 focus:outline-none"
         onClick={() => setIsCityMenuOpen((open) => !open)}
         aria-haspopup="true"
         aria-expanded={isCityMenuOpen}
       >
         <MapPin className="h-4 w-4 text-blue-400" />
-        <span className="text-sm text-blue-300">{selectedCity}</span>
+        <span className="text-sm text-white">{selectedCity}</span>
         <ChevronDown
           className={`h-4 w-4 text-blue-400 transition-transform duration-200 ${
             isCityMenuOpen ? "rotate-180" : "rotate-0"

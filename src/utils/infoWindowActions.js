@@ -19,7 +19,7 @@ export const INFO_WINDOW_ACTIONS = [
     label: "Segnala",
     title: "Segnala questo punto",
     priority: "primary",
-    roles: "*",
+    roles: ["DEFAULT_USER", "MAINTAINER", "ADMINISTRATOR", "SUPER_ADMIN"],
     order: 2,
   },
   {
@@ -43,8 +43,16 @@ export const INFO_WINDOW_ACTIONS = [
     label: "Modifica",
     title: "Modifica questo punto luce",
     priority: "overflow",
-    roles: ["SUPER_ADMIN"],
+    roles: ["SUPER_ADMIN", "SURVEYOR"],
     order: 5,
+  },
+  {
+    id: "duplica",
+    label: "Duplica",
+    title: "Duplica questo punto luce",
+    priority: "overflow",
+    roles: ["SUPER_ADMIN", "SURVEYOR"],
+    order: 6,
   },
   {
     id: "set_parent",
@@ -52,7 +60,7 @@ export const INFO_WINDOW_ACTIONS = [
     title: "Seleziona sulla mappa il punto a monte (genitore elettrico)",
     priority: "overflow",
     roles: ["SUPER_ADMIN", "SURVEYOR"],
-    order: 6,
+    order: 7,
     /** Solo PL (non QE, non gruppi differenziale) */
     requiresPl: true,
   },
@@ -62,7 +70,7 @@ export const INFO_WINDOW_ACTIONS = [
     title: "Rimuove il collegamento elettrico al genitore",
     priority: "overflow",
     roles: ["SUPER_ADMIN", "SURVEYOR"],
-    order: 7,
+    order: 8,
     requiresParent: true,
   },
   {
@@ -70,8 +78,8 @@ export const INFO_WINDOW_ACTIONS = [
     label: "Elimina",
     title: "Elimina questo punto luce",
     priority: "overflow",
-    roles: ["SUPER_ADMIN"],
-    order: 8,
+    roles: ["SUPER_ADMIN", "SURVEYOR"],
+    order: 9,
   }
 ]
 
@@ -103,7 +111,10 @@ export const getVisibleActions = (actions = INFO_WINDOW_ACTIONS, userRole, marke
  * - altrimenti segnala se visibile
  */
 export const getPrimaryAction = (visibleActions = []) => {
+  const modifica = visibleActions.find((a) => a.id === "modifica")
+  const elimina = visibleActions.find((a) => a.id === "elimina")
   const operazione = visibleActions.find((a) => a.id === "operazione")
+  if (modifica && elimina && !operazione) return modifica
   if (operazione) return operazione
   return visibleActions.find((a) => a.id === "segnala") || null
 }
@@ -112,9 +123,16 @@ export const getPrimaryAction = (visibleActions = []) => {
  * Secondo bottone in evidenza: Segnala quando il primario è Operazione.
  */
 export const getSecondaryActions = (visibleActions = [], primaryAction) => {
-  if (!primaryAction || primaryAction.id !== "operazione") return []
-  const segnala = visibleActions.find((a) => a.id === "segnala")
-  return segnala ? [segnala] : []
+  if (!primaryAction) return []
+  if (primaryAction.id === "operazione") {
+    const segnala = visibleActions.find((a) => a.id === "segnala")
+    return segnala ? [segnala] : []
+  }
+  if (primaryAction.id === "modifica") {
+    const elimina = visibleActions.find((a) => a.id === "elimina")
+    return elimina ? [elimina] : []
+  }
+  return []
 }
 
 /** Azioni residue per il menu overflow. */

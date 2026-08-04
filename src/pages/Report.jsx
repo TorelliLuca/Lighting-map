@@ -59,6 +59,10 @@ export default function Report() {
       navigate("/")
       return
     }
+    if (userData.user_type === "SURVEYOR") {
+      navigate("/dashboard")
+      return
+    }
     
     const params = new URLSearchParams(location.search)
     const comune = params.get("comune")

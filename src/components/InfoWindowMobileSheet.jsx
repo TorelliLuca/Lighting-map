@@ -19,6 +19,7 @@ export const InfoWindowMobileSheet = ({
   onClose,
   onEditClick,
   onDeleteClick,
+  onDuplicateClick,
   onBeforeReport,
   mapType,
   onSetParentClick,
@@ -55,6 +56,7 @@ export const InfoWindowMobileSheet = ({
           userData={userData}
           onEditClick={onEditClick}
           onDeleteClick={onDeleteClick}
+          onDuplicateClick={onDuplicateClick}
           onBeforeReport={onBeforeReport}
           mapType={mapType}
           idMarker={marker._id}

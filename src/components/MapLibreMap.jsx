@@ -56,6 +56,7 @@ const MapLibreMap = forwardRef(({
   showPanelNumber, // nuova prop
   onEditClick, // callback per edit
   onDeleteClick, // callback per delete
+  onDuplicateClick, // callback per duplica
   editingMarkerId, // id marker in editing
   onMarkerPositionChange, // callback per drag
   selectedCity,
@@ -626,6 +627,7 @@ const MapLibreMap = forwardRef(({
             mapType="maplibre"
             onEditClick={onEditClick}
             onDeleteClick={onDeleteClick}
+            onDuplicateClick={onDuplicateClick}
             onBeforeReport={onBeforeReport}
             idMarker={props._id}
             variant="popup"
@@ -815,7 +817,7 @@ const MapLibreMap = forwardRef(({
     return ctx.getImageData(0, 0, size, size);
   }
 
-  function createTriangleImage(color, size = 48) {
+  function createTriangleImage(color, size = 36) {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
@@ -928,7 +930,7 @@ const MapLibreMap = forwardRef(({
           'triangle-diff-',
           ['slice', ['get', 'color'], 1],
         ],
-        'icon-size': 1.05,
+        'icon-size': 1.00,
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
       },
@@ -1010,7 +1012,7 @@ const MapLibreMap = forwardRef(({
 
   // Ricentra la mappa SOLO al primo caricamento dei dati
   useEffect(() => {
-    if (!isMapActive.current || !firstLoadDone && geojsonData && geojsonData.features && geojsonData.features.length > 0 && mapLoaded) {
+    if (!isMapActive.current || (!firstLoadDone && geojsonData && geojsonData.features && geojsonData.features.length > 0 && mapLoaded)) {
       const [lng, lat] = geojsonData.features[0].geometry.coordinates;
       if (mapRef.current && typeof mapRef.current.setCenter === 'function') {
         mapRef.current.setCenter([lng, lat]);
@@ -1092,24 +1094,25 @@ const MapLibreMap = forwardRef(({
         });
       }
     });
-    // AGGIUNTA: auto-pan durante il drag
+    // Auto-pan durante il drag: su mobile bound ridotti (sheet FAB collassabile)
     function handleDrag() {
       const lngLat = dragMarker.getLngLat();
       if (map && typeof map.getContainer === 'function' && typeof map.project === 'function') {
         const container = map.getContainer();
         const rect = container.getBoundingClientRect();
         const point = map.project([lngLat.lng, lngLat.lat]);
-        // Soglie personalizzate
-        const edgeThresholdLeft = 60;
-        const edgeThresholdRight = 500; // più largo per il modal
-        const edgeThresholdTop = 60;
-        const edgeThresholdBottom = 120; // puoi aumentare se hai elementi in basso
+        const isMobileEdit = isMobileInfoWindowViewport();
+        const edgeThresholdLeft = isMobileEdit ? 40 : 60;
+        const edgeThresholdRight = isMobileEdit ? 40 : 500; // desktop: spazio per pannello laterale
+        const edgeThresholdTop = isMobileEdit ? 40 : 60;
+        const edgeThresholdBottom = isMobileEdit ? 56 : 120;
+        const panStep = isMobileEdit ? 18 : 30;
 
         let dx = 0, dy = 0;
-        if (point.x < edgeThresholdLeft) dx = -30;
-        else if (point.x > rect.width - edgeThresholdRight) dx = 30;
-        if (point.y < edgeThresholdTop) dy = -30;
-        else if (point.y > rect.height - edgeThresholdBottom) dy = 30;
+        if (point.x < edgeThresholdLeft) dx = -panStep;
+        else if (point.x > rect.width - edgeThresholdRight) dx = panStep;
+        if (point.y < edgeThresholdTop) dy = -panStep;
+        else if (point.y > rect.height - edgeThresholdBottom) dy = panStep;
 
         if ((dx !== 0 || dy !== 0) && map && typeof map.panBy === 'function') {
           map.panBy([dx, dy], { duration: 0 });
@@ -1806,12 +1809,17 @@ useEffect(() => {
     };
 
     const commitPositionUpdates = (updates) => {
-      const preview = new Map(updates.map((u) => [u._id, { lat: u.lat, lng: u.lng }]));
+      const rounded = (updates || []).map((u) => ({
+        _id: u._id,
+        lat: Number(Number(u.lat).toFixed(7)),
+        lng: Number(Number(u.lng).toFixed(7)),
+      }));
+      const preview = new Map(rounded.map((u) => [u._id, { lat: u.lat, lng: u.lng }]));
       applyPreviewPositions(preview);
 
       const baseFeatures = geojsonDataRef.current?.features || [];
       if (baseFeatures.length) {
-        const byId = new Map(updates.map((u) => [String(u._id), u]));
+        const byId = new Map(rounded.map((u) => [String(u._id), u]));
         geojsonDataRef.current = {
           ...geojsonDataRef.current,
           features: baseFeatures.map((f) => {
@@ -1827,7 +1835,7 @@ useEffect(() => {
       }
 
       if (onLassoGroupMoveRef.current) {
-        onLassoGroupMoveRef.current(updates);
+        onLassoGroupMoveRef.current(rounded);
       }
     };
 
@@ -1974,8 +1982,8 @@ useEffect(() => {
         dragStartLngLat = null;
         dragBasePositions = null;
         map.getCanvas().style.cursor = "move";
-        if (updates.length && onLassoGroupMoveRef.current) {
-          onLassoGroupMoveRef.current(updates);
+        if (updates.length) {
+          commitPositionUpdates(updates);
         }
         return;
       }

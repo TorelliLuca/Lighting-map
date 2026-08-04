@@ -21,6 +21,7 @@ import {
   Cable,
   Unplug,
   TriangleAlert,
+  Copy,
 } from "lucide-react"
 import { clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
@@ -117,6 +118,7 @@ const InfoWindow = ({
   userData,
   onEditClick,
   onDeleteClick,
+  onDuplicateClick,
   mapType,
   onBeforeReport,
   idMarker,
@@ -177,6 +179,12 @@ const InfoWindow = ({
     if (onSetParentClick) onSetParentClick(marker)
   }
 
+  const handleDuplicateClick = () => {
+    if (onDuplicateClick) {
+      onDuplicateClick(marker)
+    }
+  }
+
   const handleClearParent = () => {
     if (onClearParentClick) onClearParentClick(marker)
   }
@@ -188,6 +196,7 @@ const InfoWindow = ({
     goto: handleNavigateToLocation,
     modifica: handleEditClick,
     elimina: handleDeleteClick,
+    duplica: handleDuplicateClick,
     set_parent: handleSetParent,
     clear_parent: handleClearParent,
   }
@@ -199,6 +208,7 @@ const InfoWindow = ({
     goto: <Navigation className={iconClass} strokeWidth={2} aria-hidden="true" />,
     modifica: <Pencil className={iconClass} strokeWidth={2} aria-hidden="true" />,
     elimina: <Trash className={iconClass} strokeWidth={2} aria-hidden="true" />,
+    duplica: <Copy className={iconClass} strokeWidth={2} aria-hidden="true" />,
     set_parent: <Cable className={iconClass} strokeWidth={2} aria-hidden="true" />,
     clear_parent: <Unplug className={iconClass} strokeWidth={2} aria-hidden="true" />,
   }
@@ -468,7 +478,7 @@ const InfoWindow = ({
                   <span className="ml-2 font-medium">{topologyPower.local ?? 0} W</span>
                 </p>
                 <p>
-                  <span className={LABEL_CLASS}>Potenza a valle</span>
+                  <span className={LABEL_CLASS}>Potenza totale</span>
                   <span className="ml-2 font-medium">{topologyPower.subtree ?? 0} W</span>
                 </p>
               </div>

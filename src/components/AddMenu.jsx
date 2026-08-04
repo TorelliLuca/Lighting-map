@@ -1,5 +1,11 @@
 import { Lasso, Copy, Plus, X, Wrench, Cable } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import MapFabBottomSheet from "./ui/MapFabBottomSheet"
+import { useMediaQuery } from "../hooks/useMediaQuery"
+import { INFO_WINDOW_MOBILE_MQ } from "../utils/infoWindowActions"
+
+const actionBtnClass =
+  "flex items-center gap-3 px-4 py-2.5 text-blue-200 hover:text-white hover:bg-blue-700/30 border border-blue-500/30 hover:border-blue-500/50 rounded-lg transition-colors w-full min-h-11"
 
 function AddMenu({
   onAddPoint,
@@ -16,8 +22,13 @@ function AddMenu({
   const [isExpanded, setIsExpanded] = useState(false)
   const menuRef = useRef(null)
   const buttonRef = useRef(null)
+  const isMobile = useMediaQuery(INFO_WINDOW_MOBILE_MQ)
+
+  const closeMenu = () => setIsExpanded(false)
 
   useEffect(() => {
+    if (isMobile) return undefined
+
     function handleClickOutside(event) {
       if (
         isExpanded &&
@@ -26,7 +37,7 @@ function AddMenu({
         buttonRef.current &&
         !buttonRef.current.contains(event.target)
       ) {
-        setIsExpanded(false)
+        closeMenu()
       }
     }
 
@@ -37,33 +48,78 @@ function AddMenu({
       document.removeEventListener("mousedown", handleClickOutside)
       document.removeEventListener("touchstart", handleClickOutside)
     }
-  }, [isExpanded])
+  }, [isExpanded, isMobile])
 
   const handleAddClick = () => {
     if (interactionsDisabled) return
     onAddPoint()
-    setIsExpanded(false)
+    closeMenu()
   }
 
   const handleDuplicateClick = () => {
     if (interactionsDisabled) return
     onDuplicatePoint()
-    setIsExpanded(false)
+    closeMenu()
   }
 
   const handleLassoClick = () => {
     if (interactionsDisabled || !onToggleLasso) return
     onToggleLasso()
-    setIsExpanded(false)
+    closeMenu()
   }
 
   const handleTopologyClick = () => {
     if (interactionsDisabled || !onToggleTopologyEdit) return
     onToggleTopologyEdit()
-    setIsExpanded(false)
+    closeMenu()
   }
 
   const activeTool = isTopologyEditActive || isLassoActive
+
+  const panelBody = (
+    <div className="space-y-3">
+      {showAddTools && (
+        <>
+          <button type="button" onClick={handleAddClick} className={actionBtnClass}>
+            <Plus className="h-4 w-4" />
+            Aggiungi nuovo
+          </button>
+          <button type="button" onClick={handleDuplicateClick} className={actionBtnClass}>
+            <Copy className="h-4 w-4" />
+            Duplica
+          </button>
+        </>
+      )}
+      {showLasso && (
+        <button
+          type="button"
+          onClick={handleLassoClick}
+          className={`${actionBtnClass} ${
+            isLassoActive
+              ? "text-white bg-blue-700/40 border-blue-400/60"
+              : ""
+          }`}
+        >
+          <Lasso className="h-4 w-4" />
+          {isLassoActive ? "Disattiva lazo" : "Sposta con lazo"}
+        </button>
+      )}
+      {showTopologyEdit && (
+        <button
+          type="button"
+          onClick={handleTopologyClick}
+          className={`${actionBtnClass} ${
+            isTopologyEditActive
+              ? "text-white bg-blue-700/40 border-blue-400/60"
+              : ""
+          }`}
+        >
+          <Cable className="h-4 w-4" />
+          {isTopologyEditActive ? "Disattiva modalità linee" : "Attiva modalità linee"}
+        </button>
+      )}
+    </div>
+  )
 
   return (
     <div className={`fixed bottom-60 left-6 z-2 ${interactionsDisabled ? "opacity-50" : ""}`}>
@@ -98,59 +154,26 @@ function AddMenu({
         )}
       </button>
 
-      <div
-        ref={menuRef}
-        className={`absolute bottom-16 left-0 transition-all duration-300 origin-bottom-right ${
-          isExpanded ? "scale-100 opacity-100 pointer-events-auto" : "scale-95 opacity-0 pointer-events-none"
-        }`}
-      >
-        <div className="bg-black/70 backdrop-blur-xl border border-blue-500/40 rounded-xl shadow-[0_0_25px_rgba(0,149,255,0.15)] p-4 space-y-3 min-w-[220px]">
-          {showAddTools && (
-            <>
-              <button
-                onClick={handleAddClick}
-                className="flex items-center gap-3 px-4 py-2 text-blue-200 hover:text-white hover:bg-blue-700/30 border border-blue-500/30 hover:border-blue-500/50 rounded-lg transition-colors w-full"
-              >
-                <Plus className="h-4 w-4" />
-                Aggiungi nuovo
-              </button>
-              <button
-                onClick={handleDuplicateClick}
-                className="flex items-center gap-3 px-4 py-2 text-blue-200 hover:text-white hover:bg-blue-700/30 border border-blue-500/30 hover:border-blue-500/50 rounded-lg transition-colors w-full"
-              >
-                <Copy className="h-4 w-4" />
-                Duplica
-              </button>
-            </>
-          )}
-          {showLasso && (
-            <button
-              onClick={handleLassoClick}
-              className={`flex items-center gap-3 px-4 py-2 border rounded-lg transition-colors w-full ${
-                isLassoActive
-                  ? "text-white bg-blue-700/40 border-blue-400/60"
-                  : "text-blue-200 hover:text-white hover:bg-blue-700/30 border-blue-500/30 hover:border-blue-500/50"
-              }`}
-            >
-              <Lasso className="h-4 w-4" />
-              {isLassoActive ? "Disattiva lazo" : "Sposta con lazo"}
-            </button>
-          )}
-          {showTopologyEdit && (
-            <button
-              onClick={handleTopologyClick}
-              className={`flex items-center gap-3 px-4 py-2 border rounded-lg transition-colors w-full ${
-                isTopologyEditActive
-                  ? "text-white bg-blue-700/40 border-blue-400/60"
-                  : "text-blue-200 hover:text-white hover:bg-blue-700/30 border-blue-500/30 hover:border-blue-500/50"
-              }`}
-            >
-              <Cable className="h-4 w-4" />
-              {isTopologyEditActive ? "Disattiva modalità linee" : "Attiva modalità linee"}
-            </button>
-          )}
+      {!isMobile && (
+        <div
+          ref={menuRef}
+          className={`absolute bottom-16 left-0 transition-all duration-300 origin-bottom-right ${
+            isExpanded
+              ? "scale-100 opacity-100 pointer-events-auto"
+              : "scale-95 opacity-0 pointer-events-none"
+          }`}
+        >
+          <div className="bg-black/70 backdrop-blur-xl border border-blue-500/40 rounded-xl shadow-[0_0_25px_rgba(0,149,255,0.15)] p-4 space-y-3 min-w-[220px]">
+            {panelBody}
+          </div>
         </div>
-      </div>
+      )}
+
+      {isMobile && (
+        <MapFabBottomSheet isOpen={isExpanded} onClose={closeMenu} title="Strumenti rilievo">
+          {panelBody}
+        </MapFabBottomSheet>
+      )}
     </div>
   )
 }

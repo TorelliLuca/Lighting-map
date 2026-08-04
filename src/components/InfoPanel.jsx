@@ -1,8 +1,10 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { createPortal } from "react-dom"
 import { X, MapPin, Lightbulb, Box, AlertCircle, Clock, CheckCircle, Wrench, User, FileText } from "lucide-react"
 import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, ResponsiveContainer } from "recharts"
+import { useMediaQuery } from "../hooks/useMediaQuery"
 const COLORS = [
   "#60a5fa",
   "#818cf8",
@@ -88,17 +90,36 @@ const ClickablePoleNumber = ({ numeroPalo, lat, lng, onNavigate }) => {
   )
 }
 
-const StatCard = ({ title, value, icon: Icon, color = "blue" }) => (
-  <div
-    className={`bg-${color}-900/50 p-4 rounded-xl border border-${color}-500/30 hover:border-${color}-400/50 hover:bg-${color}-800/60 transition-all duration-200`}
-  >
-    <div className="flex items-center gap-3 mb-2">
-      <Icon className={`h-5 w-5 text-${color}-400`} />
-      <h4 className={`text-${color}-200 text-sm font-medium`}>{title}</h4>
+const STAT_CARD_STYLES = {
+  blue: {
+    card: "bg-blue-900/50 border-blue-500/30 hover:border-blue-400/50 hover:bg-blue-800/60",
+    icon: "text-blue-400",
+    title: "text-blue-200",
+  },
+  red: {
+    card: "bg-red-900/50 border-red-500/30 hover:border-red-400/50 hover:bg-red-800/60",
+    icon: "text-red-400",
+    title: "text-red-200",
+  },
+  green: {
+    card: "bg-green-900/50 border-green-500/30 hover:border-green-400/50 hover:bg-green-800/60",
+    icon: "text-green-400",
+    title: "text-green-200",
+  },
+}
+
+const StatCard = ({ title, value, icon: Icon, color = "blue" }) => {
+  const styles = STAT_CARD_STYLES[color] || STAT_CARD_STYLES.blue
+  return (
+    <div className={`p-3 sm:p-4 rounded-xl border transition-all duration-200 ${styles.card}`}>
+      <div className="flex items-center gap-2 sm:gap-3 mb-1.5 sm:mb-2 min-w-0">
+        <Icon className={`h-4 w-4 sm:h-5 sm:w-5 shrink-0 ${styles.icon}`} />
+        <h4 className={`text-xs sm:text-sm font-medium truncate ${styles.title}`}>{title}</h4>
+      </div>
+      <p className="text-xl sm:text-2xl font-bold text-white tabular-nums">{value}</p>
     </div>
-    <p className="text-2xl font-bold text-white">{value}</p>
-  </div>
-)
+  )
+}
 
 const ReportCard = ({ report, type, onNavigateToPoint }) => {
   const formatDate = (dateStr) => {
@@ -263,6 +284,7 @@ const OperationCard = ({ operation, onNavigateToPoint }) => {
 
 function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) {
   const { getAverageResponseTime } = useUser()
+  const isMobile = useMediaQuery("(max-width: 639px)")
   const [stats, setStats] = useState({
     totalPoints: 0,
     totalLightFixtures: 0,
@@ -289,6 +311,40 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
   const [showMoreReportsInProgress, setShowMoreReportsInProgress] = useState(false)
   const [showMoreReportsResolved, setShowMoreReportsResolved] = useState(false)
   const [showMoreOperations, setShowMoreOperations] = useState(false)
+
+  const pieHeight = isMobile ? 260 : 420
+  const pieOuterRadius = isMobile ? 95 : 180
+  const pieInnerRadius = isMobile ? 38 : 70
+  const reportPieHeight = isMobile ? 280 : 350
+  const reportPieOuter = isMobile ? 90 : 120
+  const reportPieInner = isMobile ? 36 : 50
+  const barHeight = isMobile ? 240 : 340
+  const labelFontSize = isMobile ? 11 : 15
+
+  const handleClose = () => {
+    setShowMoreOperations(false)
+    setShowMoreReportsInProgress(false)
+    setShowMoreReportsResolved(false)
+    onClose()
+  }
+
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") {
+        setShowMoreOperations(false)
+        setShowMoreReportsInProgress(false)
+        setShowMoreReportsResolved(false)
+        onClose()
+      }
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.body.style.overflow = prevOverflow
+      window.removeEventListener("keydown", onKeyDown)
+    }
+  }, [onClose])
 
   useEffect(() => {
     if (!activeMarkers || activeMarkers.length === 0) return
@@ -576,12 +632,10 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
   // Funzione label custom: sempre centrata nella fetta, mai label esterne
   const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, name, value }) => {
     const RADIAN = Math.PI / 180
-    // Centro la label a metà tra inner e outer radius
     const radius = innerRadius + (outerRadius - innerRadius) * 0.5
     const x = cx + radius * Math.cos(-midAngle * RADIAN)
     const y = cy + radius * Math.sin(-midAngle * RADIAN)
-    // Mostra solo se la fetta è abbastanza grande
-    if (percent < 0.07) return null
+    if (percent < (isMobile ? 0.1 : 0.07)) return null
     return (
       <text
         x={x}
@@ -589,11 +643,11 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
         fill="#fff"
         textAnchor="middle"
         dominantBaseline="central"
-        fontSize={15}
+        fontSize={labelFontSize}
         fontWeight={600}
         pointerEvents="none"
       >
-        {name} ({value})
+        {isMobile ? value : `${name} (${value})`}
       </text>
     )
   }
@@ -602,26 +656,25 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
   const renderCustomLegend =
     (data, pieData) =>
     ({ payload }) => (
-      <ul className="flex flex-wrap justify-center gap-x-6 gap-y-2 mt-2">
-        {payload.map((entry, idx) => {
+      <ul className="flex flex-wrap justify-center gap-x-3 sm:gap-x-6 gap-y-2 mt-2 px-1">
+        {payload.map((entry) => {
           const d = pieData.find((p) => p.name === entry.value)
           const isOther = d && d._isOther
-          // Mostra valore accanto al nome solo se la label non è interna (percentuale < 7%)
           const total = pieData.reduce((sum, p) => sum + p.value, 0)
           const perc = d ? d.value / total : 0
           return (
-            <li key={entry.value} className="flex items-center gap-2">
+            <li key={entry.value} className="flex items-center gap-1.5 sm:gap-2 max-w-full">
               <span
                 style={{
                   display: "inline-block",
-                  width: 14,
-                  height: 14,
+                  width: 12,
+                  height: 12,
                   borderRadius: "50%",
                   background: entry.color,
-                  marginRight: 6,
+                  flexShrink: 0,
                 }}
-              ></span>
-              <span className="text-white text-sm font-medium">
+              />
+              <span className="text-white text-xs sm:text-sm font-medium truncate">
                 {entry.value}
                 {perc < 0.07 || isOther ? ` (${d.value})` : ""}
               </span>
@@ -631,48 +684,75 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
       </ul>
     )
 
-  return (
-    <div className="absolute inset-0 bg-gradient-to-br from-black/95 via-blue-950/95 to-black/95 backdrop-blur-xl z-[1000] overflow-auto p-4 md:p-8 scrollbar-thin scrollbar-thumb-blue-700/70 scrollbar-track-blue-950/40 scrollbar">
-      <button
-        onClick={() => {onClose(); setShowMoreOperations(false); setShowMoreReportsInProgress(false); setShowMoreReportsResolved(false);}}
-        className="sticky top-4 right-4 z-[1000] float-right p-2.5 bg-black/60 hover:bg-blue-900/60 text-blue-400 rounded-lg backdrop-blur-xl border border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.3)] transition-all duration-200"
-        aria-label="Close panel"
-      >
-        <X className="h-5 w-5" />
-      </button>
+  const tabs = [
+    { id: "stats", label: "Statistiche" },
+    { id: "charts", label: "Grafici" },
+    { id: "segnalazioni", label: "Segnalazioni" },
+  ]
 
-      <div className="max-w-4xl mx-auto space-y-8 text-white">
-        <h2 className="text-3xl font-bold text-center bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-blue-600">
-          Panoramica del Sistema
-        </h2>
-        {/* Tabs */}
-        <div className="flex justify-center gap-4 my-6">
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[10050] flex flex-col bg-gradient-to-br from-slate-950 via-blue-950 to-slate-950 touch-manipulation"
+      style={{ height: "100dvh" }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Panoramica del Sistema"
+    >
+      <header
+        className="shrink-0  bg-gradient  from-slate-950 via-blue-950 to-slate-950 backdrop-blur-xl pt-[env(safe-area-inset-top)]"
+      >
+        <div className="flex items-center justify-between gap-3 px-3 sm:px-6 py-3">
+          <div className="min-w-0">
+            <h2 className="text-lg sm:text-2xl font-bold truncate bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-blue-600">
+              Panoramica del Sistema
+            </h2>
+            {townhallName && (
+              <p className="text-xs sm:text-sm text-blue-300/80 truncate mt-0.5">{townhallName}</p>
+            )}
+          </div>
           <button
-            className={`px-4 py-2 rounded-t-lg font-semibold transition-all duration-150 ${activeTab === "stats" ? "bg-blue-800/80 text-blue-200" : "bg-blue-950/40 text-blue-400 hover:bg-blue-900/40"}`}
-            onClick={() => setActiveTab("stats")}
+            type="button"
+            onClick={handleClose}
+            className="shrink-0 flex items-center justify-center min-h-11 min-w-11 p-2.5 bg-transparent hover:bg-blue-900/60 text-blue-400 rounded-xl border border-transparent cursor-pointer transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            aria-label="Chiudi pannello"
           >
-            Statistiche
-          </button>
-          <button
-            className={`px-4 py-2 rounded-t-lg font-semibold transition-all duration-150 ${activeTab === "charts" ? "bg-blue-800/80 text-blue-200" : "bg-blue-950/40 text-blue-400 hover:bg-blue-900/40"}`}
-            onClick={() => setActiveTab("charts")}
-          >
-            Grafici
-          </button>
-          <button
-            className={`px-4 py-2 rounded-t-lg font-semibold transition-all duration-150 ${activeTab === "segnalazioni" ? "bg-blue-800/80 text-blue-200" : "bg-blue-950/40 text-blue-400 hover:bg-blue-900/40"}`}
-            onClick={() => setActiveTab("segnalazioni")}
-          >
-            Segnalazioni
+            <X className="h-5 w-5" />
           </button>
         </div>
+
+        <div
+          className="flex gap-1 px-3 sm:px-6 pb-2 overflow-x-auto items-center justify-center overscroll-contain scrollbar-none [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          role="tablist"
+          aria-label="Sezioni panoramica"
+        >
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              className={`shrink-0 min-h-11 px-4 rounded-lg text-sm font-semibold cursor-pointer transition-colors duration-150 touch-manipulation ${
+                activeTab === tab.id
+                  ? "bg-blue-700/80 text-blue-50"
+                  : "bg-blue-950/50 text-blue-400 hover:bg-blue-900/50"
+              }`}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-thin scrollbar-thumb-blue-700/70 scrollbar-track-blue-950/40 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <div className="max-w-4xl mx-auto space-y-5 sm:space-y-8 text-white px-3 sm:px-6 py-4 sm:py-6">
 
         {activeTab === "stats" && (
           <>
             {/* --- VISTA STATISTICHE CLASSICA --- */}
-            <div className="bg-black/60 rounded-xl p-6 backdrop-blur-xl border border-blue-500/30 shadow-[0_0_25px_rgba(0,149,255,0.15)]">
-              <h3 className="text-xl font-semibold mb-6 text-center text-blue-400">Statistiche Generali</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-black/60 rounded-xl p-4 sm:p-6 backdrop-blur-xl border border-blue-500/30 shadow-[0_0_25px_rgba(0,149,255,0.15)]">
+              <h3 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 text-center text-blue-400">Statistiche Generali</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-4">
                 <StatCard title="Punti Totali" value={stats.totalPoints} icon={MapPin} />
                 <StatCard title="Apparecchi Totali" value={stats.totalLightFixtures} icon={Lightbulb} />
                 <StatCard title="Quadri Totali" value={stats.totalCabinets} icon={Box} />
@@ -681,18 +761,18 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
             </div>
 
             {Object.keys(stats.propertyCounts).length > 0 && (
-              <div className="bg-black/60 rounded-xl p-6 backdrop-blur-xl border border-blue-500/30 shadow-[0_0_25px_rgba(0,149,255,0.15)]">
-                <h3 className="text-xl font-semibold mb-6 text-center text-blue-400">Punti Luce per Proprietà</h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <div className="bg-black/60 rounded-xl p-4 sm:p-6 backdrop-blur-xl border border-blue-500/30 shadow-[0_0_25px_rgba(0,149,255,0.15)]">
+                <h3 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 text-center text-blue-400">Punti Luce per Proprietà</h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4">
                   {Object.entries(stats.propertyCounts).map(([property, count]) => (
                     <div
                       key={property}
-                      className="bg-blue-900/40 p-4 rounded-lg text-center border border-blue-500/20 hover:border-blue-400/40 hover:bg-blue-800/50 transition-all duration-200"
+                      className="bg-blue-900/40 p-3 sm:p-4 rounded-lg text-center border border-blue-500/20 hover:border-blue-400/40 hover:bg-blue-800/50 transition-all duration-200 min-w-0"
                     >
-                      <h4 className="text-blue-200 text-sm truncate" title={property}>
+                      <h4 className="text-blue-200 text-xs sm:text-sm truncate" title={property}>
                         {property}
                       </h4>
-                      <p className="text-xl font-bold text-white">{count}</p>
+                      <p className="text-lg sm:text-xl font-bold text-white tabular-nums">{count}</p>
                     </div>
                   ))}
                 </div>
@@ -700,20 +780,20 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
             )}
 
             {Object.keys(stats.fixtureTypeCounts).length > 0 && (
-              <div className="bg-black/60 rounded-xl p-6 backdrop-blur-xl border border-blue-500/30 shadow-[0_0_25px_rgba(0,149,255,0.15)]">
-                <h3 className="text-xl font-semibold mb-6 text-center text-blue-400">
+              <div className="bg-black/60 rounded-xl p-4 sm:p-6 backdrop-blur-xl border border-blue-500/30 shadow-[0_0_25px_rgba(0,149,255,0.15)]">
+                <h3 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 text-center text-blue-400">
                   Punti Luce per Tipo di Apparecchio
                 </h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4">
                   {Object.entries(stats.fixtureTypeCounts).map(([type, count]) => (
                     <div
                       key={type}
-                      className="bg-blue-900/40 p-4 rounded-lg text-center border border-blue-500/20 hover:border-blue-400/40 hover:bg-blue-800/50 transition-all duration-200"
+                      className="bg-blue-900/40 p-3 sm:p-4 rounded-lg text-center border border-blue-500/20 hover:border-blue-400/40 hover:bg-blue-800/50 transition-all duration-200 min-w-0"
                     >
-                      <h4 className="text-blue-200 text-sm truncate" title={type}>
+                      <h4 className="text-blue-200 text-xs sm:text-sm truncate" title={type}>
                         {type}
                       </h4>
-                      <p className="text-xl font-bold text-white">{count}</p>
+                      <p className="text-lg sm:text-xl font-bold text-white tabular-nums">{count}</p>
                     </div>
                   ))}
                 </div>
@@ -721,18 +801,18 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
             )}
 
             {Object.keys(stats.lampTypeCounts).length > 0 && (
-              <div className="bg-black/60 rounded-xl p-6 backdrop-blur-xl border border-blue-500/30 shadow-[0_0_25px_rgba(0,149,255,0.15)]">
-                <h3 className="text-xl font-semibold mb-6 text-center text-blue-400">Punti Luce per Tipo di Lampada</h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              <div className="bg-black/60 rounded-xl p-4 sm:p-6 backdrop-blur-xl border border-blue-500/30 shadow-[0_0_25px_rgba(0,149,255,0.15)]">
+                <h3 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 text-center text-blue-400">Punti Luce per Tipo di Lampada</h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-4">
                   {Object.entries(stats.lampTypeCounts).map(([type, count]) => (
                     <div
                       key={type}
-                      className="bg-blue-900/40 p-4 rounded-lg text-center border border-blue-500/20 hover:border-blue-400/40 hover:bg-blue-800/50 transition-all duration-200"
+                      className="bg-blue-900/40 p-3 sm:p-4 rounded-lg text-center border border-blue-500/20 hover:border-blue-400/40 hover:bg-blue-800/50 transition-all duration-200 min-w-0"
                     >
-                      <h4 className="text-blue-200 text-sm truncate" title={type}>
+                      <h4 className="text-blue-200 text-xs sm:text-sm truncate" title={type}>
                         {type}
                       </h4>
-                      <p className="text-xl font-bold text-white">{count}</p>
+                      <p className="text-lg sm:text-xl font-bold text-white tabular-nums">{count}</p>
                     </div>
                   ))}
                 </div>
@@ -742,27 +822,26 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
         )}
 
         {activeTab === "charts" && (
-          <div className="space-y-10">
-            <div className="flex flex-col gap-8">
+          <div className="space-y-5 sm:space-y-10">
+            <div className="flex flex-col gap-4 sm:gap-8">
               {/* Torta Proprietà */}
-              <div
-                className="bg-black/60 rounded-xl p-4 border border-blue-500/30 flex flex-col items-center w-full"
-                style={{ boxShadow: "none" }}
-              >
-                <h3 className="text-center text-blue-400 mb-2 text-lg font-semibold">Punti Luce per Proprietà</h3>
-                <div className="relative w-full h-[420px] flex items-center justify-center">
-                  <ResponsiveContainer width="100%" height={420} minWidth={320} minHeight={320}>
-                    <PieChart style={{ zIndex: 2, background: "transparent" }}>
+              <div className="bg-black/60 rounded-xl p-3 sm:p-4 border border-blue-500/30 flex flex-col items-center w-full overflow-hidden">
+                <h3 className="text-center text-blue-400 mb-2 text-base sm:text-lg font-semibold px-1">
+                  Punti Luce per Proprietà
+                </h3>
+                <div className="relative w-full flex items-center justify-center" style={{ height: pieHeight }}>
+                  <ResponsiveContainer width="100%" height={pieHeight} minWidth={0} minHeight={200}>
+                    <PieChart style={{ background: "transparent" }}>
                       <Pie
                         data={propertyPieData}
                         dataKey="value"
                         nameKey="name"
                         cx="50%"
                         cy="50%"
-                        outerRadius={180}
-                        innerRadius={70}
+                        outerRadius={pieOuterRadius}
+                        innerRadius={pieInnerRadius}
                         label={renderCustomizedLabel}
-                        isAnimationActive={true}
+                        isAnimationActive={!isMobile}
                         animationBegin={0}
                         animationDuration={2000}
                         animationEasing="ease-in-out"
@@ -793,26 +872,23 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
                 </div>
               </div>
               {/* Torta Apparecchio */}
-              <div
-                className="bg-black/60 rounded-xl p-4 border border-blue-500/30 flex flex-col items-center w-full"
-                style={{ boxShadow: "none" }}
-              >
-                <h3 className="text-center text-blue-400 mb-2 text-lg font-semibold">
+              <div className="bg-black/60 rounded-xl p-3 sm:p-4 border border-blue-500/30 flex flex-col items-center w-full overflow-hidden">
+                <h3 className="text-center text-blue-400 mb-2 text-base sm:text-lg font-semibold px-1">
                   Punti Luce per Tipo Apparecchio
                 </h3>
-                <div className="relative w-full h-[420px] flex items-center justify-center">
-                  <ResponsiveContainer width="100%" height={420} minWidth={320} minHeight={320}>
-                    <PieChart style={{ zIndex: 2, background: "transparent" }}>
+                <div className="relative w-full flex items-center justify-center" style={{ height: pieHeight }}>
+                  <ResponsiveContainer width="100%" height={pieHeight} minWidth={0} minHeight={200}>
+                    <PieChart style={{ background: "transparent" }}>
                       <Pie
                         data={fixturePieData}
                         dataKey="value"
                         nameKey="name"
                         cx="50%"
                         cy="50%"
-                        outerRadius={180}
-                        innerRadius={70}
+                        outerRadius={pieOuterRadius}
+                        innerRadius={pieInnerRadius}
                         label={renderCustomizedLabel}
-                        isAnimationActive={true}
+                        isAnimationActive={!isMobile}
                         animationBegin={0}
                         animationDuration={2000}
                         animationEasing="ease-in-out"
@@ -837,24 +913,23 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
                 </div>
               </div>
               {/* Torta Lampada */}
-              <div
-                className="bg-black/60 rounded-xl p-4 border border-blue-500/30 flex flex-col items-center w-full"
-                style={{ boxShadow: "none" }}
-              >
-                <h3 className="text-center text-blue-400 mb-2 text-lg font-semibold">Punti Luce per Tipo Lampada</h3>
-                <div className="relative w-full h-[420px] flex items-center justify-center">
-                  <ResponsiveContainer width="100%" height={420} minWidth={320} minHeight={320}>
-                    <PieChart style={{ zIndex: 2, background: "transparent" }}>
+              <div className="bg-black/60 rounded-xl p-3 sm:p-4 border border-blue-500/30 flex flex-col items-center w-full overflow-hidden">
+                <h3 className="text-center text-blue-400 mb-2 text-base sm:text-lg font-semibold px-1">
+                  Punti Luce per Tipo Lampada
+                </h3>
+                <div className="relative w-full flex items-center justify-center" style={{ height: pieHeight }}>
+                  <ResponsiveContainer width="100%" height={pieHeight} minWidth={0} minHeight={200}>
+                    <PieChart style={{ background: "transparent" }}>
                       <Pie
                         data={lampPieData}
                         dataKey="value"
                         nameKey="name"
                         cx="50%"
                         cy="50%"
-                        outerRadius={180}
-                        innerRadius={70}
+                        outerRadius={pieOuterRadius}
+                        innerRadius={pieInnerRadius}
                         label={renderCustomizedLabel}
-                        isAnimationActive={true}
+                        isAnimationActive={!isMobile}
                         animationBegin={0}
                         animationDuration={2000}
                         animationEasing="ease-in-out"
@@ -880,27 +955,32 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
               </div>
             </div>
             {/* Tempo di risposta medio */}
-            <div className="bg-black/60 rounded-xl p-6 border border-blue-500/30 flex flex-col items-center">
-              <h3 className="text-blue-400 text-lg font-semibold mb-2">Tempo di risposta medio alle segnalazioni</h3>
+            <div className="bg-black/60 rounded-xl p-4 sm:p-6 border border-blue-500/30 flex flex-col items-center text-center">
+              <h3 className="text-blue-400 text-base sm:text-lg font-semibold mb-2">
+                Tempo di risposta medio alle segnalazioni
+              </h3>
               {loadingAvg ? (
                 <span className="text-blue-200">Caricamento...</span>
               ) : errorAvg ? (
                 <span className="text-red-400">{errorAvg}</span>
               ) : avgResponseTime !== null ? (
-                <span className="text-3xl font-bold text-blue-200">{avgResponseTime}</span>
+                <span className="text-2xl sm:text-3xl font-bold text-blue-200">{avgResponseTime}</span>
               ) : (
                 <span className="text-blue-200">Nessun dato disponibile</span>
               )}
             </div>
             {/* Grafico a colonne segnalazioni/operazioni */}
-            <div className="bg-black/60 rounded-xl p-6 border border-blue-500/30">
-              <h3 className="text-blue-400 text-lg font-semibold mb-4 text-center">
+            <div className="bg-black/60 rounded-xl p-3 sm:p-6 border border-blue-500/30 overflow-hidden">
+              <h3 className="text-blue-400 text-base sm:text-lg font-semibold mb-4 text-center">
                 Segnalazioni e Operazioni per mese
               </h3>
-              <ResponsiveContainer width="100%" height={340} minWidth={220} minHeight={220}>
-                <BarChart data={barData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
-                  <XAxis dataKey="mese" stroke="#60a5fa" />
-                  <YAxis stroke="#60a5fa" />
+              <ResponsiveContainer width="100%" height={barHeight} minWidth={0} minHeight={180}>
+                <BarChart
+                  data={barData}
+                  margin={{ top: 10, right: isMobile ? 8 : 30, left: isMobile ? -18 : 0, bottom: 5 }}
+                >
+                  <XAxis dataKey="mese" stroke="#60a5fa" tick={{ fontSize: isMobile ? 10 : 12 }} />
+                  <YAxis stroke="#60a5fa" tick={{ fontSize: isMobile ? 10 : 12 }} width={isMobile ? 32 : 40} />
                   <Tooltip />
                   <Legend />
                   <Bar dataKey="Segnalazioni" fill="#ef4444" radius={[8, 8, 0, 0]} />
@@ -912,11 +992,13 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
         )}
 
         {activeTab === "segnalazioni" && (
-          <div className="space-y-8 pb-20">
+          <div className="space-y-5 sm:space-y-8 pb-8 sm:pb-12">
             {/* Statistiche Segnalazioni */}
-            <div className="bg-black/60 rounded-xl p-6 backdrop-blur-xl border border-blue-500/30 shadow-[0_0_25px_rgba(0,149,255,0.15)]">
-              <h3 className="text-xl font-semibold mb-6 text-center text-blue-400">Statistiche Segnalazioni</h3>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="bg-black/60 rounded-xl p-4 sm:p-6 backdrop-blur-xl border border-blue-500/30 shadow-[0_0_25px_rgba(0,149,255,0.15)]">
+              <h3 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 text-center text-blue-400">
+                Statistiche Segnalazioni
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 sm:gap-4">
                 <StatCard
                   title="Segnalazioni in Corso"
                   value={reportsStats.totalReportsInProgress}
@@ -934,12 +1016,14 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
             </div>
 
             {/* Grafici Segnalazioni */}
-            <div className="grid md:grid-cols-2 gap-8 ">
+            <div className="grid md:grid-cols-2 gap-4 sm:gap-8">
               {/* Grafico Tipi di Segnalazione */}
               {reportTypePieData.length > 0 && (
-                <div className="bg-black/60 rounded-xl p-4 border border-blue-500/30 flex flex-col items-center">
-                  <h3 className="text-center text-blue-400 mb-2 text-lg font-semibold">Segnalazioni per Tipo</h3>
-                  <ResponsiveContainer width="100%" height={350}>
+                <div className="bg-black/60 rounded-xl p-3 sm:p-4 border border-blue-500/30 flex flex-col items-center overflow-hidden">
+                  <h3 className="text-center text-blue-400 mb-2 text-base sm:text-lg font-semibold">
+                    Segnalazioni per Tipo
+                  </h3>
+                  <ResponsiveContainer width="100%" height={reportPieHeight} minWidth={0}>
                     <PieChart>
                       <Pie
                         data={reportTypePieData}
@@ -947,10 +1031,10 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
                         nameKey="name"
                         cx="50%"
                         cy="50%"
-                        outerRadius={120}
-                        innerRadius={50}
+                        outerRadius={reportPieOuter}
+                        innerRadius={reportPieInner}
                         label={renderCustomizedLabel}
-                        isAnimationActive={true}
+                        isAnimationActive={!isMobile}
                         animationDuration={1500}
                         labelLine={false}
                       >
@@ -975,9 +1059,11 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
 
               {/* Grafico Tipi di Operazione */}
               {operationTypePieData.length > 0 && (
-                <div className="bg-black/60 rounded-xl p-4 border border-blue-500/30 flex flex-col items-center">
-                  <h3 className="text-center text-blue-400 mb-2 text-lg font-semibold">Operazioni per Tipo</h3>
-                  <ResponsiveContainer width="100%" height={350}>
+                <div className="bg-black/60 rounded-xl p-3 sm:p-4 border border-blue-500/30 flex flex-col items-center overflow-hidden">
+                  <h3 className="text-center text-blue-400 mb-2 text-base sm:text-lg font-semibold">
+                    Operazioni per Tipo
+                  </h3>
+                  <ResponsiveContainer width="100%" height={reportPieHeight} minWidth={0}>
                     <PieChart>
                       <Pie
                         data={operationTypePieData}
@@ -985,10 +1071,10 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
                         nameKey="name"
                         cx="50%"
                         cy="50%"
-                        outerRadius={120}
-                        innerRadius={50}
+                        outerRadius={reportPieOuter}
+                        innerRadius={reportPieInner}
                         label={renderCustomizedLabel}
-                        isAnimationActive={true}
+                        isAnimationActive={!isMobile}
                         animationDuration={1500}
                         labelLine={false}
                       >
@@ -1014,9 +1100,11 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
 
             {/* Lista Segnalazioni in Corso */}
             {reportsStats.reportsInProgress.length > 0 && (
-              <div className="bg-black/60 rounded-xl p-6 backdrop-blur-xl border border-red-500/30">
-                <h3 className="text-xl font-semibold mb-6 text-center text-red-400">Segnalazioni in Corso</h3>
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-96 overflow-y-auto scrollbar-thin scrollbar-thumb-red-700/70 scrollbar-track-red-950/40">
+              <div className="bg-black/60 rounded-xl p-4 sm:p-6 backdrop-blur-xl border border-red-500/30">
+                <h3 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 text-center text-red-400">
+                  Segnalazioni in Corso
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 max-h-[min(60vh,24rem)] overflow-y-auto overscroll-contain scrollbar-thin scrollbar-thumb-red-700/70 scrollbar-track-red-950/40">
                   {showMoreReportsInProgress ? reportsStats.reportsInProgress.map((report, idx) => (
                     <ReportCard key={`progress-${idx}`} report={report} type="progress" onNavigateToPoint={onNavigateToPoint} />
                   )) : reportsStats.reportsInProgress.slice(0, 12).map((report, idx) => (
@@ -1024,18 +1112,24 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
                   ))}
                 </div>
                 {!showMoreReportsInProgress && reportsStats.reportsInProgress.length > 12 && (
-                  <p className="text-center text-red-300 mt-4 cursor-pointer" onClick={() => setShowMoreReportsInProgress(true)}>
+                  <button
+                    type="button"
+                    className="w-full text-center text-red-300 mt-4 min-h-11 cursor-pointer hover:text-red-200 transition-colors"
+                    onClick={() => setShowMoreReportsInProgress(true)}
+                  >
                     ... e altre {reportsStats.reportsInProgress.length - 12} segnalazioni
-                  </p>
+                  </button>
                 )}
               </div>
             )}
 
             {/* Lista Segnalazioni Risolte */}
             {reportsStats.reportsResolved.length > 0 && (
-              <div className="bg-black/60 rounded-xl p-6 backdrop-blur-xl border border-green-500/30">
-                <h3 className="text-xl font-semibold mb-6 text-center text-green-400">Segnalazioni Risolte</h3>
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-96 overflow-y-auto scrollbar-thin scrollbar-thumb-green-700/70 scrollbar-track-green-950/40">
+              <div className="bg-black/60 rounded-xl p-4 sm:p-6 backdrop-blur-xl border border-green-500/30">
+                <h3 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 text-center text-green-400">
+                  Segnalazioni Risolte
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 max-h-[min(60vh,24rem)] overflow-y-auto overscroll-contain scrollbar-thin scrollbar-thumb-green-700/70 scrollbar-track-green-950/40">
                   {showMoreReportsResolved ? reportsStats.reportsResolved.map((report, idx) => (
                     <ReportCard key={`resolved-${idx}`} report={report} type="resolved" onNavigateToPoint={onNavigateToPoint} />
                   )) : reportsStats.reportsResolved.slice(0, 12).map((report, idx) => (
@@ -1043,18 +1137,24 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
                   ))}
                 </div>
                 {!showMoreReportsResolved && reportsStats.reportsResolved.length > 12 && (
-                  <p className="text-center text-green-300 mt-4 cursor-pointer" onClick={() => setShowMoreReportsResolved(true)}>
+                  <button
+                    type="button"
+                    className="w-full text-center text-green-300 mt-4 min-h-11 cursor-pointer hover:text-green-200 transition-colors"
+                    onClick={() => setShowMoreReportsResolved(true)}
+                  >
                     ... e altre {reportsStats.reportsResolved.length - 12} segnalazioni
-                  </p>
+                  </button>
                 )}
               </div>
             )}
 
             {/* Lista Operazioni */}
             {reportsStats.operations.length > 0 && (
-              <div className="bg-black/60 rounded-xl p-6 backdrop-blur-xl border border-blue-500/30">
-                <h3 className="text-xl font-semibold mb-6 text-center text-blue-400">Operazioni Effettuate</h3>
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-96 overflow-y-auto scrollbar-thin scrollbar-thumb-blue-700/70 scrollbar-track-blue-950/40">
+              <div className="bg-black/60 rounded-xl p-4 sm:p-6 backdrop-blur-xl border border-blue-500/30">
+                <h3 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6 text-center text-blue-400">
+                  Operazioni Effettuate
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 max-h-[min(60vh,24rem)] overflow-y-auto overscroll-contain scrollbar-thin scrollbar-thumb-blue-700/70 scrollbar-track-blue-950/40">
                   {showMoreOperations ? reportsStats.operations.map((operation, idx) => (
                     <OperationCard key={`operation-${idx}`} operation={operation} onNavigateToPoint={onNavigateToPoint} />
                   )) : reportsStats.operations.slice(0, 12).map((operation, idx) => (
@@ -1062,9 +1162,13 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
                   ))}
                 </div>
                 {!showMoreOperations && reportsStats.operations.length > 12 && (
-                  <p className="text-center text-blue-300 mt-4 cursor-pointer" onClick={() => setShowMoreOperations(true)}>
+                  <button
+                    type="button"
+                    className="w-full text-center text-blue-300 mt-4 min-h-11 cursor-pointer hover:text-blue-200 transition-colors"
+                    onClick={() => setShowMoreOperations(true)}
+                  >
                     ... e altre {reportsStats.operations.length - 12} operazioni
-                  </p>
+                  </button>
                 )}
               </div>
             )}
@@ -1073,7 +1177,7 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
             {reportsStats.totalReportsInProgress === 0 &&
               reportsStats.totalReportsResolved === 0 &&
               reportsStats.totalOperations === 0 && (
-                <div className="bg-black/60 rounded-xl p-8 backdrop-blur-xl border border-gray-500/30 text-center">
+                <div className="bg-black/60 rounded-xl p-6 sm:p-8 backdrop-blur-xl border border-gray-500/30 text-center">
                   <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                   <h3 className="text-xl font-semibold text-gray-400 mb-2">Nessuna Segnalazione</h3>
                   <p className="text-gray-500">Non sono presenti segnalazioni o operazioni per l'area selezionata.</p>
@@ -1081,8 +1185,10 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
               )}
           </div>
         )}
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

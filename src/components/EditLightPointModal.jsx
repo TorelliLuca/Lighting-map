@@ -1,10 +1,23 @@
 "use client"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { X, Save, MapPin, RotateCcw, Crosshair, ChevronDown } from "lucide-react"
 import toast from "react-hot-toast"
 import { migrateLegacyLightPointFields, prepareLightPointPayload } from "../utils/utils"
+import MapFabBottomSheet from "./ui/MapFabBottomSheet"
+import { useMediaQuery } from "../hooks/useMediaQuery"
+import { INFO_WINDOW_MOBILE_MQ } from "../utils/infoWindowActions"
 
-const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersData, electricPanels = [] }) => {
+const EditLightPointModal = ({
+  marker,
+  isOpen,
+  onClose,
+  onSave,
+  map,
+  allMarkersData,
+  electricPanels = [],
+  onRequestConfirm,
+}) => {
+  const isMobile = useMediaQuery(INFO_WINDOW_MOBILE_MQ)
   // Stato locale per la posizione temporanea
   const [tempPosition, setTempPosition] = useState(null)
   const [formData, setFormData] = useState({})
@@ -14,6 +27,8 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
   const [isFetchingAddress, setIsFetchingAddress] = useState(false)
   const [isResizing, setIsResizing] = useState(false)
   const [modalWidth, setModalWidth] = useState(384) // Default 96 (24rem)
+  const [sheetCollapsed, setSheetCollapsed] = useState(false)
+  const skipCollapseOnNextPositionRef = useRef(true)
 
   // Opzioni per le select
   const selectOptions = {
@@ -163,9 +178,6 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
     "lng",
   ]
 
-  // Detect mobile device
-  const isMobile = typeof window !== "undefined" && window.innerWidth < 768
-
   // Handle resize functionality
   useEffect(() => {
     const handleMouseMove = (e) => {
@@ -196,6 +208,8 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
   // Inizializza i dati quando cambia il marker o si apre il modal
   useEffect(() => {
     if (isOpen && marker) {
+      skipCollapseOnNextPositionRef.current = true
+      setSheetCollapsed(false)
       setTempPosition({ lat: marker.lat, lng: marker.lng })
       const editableData = migrateLegacyLightPointFields({ ...marker })
 
@@ -203,7 +217,31 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
       setOriginalData(editableData)
       setHasChanges(false)
     }
-  }, [isOpen, marker])
+  }, [isOpen, marker?._id])
+
+  // Collassa lo sheet mobile quando l'utente sposta il marker sulla mappa
+  useEffect(() => {
+    if (!isOpen || !isMobile || !tempPosition) return
+    if (skipCollapseOnNextPositionRef.current) {
+      skipCollapseOnNextPositionRef.current = false
+      return
+    }
+    setSheetCollapsed(true)
+  }, [tempPosition?.lat, tempPosition?.lng, isOpen, isMobile])
+
+  // Sync sola posizione se il marker esterno cambia coordinate durante l'edit (MapLibre drag)
+  useEffect(() => {
+    if (!isOpen || !marker || !tempPosition) return
+    const nextLat = marker.lat
+    const nextLng = marker.lng
+    if (
+      String(nextLat) === String(tempPosition.lat) &&
+      String(nextLng) === String(tempPosition.lng)
+    ) {
+      return
+    }
+    setTempPosition({ lat: nextLat, lng: nextLng })
+  }, [isOpen, marker?.lat, marker?.lng])
 
   // Gestione drag marker sulla mappa
   useEffect(() => {
@@ -233,7 +271,7 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
         if (dragEndListener && dragEndListener.remove) dragEndListener.remove()
       }
     }
-  }, [isOpen, map, marker, allMarkersData])
+  }, [isOpen, map, marker?._id, allMarkersData])
 
   useEffect(() => {
     if (!isOpen || !marker) return
@@ -242,7 +280,7 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
         window.onMarkerPositionChange(marker._id, tempPosition.lat, tempPosition.lng)
       }
     }
-  }, [tempPosition, isOpen, map, marker])
+  }, [tempPosition, isOpen, map, marker?._id])
 
   // Gestione cambiamenti nei campi
   useEffect(() => {
@@ -375,19 +413,33 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
     }
   }
 
-  const handleCancel = () => {
+  const handleCancel = async () => {
     if (hasChanges) {
-      if (window.confirm("Ci sono modifiche non salvate. Vuoi davvero annullare?")) {
+      let shouldClose = false
+      if (typeof onRequestConfirm === "function") {
+        shouldClose = await onRequestConfirm({
+          title: "Modifiche non salvate",
+          description: "Vuoi davvero annullare le modifiche?",
+          confirmLabel: "Scarta modifiche",
+          cancelLabel: "Continua modifica",
+          variant: "default",
+        })
+      } else {
+        shouldClose = window.confirm("Ci sono modifiche non salvate. Vuoi davvero annullare?")
+      }
+      if (shouldClose) {
         setFormData(originalData)
         setTempPosition({ lat: marker.lat, lng: marker.lng })
         setHasChanges(false)
         handleResetPosition()
+        setSheetCollapsed(false)
         onClose()
       }
     } else {
       setFormData(originalData)
       setTempPosition({ lat: marker.lat, lng: marker.lng })
       setHasChanges(false)
+      setSheetCollapsed(false)
       onClose()
     }
   }
@@ -596,150 +648,167 @@ const EditLightPointModal = ({ marker, isOpen, onClose, onSave, map, allMarkersD
 
   if (!isOpen || !marker || !tempPosition) return null
 
-  const modalStyle = isMobile ? { width: "100vw", height: "100vh" } : { width: `${modalWidth}px` }
+  const sheetTitle = `Modifica · ${marker.marker === "QE" ? "QE" : "PL"} ${marker.numero_palo || ""}`
+  const peekLabel = `${marker.marker === "QE" ? "Quadro" : "Punto luce"} ${marker.numero_palo || ""} · continua modifica`
 
-  return (
+  const panelBody = (
     <>
-      {/* Backdrop for mobile */}
-      {isMobile && <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[9998]" onClick={handleCancel} />}
+      {isMobile && (
+        <p className="mb-4 text-xs text-blue-300/90 leading-relaxed">
+          Trascina il marker sulla mappa per spostarlo. Lo sheet si collassa: riaprilo
+          dal bordo in basso per completare le modifiche.
+        </p>
+      )}
 
-      <div
-        className={`fixed ${isMobile ? "inset-0" : "top-0 right-0 h-full"} bg-black/80 backdrop-blur-xl border-l border-blue-500/30 z-[9999] transform transition-transform duration-300 shadow-[0_0_25px_rgba(0,149,255,0.15)] ${isOpen ? "translate-x-0" : "translate-x-full"} ${isMobile ? "rounded-none" : "rounded-l-xl"}`}
-        style={modalStyle}
-      >
-        {/* Resize handle for desktop */}
-        {!isMobile && (
-          <div
-            className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-blue-500/50 transition-colors"
-            onMouseDown={() => setIsResizing(true)}
-          />
+      <div className="mb-4 p-3 bg-blue-900/50 border border-blue-500/30 rounded-lg">
+        <div className="flex items-center gap-2 text-blue-300">
+          <MapPin className="h-4 w-4 flex-shrink-0" />
+          <span className="text-sm font-medium">
+            Modalità spostamento attiva - Trascina il marker sulla mappa
+          </span>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        {Object.entries(formData).length === 0 ? (
+          <div className="text-center py-8">
+            <p className="text-blue-300">Nessun campo modificabile trovato</p>
+          </div>
+        ) : (
+          <>
+            {marker.marker === "QE"
+              ? campiQE.map((key) => renderField(key, formData[key] ?? "", marker.marker))
+              : campiPL.map((key) => renderField(key, formData[key] ?? "", marker.marker))}
+          </>
         )}
+      </div>
 
-        <div className="h-full flex flex-col">
-          {/* Header */}
-          <div
-            className={`flex items-center justify-between ${isMobile ? "p-4" : "p-6"} border-b border-blue-500/30 bg-blue-900/50`}
+      <div className="mt-6 p-4 bg-blue-900/40 rounded-lg border border-blue-500/30">
+        <h3 className="text-base font-medium text-white mb-3 sm:text-lg">Posizione</h3>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-blue-300 mb-1">Latitudine</label>
+            <input
+              type="text"
+              value={Number(tempPosition?.lat).toFixed(5)}
+              readOnly
+              className="w-full px-3 py-3 bg-blue-900/60 text-blue-300 border border-blue-500/40 rounded-lg min-h-[44px]"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-blue-300 mb-1">Longitudine</label>
+            <input
+              type="text"
+              value={Number(tempPosition?.lng).toFixed(5)}
+              readOnly
+              className="w-full px-3 py-3 bg-blue-900/60 text-blue-300 border border-blue-500/40 rounded-lg min-h-[44px]"
+            />
+          </div>
+        </div>
+        <div className="mt-3 space-y-2">
+          <button
+            type="button"
+            onClick={handleResetPosition}
+            className="flex items-center gap-2 px-4 py-3 text-sm text-blue-300 hover:text-blue-200 hover:bg-blue-800/50 rounded-lg transition-colors border border-blue-500/30 w-full min-h-[44px]"
           >
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-500/20 rounded-lg border border-blue-500/30">
-                <MapPin className="h-5 w-5 text-blue-400" />
-              </div>
-              <div>
-                <h2 className={`${isMobile ? "text-base" : "text-lg"} font-semibold text-white`}>
-                  Modifica Punto Luce
-                </h2>
-                <p className="text-sm text-blue-300">
-                  {marker.marker === "QE" ? "Quadro Elettrico" : "Punto Luce"} - {marker.numero_palo}
-                </p>
-              </div>
-            </div>
+            <RotateCcw className="h-4 w-4" />
+            Ripristina posizione originale
+          </button>
+          {!isMobile && (
             <button
-              onClick={handleCancel}
-              className="p-2 hover:bg-blue-800/50 rounded-lg transition-colors border border-blue-500/30 min-h-[44px] min-w-[44px] flex items-center justify-center"
+              type="button"
+              onClick={handleCenterMap}
+              className="flex items-center gap-2 px-4 py-3 text-sm text-blue-300 hover:text-blue-200 hover:bg-blue-800/50 rounded-lg transition-colors border border-blue-500/30 w-full min-h-[44px]"
             >
-              <X className="h-4 w-4 text-blue-400" />
+              <Crosshair className="h-4 w-4" />
+              Centra mappa sul marker
             </button>
-          </div>
+          )}
+        </div>
+      </div>
 
-          {/* Content */}
-          <div className={`flex-1 overflow-y-auto ${isMobile ? "p-4" : "p-6"}`}>
-            {/* Avviso modalità drag */}
-            <div className="mb-4 p-3 bg-blue-900/50 border border-blue-500/30 rounded-lg">
-              <div className="flex items-center gap-2 text-blue-300">
-                <MapPin className="h-4 w-4 flex-shrink-0" />
-                <span className="text-sm font-medium">
-                  Modalità spostamento attiva - Trascina il marker sulla mappa
-                </span>
-              </div>
-            </div>
-
-            {/* Form fields */}
-            <div className="space-y-4">
-              {Object.entries(formData).length === 0 ? (
-                <div className="text-center py-8">
-                  <p className="text-blue-300">Nessun campo modificabile trovato</p>
-                </div>
-              ) : (
-                <>
-                  {/* Altri campi filtrati per QE o PL */}
-                  {marker.marker === "QE"
-                    ? campiQE.map((key) => renderField(key, formData[key] ?? "", marker.marker))
-                    : campiPL.map((key) => renderField(key, formData[key] ?? "", marker.marker))}
-                </>
-              )}
-            </div>
-
-            {/* Position controls */}
-            <div className="mt-6 p-4 bg-blue-900/40 rounded-lg border border-blue-500/30">
-              <h3 className={`${isMobile ? "text-base" : "text-lg"} font-medium text-white mb-3`}>Posizione</h3>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-sm font-medium text-blue-300 mb-1">Latitudine</label>
-                  <input
-                    type="text"
-                    value={Number(tempPosition?.lat).toFixed(5)}
-                    readOnly
-                    className="w-full px-3 py-3 bg-blue-900/60 text-blue-300 border border-blue-500/40 rounded-lg min-h-[44px]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-blue-300 mb-1">Longitudine</label>
-                  <input
-                    type="text"
-                    value={Number(tempPosition?.lng).toFixed(5)}
-                    readOnly
-                    className="w-full px-3 py-3 bg-blue-900/60 text-blue-300 border border-blue-500/40 rounded-lg min-h-[44px]"
-                  />
-                </div>
-              </div>
-              <div className="mt-3 space-y-2">
-                <button
-                  onClick={handleResetPosition}
-                  className="flex items-center gap-2 px-4 py-3 text-sm text-blue-300 hover:text-blue-200 hover:bg-blue-800/50 rounded-lg transition-colors border border-blue-500/30 w-full min-h-[44px]"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  Ripristina posizione originale
-                </button>
-                <button
-                  onClick={handleCenterMap}
-                  className="flex items-center gap-2 px-4 py-3 text-sm text-blue-300 hover:text-blue-200 hover:bg-blue-800/50 rounded-lg transition-colors border border-blue-500/30 w-full min-h-[44px]"
-                >
-                  <Crosshair className="h-4 w-4" />
-                  Centra mappa sul marker
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div className={`${isMobile ? "p-4" : "p-6"} border-t border-blue-500/30 bg-blue-900/50`}>
-            <div className="text-sm text-blue-300 mb-4">
-              {hasChanges ? (
-                <span className="text-orange-400 font-medium">⚠️ Modifiche non salvate</span>
-              ) : (
-                <span className="text-green-400 font-medium">✓ Nessuna modifica</span>
-              )}
-            </div>
-            <div className={`flex gap-3 ${isMobile ? "flex-col" : ""}`}>
-              <button
-                onClick={handleCancel}
-                className={`${isMobile ? "w-full" : "flex-1"} px-4 py-3 text-blue-300 bg-blue-900/40 border border-blue-500/40 rounded-lg hover:bg-blue-800/50 transition-colors min-h-[44px]`}
-              >
-                Annulla
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={!hasChanges || isSaving}
-                className={`${isMobile ? "w-full" : "flex-1"} flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors min-h-[44px]`}
-              >
-                <Save className="h-4 w-4" />
-                {isSaving ? "Salvando..." : "Salva"}
-              </button>
-            </div>
-          </div>
+      <div className="mt-6 pt-4 border-t border-blue-500/30">
+        <div className="text-sm text-blue-300 mb-4">
+          {hasChanges ? (
+            <span className="text-orange-400 font-medium">Modifiche non salvate</span>
+          ) : (
+            <span className="text-green-400 font-medium">Nessuna modifica</span>
+          )}
+        </div>
+        <div className={`flex gap-3 ${isMobile ? "flex-col" : ""}`}>
+          <button
+            type="button"
+            onClick={handleCancel}
+            className={`${isMobile ? "w-full" : "flex-1"} px-4 py-3 text-blue-300 bg-blue-900/40 border border-blue-500/40 rounded-lg hover:bg-blue-800/50 transition-colors min-h-[44px]`}
+          >
+            Annulla
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!hasChanges || isSaving}
+            className={`${isMobile ? "w-full" : "flex-1"} flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors min-h-[44px]`}
+          >
+            <Save className="h-4 w-4" />
+            {isSaving ? "Salvando..." : "Salva"}
+          </button>
         </div>
       </div>
     </>
+  )
+
+  if (isMobile) {
+    return (
+      <MapFabBottomSheet
+        isOpen={isOpen}
+        onClose={handleCancel}
+        title={sheetTitle}
+        tall
+        collapsible
+        collapsed={sheetCollapsed}
+        onCollapsedChange={setSheetCollapsed}
+        peekLabel={peekLabel}
+      >
+        {panelBody}
+      </MapFabBottomSheet>
+    )
+  }
+
+  return (
+    <div
+      className={`fixed top-0 right-0 h-full bg-black/80 backdrop-blur-xl border-l border-blue-500/30 z-[9999] transform transition-transform duration-300 shadow-[0_0_25px_rgba(0,149,255,0.15)] ${isOpen ? "translate-x-0" : "translate-x-full"} rounded-l-xl`}
+      style={{ width: `${modalWidth}px` }}
+    >
+      <div
+        className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-blue-500/50 transition-colors"
+        onMouseDown={() => setIsResizing(true)}
+      />
+
+      <div className="h-full flex flex-col">
+        <div className="flex items-center justify-between p-6 border-b border-blue-500/30 bg-blue-900/50">
+          <div className="flex items-center gap-3 overflow-x-auto">
+            <div className="p-2 bg-blue-500/20 rounded-lg border border-blue-500/30">
+              <MapPin className="h-5 w-5 text-blue-400" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-white">Modifica Punto Luce</h2>
+              <p className="text-sm text-blue-300">
+                {marker.marker === "QE" ? "Quadro Elettrico" : "Punto Luce"} - {marker.numero_palo}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleCancel}
+            className="p-2 hover:bg-blue-800/50 rounded-lg transition-colors border border-blue-500/30 min-h-[44px] min-w-[44px] flex items-center justify-center"
+          >
+            <X className="h-4 w-4 text-blue-400" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6">{panelBody}</div>
+      </div>
+    </div>
   )
 }
 

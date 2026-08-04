@@ -23,17 +23,17 @@ const basePath = import.meta.env.VITE_PUBLIC_URL || "";
 
 // Mappatura delle rotte con i titoli corrispondenti
 const routeTitles = {
-    "/": "Login | Lighting Map",
-    "/login": "Login | Lighting Map",
-    "/signin": "Registrati | Lighting Map",
-    "/confirm-email": "Conferma Email | Lighting Map",
-    "/reset-password": "Reset Password | Lighting Map",
-    "/dashboard": "Dashboard | Lighting Map",
-    "/report": "Report | Lighting Map",
-    "/operation": "Operazioni | Lighting Map",
-    "/my-organization": "La mia Organizzazione | Lighting Map",
-    "/organization-management": "Gestione Organizzazioni | Lighting Map",
-    "/manual": "Manuale | Lighting Map",
+    "/": "Login | LightingMap",
+    "/login": "Login | LightingMap",
+    "/signin": "Registrati | LightingMap",
+    "/confirm-email": "Conferma Email | LightingMap",
+    "/reset-password": "Reset Password | LightingMap",
+    "/dashboard": "Dashboard | LightingMap",
+    "/report": "Report | LightingMap",
+    "/operation": "Operazioni | LightingMap",
+    "/my-organization": "La mia Organizzazione | LightingMap",
+    "/organization-management": "Gestione Organizzazioni | LightingMap",
+    "/manual": "Manuale | LightingMap",
 };
 
 // Hook per gestire dinamicamente il titolo della pagina

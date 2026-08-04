@@ -113,7 +113,7 @@ export default function SearchBar({
           <button
             type="button"
             disabled={disabled}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-900/40 border border-blue-500/20 text-blue-200 hover:bg-blue-900/60 transition-colors disabled:cursor-not-allowed disabled:hover:bg-blue-900/40"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-transparent border border-transparent text-blue-200 hover:bg-blue-900/60 transition-colors disabled:cursor-not-allowed disabled:hover:bg-blue-900/40"
             onClick={() => !disabled && setShowDropdown(v => !v)}
             tabIndex={0}
           >

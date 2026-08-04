@@ -303,6 +303,7 @@ const createMarkers = async (
   editingMarkerId,
   onMarkerDragEnd,
   onDeleteClick,
+  onDuplicateClick,
   showPanelNumber,
   showStreetLampNumber,
   setSelectedMarkerForInfo,
@@ -502,6 +503,7 @@ const createMarkers = async (
             userData={userData} 
             onEditClick={onEditClick}
             onDeleteClick={onDeleteClick}
+            onDuplicateClick={onDuplicateClick}
             idMarker={ marker._id}
             variant="popup"
             onSetParentClick={onSetParentClick}
@@ -664,6 +666,7 @@ const setupMarkerClustering = async (
   editingMarkerId,
   onMarkerDragEnd,
   onDeleteClick,
+  onDuplicateClick,
   showPanelNumber,
   showStreetLampNumber,
   setSelectedMarkerForInfo,
@@ -717,6 +720,7 @@ const setupMarkerClustering = async (
       editingMarkerId,
       onMarkerDragEnd,
       onDeleteClick,
+      onDuplicateClick,
       showPanelNumber,
       showStreetLampNumber,
       setSelectedMarkerForInfo,
