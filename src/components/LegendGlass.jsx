@@ -96,7 +96,14 @@ const LegendList = ({ items, dense = false, columns = 1 }) => {
   )
 }
 
-function LegendGlass({ highlightOption, legendColorMap }) {
+function LegendGlass({
+  highlightOption,
+  legendColorMap,
+  items: customItems = null,
+  title: customTitle = null,
+  subtitle: customSubtitle = null,
+  className = "fixed bottom-42 left-6 z-40 select-none",
+}) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const isMobile = useMediaQuery(INFO_WINDOW_MOBILE_MQ)
@@ -105,12 +112,12 @@ function LegendGlass({ highlightOption, legendColorMap }) {
   const searchRef = useRef(null)
 
   const legendItems = useMemo(
-    () => buildLegendItems(highlightOption, legendColorMap),
-    [highlightOption, legendColorMap],
+    () => (Array.isArray(customItems) ? customItems : buildLegendItems(highlightOption, legendColorMap)),
+    [customItems, highlightOption, legendColorMap],
   )
 
-  const subtitle = getLegendSubtitle(highlightOption)
-  const title = `Legenda · ${subtitle}`
+  const subtitle = customSubtitle ?? getLegendSubtitle(highlightOption)
+  const title = customTitle ?? `Legenda · ${subtitle}`
   const showSearch = !isMobile && legendItems.length >= SEARCH_THRESHOLD
 
   const filteredItems = useMemo(() => {
@@ -126,7 +133,7 @@ function LegendGlass({ highlightOption, legendColorMap }) {
 
   useEffect(() => {
     setQuery("")
-  }, [highlightOption])
+  }, [highlightOption, customItems])
 
   useEffect(() => {
     if (isMobile || !open) return undefined
@@ -159,7 +166,7 @@ function LegendGlass({ highlightOption, legendColorMap }) {
       const t = window.setTimeout(() => searchRef.current?.focus(), 80)
       return () => window.clearTimeout(t)
     }
-  }, [open, showSearch, highlightOption])
+  }, [open, showSearch, highlightOption, customItems])
 
   const closeMenu = () => setOpen(false)
 
@@ -181,7 +188,7 @@ function LegendGlass({ highlightOption, legendColorMap }) {
   // —— Mobile: FAB + bottom sheet ——
   if (isMobile) {
     return (
-      <div className="fixed bottom-42 left-6 z-4 select-none">
+      <div className={className} data-tour="legend">
         {fabButton}
         <MapFabBottomSheet isOpen={open} onClose={closeMenu} title={title} tall>
           <LegendList items={legendItems} dense />
@@ -194,7 +201,7 @@ function LegendGlass({ highlightOption, legendColorMap }) {
   const useTwoColumns = filteredItems.length > 6
 
   return (
-    <div className="fixed bottom-42 left-6 z-4 select-none">
+    <div className={className} data-tour="legend">
       {fabButton}
 
       <div
@@ -250,7 +257,7 @@ function LegendGlass({ highlightOption, legendColorMap }) {
             </div>
           )}
 
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 scrollbar-thin">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 scrollbar-app">
             {filteredItems.length === 0 && legendItems.length > 0 ? (
               <p className="text-blue-300/80 text-sm py-4 text-center">Nessun risultato</p>
             ) : (
@@ -259,19 +266,6 @@ function LegendGlass({ highlightOption, legendColorMap }) {
           </div>
         </div>
       </div>
-
-      <style>{`
-        .scrollbar-thin::-webkit-scrollbar {
-          width: 6px;
-        }
-        .scrollbar-thin::-webkit-scrollbar-thumb {
-          background: #1e40af;
-          border-radius: 6px;
-        }
-        .scrollbar-thin::-webkit-scrollbar-track {
-          background: #1e293b;
-        }
-      `}</style>
     </div>
   )
 }

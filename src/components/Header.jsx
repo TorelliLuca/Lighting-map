@@ -15,14 +15,17 @@ import {
   CheckCheck,
   HelpCircle,
   Info,
+  FileSpreadsheet,
+  ClipboardCheck,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
 import Logo from "./Logo";
-import { translateUserType } from "../utils/utils";
+import { canApproveQuoteByRole, canManageQuotesByRole, translateUserType } from "../utils/utils";
 import SearchBar from "./SearchBar";
 import { api } from "../context/UserContext";
 import { usePushNotifications } from "../context/PushNotificationsContext";
+import { resolveNotificationNavigateTarget } from "../utils/notificationDeepLinks";
 
 const UNREAD_POLL_MS = 60_000;
 
@@ -30,7 +33,7 @@ const useClickOutside = (ref, callback) => {
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (ref.current && !ref.current.contains(event.target)) {
-        callback();
+        callback(event);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -52,7 +55,13 @@ function formatNotificationDate(iso) {
   }
 }
 
-const NotificationsPanel = ({ onBack, unreadCount, setUnreadCount }) => {
+const NotificationsPanel = ({
+  onBack,
+  onCloseMenu,
+  unreadCount,
+  setUnreadCount,
+}) => {
+  const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const {
@@ -122,6 +131,17 @@ const NotificationsPanel = ({ onBack, unreadCount, setUnreadCount }) => {
     }
   };
 
+  const handleNotificationClick = async (n) => {
+    if (!n.read) {
+      await handleMarkOne(n._id);
+    }
+    const target = resolveNotificationNavigateTarget(n);
+    if (target) {
+      onCloseMenu?.();
+      navigate(target);
+    }
+  };
+
   return (
     <div className="flex flex-col max-h-[min(70vh,420px)]">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-blue-500/20 ">
@@ -180,7 +200,7 @@ const NotificationsPanel = ({ onBack, unreadCount, setUnreadCount }) => {
         </div>
       )}
 
-      <div className="overflow-y-auto flex-1 py-1 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-black-950 [&::-webkit-scrollbar-thumb]:bg-blue-500 [&::-webkit-scrollbar-thumb]:rounded-full">
+      <div className="overflow-y-auto flex-1 py-1 scrollbar-app">
         {loading && (
           <p className="px-4 py-6 text-center text-sm text-blue-300/70">Caricamento…</p>
         )}
@@ -190,14 +210,16 @@ const NotificationsPanel = ({ onBack, unreadCount, setUnreadCount }) => {
           </p>
         )}
         {!loading &&
-          items.map((n) => (
+          items.map((n) => {
+            const target = resolveNotificationNavigateTarget(n);
+            return (
             <button
               key={n._id}
               type="button"
-              onClick={() => {
-                if (!n.read) handleMarkOne(n._id);
-              }}
+              onClick={() => handleNotificationClick(n)}
               className={`w-full text-left px-4 py-2.5 border-l-2 transition-colors ${
+                target ? "cursor-pointer" : "cursor-default"
+              } ${
                 n.read
                   ? "border-transparent text-blue-200/55 hover:bg-blue-900/20"
                   : "border-blue-500 bg-blue-950/40 text-white hover:bg-blue-900/40"
@@ -231,7 +253,8 @@ const NotificationsPanel = ({ onBack, unreadCount, setUnreadCount }) => {
                 </div>
               </div>
             </button>
-          ))}
+            );
+          })}
       </div>
     </div>
   );
@@ -277,7 +300,7 @@ const UserMenu = ({
   }, [isUserMenuOpen]);
 
   return (
-    <div className="relative" ref={userMenuRef}>
+    <div className="relative" ref={userMenuRef} data-tour="user-menu">
       <button
         className="relative flex items-center space-x-2 bg-transparent p-1.5 rounded-xl border border-transparent hover:bg-blue-900/40 transition-colors duration-200 focus:outline-none"
         onClick={() => setIsUserMenuOpen((open) => !open)}
@@ -290,7 +313,7 @@ const UserMenu = ({
             {userData?.name} {userData?.surname}
           </span>
           <span className="text-xs text-blue-300">
-            {translateUserType(userData?.user_type) || "Utente"}
+            {translateUserType(userData?.user_type, userData?.sub_role) || "Utente"}
           </span>
         </div>
         <ChevronDown
@@ -328,14 +351,15 @@ const UserMenu = ({
                 </li>
                 <li>
                   <button
-                    className="w-full text-left px-4 py-2 text-gray-400 cursor-not-allowed flex items-center gap-2"
-                    disabled
+                    type="button"
+                    className="w-full text-left px-4 py-2 hover:bg-blue-900/30 text-white flex items-center gap-2 cursor-pointer"
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      navigate("/profile");
+                    }}
                   >
                     <UserCircle className="h-4 w-4" />
                     Profilo
-                    <span className="ml-auto text-xs bg-blue-700/30 text-blue-300 px-2 py-0.5 rounded">
-                      In arrivo
-                    </span>
                   </button>
                 </li>
                 <li>
@@ -386,6 +410,10 @@ const UserMenu = ({
             ) : (
               <NotificationsPanel
                 onBack={() => setView("main")}
+                onCloseMenu={() => {
+                  setIsUserMenuOpen(false);
+                  setView("main");
+                }}
                 unreadCount={unreadCount}
                 setUnreadCount={setUnreadCount}
               />
@@ -397,13 +425,39 @@ const UserMenu = ({
   );
 };
 
-const CityOrganizationsMenu = ({ selectedCity, handleOrganizzazioniClick, isUserAdmin }) => {
+const CityOrganizationsMenu = ({
+  selectedCity,
+  handleOrganizzazioniClick,
+  handlePreventiviClick,
+  handleConsuntiviClick,
+  handleApprovazioneClick,
+  isUserAdmin,
+  canManageQuotes,
+}) => {
   const [isCityMenuOpen, setIsCityMenuOpen] = useState(false);
   const cityMenuRef = useRef(null);
 
-  useClickOutside(cityMenuRef, () => setIsCityMenuOpen(false));
+  useClickOutside(cityMenuRef, (event) => {
+    if (event?.target?.closest?.(".driver-popover, .driver-overlay, .driver-active-element")) {
+      return;
+    }
+    setIsCityMenuOpen(false);
+  });
 
-  if (!isUserAdmin) {
+  useEffect(() => {
+    const open = () => setIsCityMenuOpen(true);
+    const close = () => setIsCityMenuOpen(false);
+    window.addEventListener("lighting-map:org-menu-open", open);
+    window.addEventListener("lighting-map:org-menu-close", close);
+    return () => {
+      window.removeEventListener("lighting-map:org-menu-open", open);
+      window.removeEventListener("lighting-map:org-menu-close", close);
+    };
+  }, []);
+
+  const showMenu = isUserAdmin || canManageQuotes;
+
+  if (!showMenu) {
     return (
       <div className="flex items-center space-x-2 bg-transparent px-3  rounded-xl border-transparent">
         <MapPin className="h-4 w-4 text-blue-400" />
@@ -413,7 +467,7 @@ const CityOrganizationsMenu = ({ selectedCity, handleOrganizzazioniClick, isUser
   }
 
   return (
-    <div className="relative" ref={cityMenuRef}>
+    <div className="relative" ref={cityMenuRef} data-tour="org-menu">
       <button
         className="flex items-center space-x-2 bg-transparent px-3 rounded-xl  border-transparent hover:bg-blue-900/40 transition-colors duration-200 focus:outline-none"
         onClick={() => setIsCityMenuOpen((open) => !open)}
@@ -428,29 +482,81 @@ const CityOrganizationsMenu = ({ selectedCity, handleOrganizzazioniClick, isUser
           }`}
         />
       </button>
-      <AnimatePresence>
-        {isCityMenuOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.2 }}
-            className="absolute left-0 mt-3 w-56 bg-black border border-blue-500/30 rounded-lg shadow-lg z-50 overflow-hidden"
-          >
+      <div
+        className={`absolute left-0 mt-3 w-56 bg-black border border-blue-500/30 rounded-lg shadow-lg z-50 overflow-hidden transition-all duration-200 origin-top-left ${
+          isCityMenuOpen
+            ? "opacity-100 scale-100 pointer-events-auto"
+            : "opacity-0 scale-95 pointer-events-none"
+        }`}
+        aria-hidden={!isCityMenuOpen}
+      >
             <ul className="py-1">
-              <li>
-                <button
-                  className="w-full text-left px-4 py-2 hover:bg-blue-900/30 text-white flex items-center gap-2"
-                  onClick={handleOrganizzazioniClick}
-                >
-                  <Users className="h-4 w-4" />
-                  Organizzazioni
-                </button>
-              </li>
+              {canManageQuotes && (
+                <li>
+                  <button
+                    type="button"
+                    data-tour="org-preventivi"
+                    className="w-full text-left px-4 py-2 hover:bg-blue-900/30 text-white flex items-center gap-2"
+                    onClick={() => {
+                      setIsCityMenuOpen(false);
+                      handlePreventiviClick?.();
+                    }}
+                  >
+                    <FileSpreadsheet className="h-4 w-4" />
+                    Preventivi IMS
+                  </button>
+                </li>
+              )}
+              {canManageQuotes && (
+                <li>
+                  <button
+                    type="button"
+                    data-tour="org-consuntivi"
+                    className="w-full text-left px-4 py-2 hover:bg-blue-900/30 text-white flex items-center gap-2"
+                    onClick={() => {
+                      setIsCityMenuOpen(false);
+                      handleConsuntiviClick?.();
+                    }}
+                  >
+                    <FileSpreadsheet className="h-4 w-4 text-amber-400" />
+                    Consuntivi IMS
+                  </button>
+                </li>
+              )}
+              {isUserAdmin && (
+                <li>
+                  <button
+                    type="button"
+                    data-tour="org-approvazione"
+                    className="w-full text-left px-4 py-2 hover:bg-blue-900/30 text-white flex items-center gap-2"
+                    onClick={() => {
+                      setIsCityMenuOpen(false);
+                      handleApprovazioneClick?.();
+                    }}
+                  >
+                    <ClipboardCheck className="h-4 w-4" />
+                    Approvazione IMS
+                  </button>
+                </li>
+              )}
+              {isUserAdmin && (
+                <li>
+                  <button
+                    type="button"
+                    data-tour="org-organizzazioni"
+                    className="w-full text-left px-4 py-2 hover:bg-blue-900/30 text-white flex items-center gap-2"
+                    onClick={() => {
+                      setIsCityMenuOpen(false);
+                      handleOrganizzazioniClick();
+                    }}
+                  >
+                    <Users className="h-4 w-4" />
+                    Organizzazioni
+                  </button>
+                </li>
+              )}
             </ul>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      </div>
     </div>
   );
 };
@@ -480,6 +586,21 @@ function Header({
 
   const handleOrganizzazioniClick = () => {
     navigate("/organization-management", { state: { townhallId: selectedCity } });
+  };
+
+  const handlePreventiviClick = () => {
+    const qs = selectedCity ? `?comune=${encodeURIComponent(selectedCity)}` : "";
+    navigate(`/quotes${qs}`);
+  };
+
+  const handleConsuntiviClick = () => {
+    const qs = selectedCity ? `?comune=${encodeURIComponent(selectedCity)}` : "";
+    navigate(`/consuntivi${qs}`);
+  };
+
+  const handleApprovazioneClick = () => {
+    const qs = selectedCity ? `?comune=${encodeURIComponent(selectedCity)}` : "";
+    navigate(`/quotes/approval${qs}`);
   };
 
   const handleMyOrganizationsClick = () => {
@@ -567,8 +688,8 @@ function Header({
     setIsLoading(false);
   };
 
-  const isUserAdmin =
-    userData?.user_type === "SUPER_ADMIN" || userData?.user_type === "ADMINISTRATOR";
+  const isUserAdmin = canApproveQuoteByRole(userData);
+  const canManageQuotes = canManageQuotesByRole(userData);
 
   return (
     <header className="top-0 bg-black/40 backdrop-blur-xl border-b border-blue-500/20 shadow-[0_0_15px_rgba(0,149,255,0.15)] p-2 relative z-3">
@@ -600,7 +721,11 @@ function Header({
             <CityOrganizationsMenu
               selectedCity={selectedCity}
               handleOrganizzazioniClick={handleOrganizzazioniClick}
+              handlePreventiviClick={handlePreventiviClick}
+              handleConsuntiviClick={handleConsuntiviClick}
+              handleApprovazioneClick={handleApprovazioneClick}
               isUserAdmin={isUserAdmin}
+              canManageQuotes={canManageQuotes}
             />
           )}
           <UserMenu

@@ -1,5 +1,6 @@
 @import "tailwindcss";
-@import "tailwind-scrollbar";
+
+/* Scrollbar globali: vedi src/index.css (solo ::-webkit-scrollbar) */
 
 #root {
   max-width: 1280px;

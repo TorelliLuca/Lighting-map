@@ -122,7 +122,10 @@ function AddMenu({
   )
 
   return (
-    <div className={`fixed bottom-60 left-6 z-2 ${interactionsDisabled ? "opacity-50" : ""}`}>
+    <div
+      data-tour="add-menu"
+      className={`fixed bottom-60 left-6 z-2 ${interactionsDisabled ? "opacity-50" : ""}`}
+    >
       <button
         ref={buttonRef}
         onClick={() => !interactionsDisabled && setIsExpanded(!isExpanded)}

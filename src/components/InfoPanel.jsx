@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react"
 import { createPortal } from "react-dom"
-import { X, MapPin, Lightbulb, Box, AlertCircle, Clock, CheckCircle, Wrench, User, FileText } from "lucide-react"
+import { useNavigate } from "react-router-dom"
+import { X, MapPin, Lightbulb, Box, AlertCircle, Clock, CheckCircle, Wrench, User, FileText, Hexagon, ExternalLink } from "lucide-react"
 import { PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, ResponsiveContainer } from "recharts"
 import { useMediaQuery } from "../hooks/useMediaQuery"
 const COLORS = [
@@ -18,7 +19,9 @@ const COLORS = [
   "#c084fc",
 ]
 import { useUser } from "../context/UserContext"
-import { getTipoLampada } from "../utils/utils"
+import { getTipoLampada, getExtraordinaryDueUrgency, getDaysRemaining, WORKFLOW_STATUS_LABELS, formatReportFaultLabel, isExtraordinaryReportInProgress } from "../utils/utils"
+import { StatCard } from "./ui/StatCard"
+import { DueStatusBadge } from "./ui/DueStatusBadge"
 const PROPERTY_COLORS = {
   EnelSole: "#ef4444", // rosso
   Municipale: "#2563eb", // blu
@@ -45,6 +48,10 @@ const REPORT_TYPE_LABELS = {
   BROKEN_TERMINAL_BLOCK: "Morsettiera rotta",
   BROKEN_PANEL: "Pannello rotto",
   OTHER: "Altro",
+  IMMEDIATE_DANGER: "Pericolo immediato per la pubblica incolumità",
+  MULTIPLE_OFF: "Tre o più punti luce spenti nello stesso tratto",
+  SINGLE_OFF: "Punto luce singolo spento",
+  NON_URGENT: "Anomalia non urgente",
 }
 
 const OPERATION_TYPE_LABELS = {
@@ -87,37 +94,6 @@ const ClickablePoleNumber = ({ numeroPalo, lat, lng, onNavigate }) => {
     >
       {content}
     </button>
-  )
-}
-
-const STAT_CARD_STYLES = {
-  blue: {
-    card: "bg-blue-900/50 border-blue-500/30 hover:border-blue-400/50 hover:bg-blue-800/60",
-    icon: "text-blue-400",
-    title: "text-blue-200",
-  },
-  red: {
-    card: "bg-red-900/50 border-red-500/30 hover:border-red-400/50 hover:bg-red-800/60",
-    icon: "text-red-400",
-    title: "text-red-200",
-  },
-  green: {
-    card: "bg-green-900/50 border-green-500/30 hover:border-green-400/50 hover:bg-green-800/60",
-    icon: "text-green-400",
-    title: "text-green-200",
-  },
-}
-
-const StatCard = ({ title, value, icon: Icon, color = "blue" }) => {
-  const styles = STAT_CARD_STYLES[color] || STAT_CARD_STYLES.blue
-  return (
-    <div className={`p-3 sm:p-4 rounded-xl border transition-all duration-200 ${styles.card}`}>
-      <div className="flex items-center gap-2 sm:gap-3 mb-1.5 sm:mb-2 min-w-0">
-        <Icon className={`h-4 w-4 sm:h-5 sm:w-5 shrink-0 ${styles.icon}`} />
-        <h4 className={`text-xs sm:text-sm font-medium truncate ${styles.title}`}>{title}</h4>
-      </div>
-      <p className="text-xl sm:text-2xl font-bold text-white tabular-nums">{value}</p>
-    </div>
   )
 }
 
@@ -175,8 +151,8 @@ const ReportCard = ({ report, type, onNavigateToPoint }) => {
 
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-blue-400" />
-          <span className={`text-sm ${getTypeColor(report.report_type)}`}>
-            {REPORT_TYPE_LABELS[report.report_type] || report.report_type}
+          <span className={`text-sm ${getTypeColor(report.report_type || report.fault_label)}`}>
+            {formatReportFaultLabel(report)}
           </span>
         </div>
 
@@ -284,6 +260,7 @@ const OperationCard = ({ operation, onNavigateToPoint }) => {
 
 function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) {
   const { getAverageResponseTime } = useUser()
+  const navigate = useNavigate()
   const isMobile = useMediaQuery("(max-width: 639px)")
   const [stats, setStats] = useState({
     totalPoints: 0,
@@ -303,6 +280,12 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
     reportsInProgress: [],
     reportsResolved: [],
     operations: [],
+    extraordinary: {
+      open: 0,
+      soon: 0,
+      overdue: 0,
+      items: [],
+    },
   })
   const [activeTab, setActiveTab] = useState("stats")
   const [avgResponseTime, setAvgResponseTime] = useState(null)
@@ -434,8 +417,8 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
             lat: marker.data.lat,
             lng: marker.data.lng,
           })
-          const type = report.report_type || "OTHER"
-          reportsByType[type] = (reportsByType[type] || 0) + 1
+          const type = report.fault_label || report.report_type || "OTHER"
+          reportsByType[formatReportFaultLabel(type)] = (reportsByType[formatReportFaultLabel(type)] || 0) + 1
         })
       }
 
@@ -448,8 +431,8 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
             lat: marker.data.lat,
             lng: marker.data.lng,
           })
-          const type = report.report_type || "OTHER"
-          reportsByType[type] = (reportsByType[type] || 0) + 1
+          const type = report.fault_label || report.report_type || "OTHER"
+          reportsByType[formatReportFaultLabel(type)] = (reportsByType[formatReportFaultLabel(type)] || 0) + 1
         })
       }
 
@@ -470,6 +453,20 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
     reportsInProgress = reportsInProgress.sort((a, b) => new Date(b.report_date) - new Date(a.report_date))
     reportsResolved = reportsResolved.sort((a, b) => new Date(b.report_date) - new Date(a.report_date))
     operations.sort((a, b) => new Date(b.operation_date) - new Date(a.operation_date))
+
+    const extraordinaryItems = reportsInProgress
+      .filter((r) => isExtraordinaryReportInProgress(r))
+      .map((r) => ({
+        ...r,
+        dueUrgency: getExtraordinaryDueUrgency(r.due_date),
+        daysRemaining: getDaysRemaining(r.due_date),
+      }))
+      .sort((a, b) => {
+        const da = a.due_date ? new Date(a.due_date).getTime() : Infinity
+        const db = b.due_date ? new Date(b.due_date).getTime() : Infinity
+        return da - db
+      })
+
     setReportsStats({
       totalReportsInProgress: reportsInProgress.length,
       totalReportsResolved: reportsResolved.length,
@@ -479,6 +476,12 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
       reportsInProgress,
       reportsResolved,
       operations,
+      extraordinary: {
+        open: extraordinaryItems.length,
+        soon: extraordinaryItems.filter((r) => r.dueUrgency === "soon").length,
+        overdue: extraordinaryItems.filter((r) => r.dueUrgency === "overdue").length,
+        items: extraordinaryItems,
+      },
     })
   }, [activeMarkers])
 
@@ -688,6 +691,7 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
     { id: "stats", label: "Statistiche" },
     { id: "charts", label: "Grafici" },
     { id: "segnalazioni", label: "Segnalazioni" },
+    { id: "straordinarie", label: "Straordinarie" },
   ]
 
   return createPortal(
@@ -1183,6 +1187,79 @@ function InfoPanel({ activeMarkers, onClose, townhallName, onNavigateToPoint }) 
                   <p className="text-gray-500">Non sono presenti segnalazioni o operazioni per l'area selezionata.</p>
                 </div>
               )}
+          </div>
+        )}
+
+        {activeTab === "straordinarie" && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <StatCard title="Aperte" value={reportsStats.extraordinary?.open || 0} icon={Hexagon} color="blue" />
+              <StatCard title="In scadenza" value={reportsStats.extraordinary?.soon || 0} icon={Clock} color="amber" />
+              <StatCard title="Scadute" value={reportsStats.extraordinary?.overdue || 0} icon={AlertCircle} color="red" />
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  handleClose()
+                  const qs = townhallName ? `?comune=${encodeURIComponent(townhallName)}` : ""
+                  navigate(`/extraordinary${qs}`)
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-orange-600/30 hover:bg-orange-600/50 text-orange-100 border border-orange-500/40 min-h-11"
+              >
+                <ExternalLink className="h-4 w-4" />
+                Apri dashboard straordinarie
+              </button>
+            </div>
+
+            {(reportsStats.extraordinary?.items || []).length > 0 ? (
+              <div className="space-y-3">
+                {reportsStats.extraordinary.items.map((report) => (
+                  <div
+                    key={report._id}
+                    className="bg-black/40 p-4 rounded-lg border border-orange-500/30 hover:bg-black/60 transition-all"
+                  >
+                    <div className="flex justify-between items-start gap-2 mb-2">
+                      <button
+                        type="button"
+                        className="text-white font-semibold hover:text-blue-300"
+                        onClick={() => onNavigateToPoint?.(report.lat, report.lng, report.numero_palo)}
+                      >
+                        PL {report.numero_palo}
+                      </button>
+                      <DueStatusBadge
+                        dueStatus={report.dueUrgency || "none"}
+                        daysRemaining={report.daysRemaining}
+                        showDate={Boolean(report.due_date)}
+                        dueDate={report.due_date}
+                      />
+                    </div>
+                    <p className="text-sm text-blue-200">
+                      Classe {report.risk_class || "—"} ·{" "}
+                      {WORKFLOW_STATUS_LABELS[report.workflow_status] || report.workflow_status}
+                    </p>
+                    {report.linked_quote_id && (
+                      <button
+                        type="button"
+                        className="mt-2 text-sm text-blue-300 hover:text-white inline-flex items-center gap-1"
+                        onClick={() => {
+                          handleClose()
+                          navigate(`/quote/${report.linked_quote_id}`)
+                        }}
+                      >
+                        Preventivo <ExternalLink className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-black/60 rounded-xl p-6 backdrop-blur-xl border border-gray-500/30 text-center">
+                <Hexagon className="h-10 w-10 text-gray-400 mx-auto mb-3" />
+                <p className="text-gray-400">Nessuna straordinaria aperta sul comune corrente.</p>
+              </div>
+            )}
           </div>
         )}
         </div>

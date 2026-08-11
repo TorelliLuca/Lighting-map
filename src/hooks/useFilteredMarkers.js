@@ -1,11 +1,17 @@
 import { useMemo } from 'react';
 import { getColorList, DEFAULT_COLOR, FC_QUADRO_COLOR, applyFcQuadroToLegendMap, isFcQuadro } from '../utils/ColorGenerator';
-import { getTipoLampada } from '../utils/utils';
+import { getTipoLampada, getReportBadgeInfo } from '../utils/utils';
+import { getEffectiveQuadro, toIdString } from '../utils/topologyLines';
 
 // Genera la mappa colori coordinata come in createMarkers.jsx
 export function generateLegendColorMap(markers, highlightOption) {
   let colorMappings = { quadro: {}, proprieta: {}, lotto: {}, tipo_lampada: {}, tipo_apparecchio: {} };
   let uniqueValues = [];
+  const byId = new Map(
+    (markers || [])
+      .map((marker) => [toIdString(marker?._id), marker])
+      .filter(([id]) => Boolean(id)),
+  );
   if (highlightOption === 'PROPRIETA') {
     uniqueValues = Array.from(new Set(markers.map(marker => marker.proprieta).filter(Boolean)));
     const colorList = getColorList(uniqueValues.length);
@@ -13,7 +19,13 @@ export function generateLegendColorMap(markers, highlightOption) {
       colorMappings.proprieta[val] = colorList[idx];
     });
   } else if (highlightOption === 'MARKER') {
-    uniqueValues = Array.from(new Set(markers.map(marker => marker.quadro).filter(Boolean)));
+    uniqueValues = Array.from(
+      new Set(
+        markers
+          .map((marker) => getEffectiveQuadro(marker, byId))
+          .filter(Boolean),
+      ),
+    );
     const colorList = getColorList(uniqueValues.length);
     uniqueValues.forEach((val, idx) => {
       colorMappings.quadro[val] = colorList[idx];
@@ -43,7 +55,10 @@ export function generateLegendColorMap(markers, highlightOption) {
 }
 
 // Funzione per determinare il colore del marker
-function getMarkerColor(marker, highlightOption, colorMappings) {
+function getMarkerColor(marker, highlightOption, colorMappings, byId = null) {
+  const markerById =
+    byId ||
+    new Map([[toIdString(marker?._id), marker]].filter(([id]) => Boolean(id)));
  
   // Notifiche attive
   const hasActiveNotifications = marker.segnalazioni_in_corso && marker.segnalazioni_in_corso.length > 0;
@@ -51,8 +66,9 @@ function getMarkerColor(marker, highlightOption, colorMappings) {
   if (highlightOption === '' || !highlightOption) {
     markerColor = hasActiveNotifications ? '#FFCC00' : DEFAULT_COLOR;
   } else if (highlightOption === 'MARKER') {
-    if (marker.quadro && colorMappings.quadro[marker.quadro]) {
-      markerColor = colorMappings.quadro[marker.quadro];
+    const quadro = getEffectiveQuadro(marker, markerById);
+    if (quadro && colorMappings.quadro[quadro]) {
+      markerColor = colorMappings.quadro[quadro];
     }
   } else if (highlightOption === 'PROPRIETA') {
     const prop = marker.proprieta ? marker.proprieta.trim().toLowerCase() : '';
@@ -84,7 +100,7 @@ function getMarkerColor(marker, highlightOption, colorMappings) {
     
   }
 
-  if (isFcQuadro(marker.quadro)) {
+  if (isFcQuadro(marker.quadro) || isFcQuadro(getEffectiveQuadro(marker, markerById))) {
     markerColor = FC_QUADRO_COLOR;
   }
 
@@ -136,6 +152,11 @@ function filterMarkers(markers, filterType, selectedProprietaFilter) {
 
 // Funzione per convertire marker in GeoJSON FeatureCollection (aggiunge color)
 function markersToGeoJSON(markers, highlightOption) {
+  const byId = new Map(
+    (markers || [])
+      .map((marker) => [toIdString(marker?._id), marker])
+      .filter(([id]) => Boolean(id)),
+  );
   const colorMappings = generateLegendColorMap(markers, highlightOption);
   const differenteRegex = /^differente/i;
 
@@ -186,6 +207,7 @@ function markersToGeoJSON(markers, highlightOption) {
         const lat = parseFloat(String(m.lat ?? '').replace(',', '.'));
         const lng = parseFloat(String(m.lng ?? '').replace(',', '.'));
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        const badge = getReportBadgeInfo(m.segnalazioni_in_corso);
         return {
           type: 'Feature',
           geometry: {
@@ -198,8 +220,12 @@ function markersToGeoJSON(markers, highlightOption) {
             _id: m._id != null ? String(m._id) : m._id,
             lat,
             lng,
-            color: getMarkerColor(m, highlightOption, colorMappings),
+            color: getMarkerColor(m, highlightOption, colorMappings, byId),
             segnalazioni_in_corso_length: m.segnalazioni_in_corso ? m.segnalazioni_in_corso.length : 0,
+            report_badge_type: badge.type || '',
+            has_ordinary_report: badge.type === 'ordinary',
+            has_extraordinary_report: badge.type === 'extraordinary',
+            due_urgency: badge.dueUrgency || 'none',
             city: m.city
           },
         };

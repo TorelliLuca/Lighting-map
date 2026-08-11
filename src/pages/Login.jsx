@@ -9,7 +9,7 @@ import Logo from "../components/Logo"
 
 const BASE_URL = import.meta.env.VITE_SERVER_URL
 
-const LoginForm = ({ onForgotPasswordClick, email, setEmail, password, setPassword, handleSubmit, isLoading, error, showPassword, setShowPassword }) => (
+const LoginForm = ({ onForgotPasswordClick, email, setEmail, password, setPassword, rememberMe, setRememberMe, handleSubmit, isLoading, error, showPassword, setShowPassword }) => (
   <>
     <div className="flex justify-center">
       <Logo />
@@ -73,6 +73,20 @@ const LoginForm = ({ onForgotPasswordClick, email, setEmail, password, setPasswo
             </button>
           </div>
         </div>
+      </div>
+
+      <div className="flex items-center">
+        <input
+          id="remember-me"
+          name="remember-me"
+          type="checkbox"
+          checked={rememberMe}
+          onChange={(e) => setRememberMe(e.target.checked)}
+          className="h-4 w-4 rounded border-blue-500/40 bg-blue-900/20 text-blue-500 focus:ring-blue-500/50"
+        />
+        <label htmlFor="remember-me" className="ml-2 block text-sm text-blue-200/80">
+          Resta connesso
+        </label>
       </div>
 
       {error && (
@@ -239,6 +253,7 @@ const SuccessScreen = ({ email, onBackToLogin, onResend, canResend, countdown })
 export default function Login() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [rememberMe, setRememberMe] = useState(true)
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [isLoading, setIsLoading] = useState(false)
@@ -277,7 +292,7 @@ export default function Login() {
     setError("")
 
     try {
-      await login(email, password)
+      await login(email, password, rememberMe)
       navigate("/dashboard")
     } catch (err) {
       setError(err.response?.data || "Credenziali non valide. Riprova.")
@@ -346,6 +361,8 @@ export default function Login() {
                     setEmail={setEmail}
                     password={password}
                     setPassword={setPassword}
+                    rememberMe={rememberMe}
+                    setRememberMe={setRememberMe}
                     handleSubmit={handleSubmit}
                     isLoading={isLoading}
                     error={error}

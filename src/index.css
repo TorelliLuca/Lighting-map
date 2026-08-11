@@ -1,24 +1,158 @@
 @import "tailwindcss";
 
-/* @theme {
-  --color-chambray: #37638b;
-  --color-desert-storm: #fbfbfa;
-  --color-bazaar: #926878;
-  --color-rock-blue: #98b5cd;
-  --color-antique-brass: #c69669;
-  --color-picton-blue: #45c2f0;
-  --color-new-orleans: #f3d2a1;
-  --color-botticelli: #c8e2e8;
-  --color-tan: #d4ad94;
-  --color-oyster-pink: #eac7cf;
+/*
+ * Scrollbar blue-glass per container overflow (catalogo, tabelle, select, …).
+ * Solo ::-webkit-scrollbar — niente scrollbar-width su Chromium.
+ * La scrollbar di PAGINA (html) è in src/scrollbar.css (importato da main.jsx).
+ */
+
+.overflow-auto:not(.scrollbar-none)::-webkit-scrollbar,
+.overflow-x-auto:not(.scrollbar-none)::-webkit-scrollbar,
+.overflow-y-auto:not(.scrollbar-none)::-webkit-scrollbar,
+.scrollbar-app::-webkit-scrollbar,
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
-@layer utilities {
-  .animate-fade-in-up {
-    @apply transition-all duration-200 ease-out opacity-0 translate-y-2;
-    animation: fadeInUp 0.2s forwards;
+.overflow-auto:not(.scrollbar-none)::-webkit-scrollbar-track,
+.overflow-x-auto:not(.scrollbar-none)::-webkit-scrollbar-track,
+.overflow-y-auto:not(.scrollbar-none)::-webkit-scrollbar-track,
+.scrollbar-app::-webkit-scrollbar-track,
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgb(30 58 138 / 0.2); /* blue-900/20 */
+  border-radius: 9999px;
+}
+
+.overflow-auto:not(.scrollbar-none)::-webkit-scrollbar-thumb,
+.overflow-x-auto:not(.scrollbar-none)::-webkit-scrollbar-thumb,
+.overflow-y-auto:not(.scrollbar-none)::-webkit-scrollbar-thumb,
+.scrollbar-app::-webkit-scrollbar-thumb,
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgb(59 130 246 / 0.3); /* blue-500/30 */
+  border-radius: 9999px;
+}
+
+.overflow-auto:not(.scrollbar-none)::-webkit-scrollbar-thumb:hover,
+.overflow-x-auto:not(.scrollbar-none)::-webkit-scrollbar-thumb:hover,
+.overflow-y-auto:not(.scrollbar-none)::-webkit-scrollbar-thumb:hover,
+.scrollbar-app::-webkit-scrollbar-thumb:hover,
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgb(59 130 246 / 0.5);
+}
+
+.overflow-auto:not(.scrollbar-none)::-webkit-scrollbar-corner,
+.overflow-x-auto:not(.scrollbar-none)::-webkit-scrollbar-corner,
+.overflow-y-auto:not(.scrollbar-none)::-webkit-scrollbar-corner,
+.scrollbar-app::-webkit-scrollbar-corner,
+.custom-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+  border-radius: 9999px;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .overflow-auto:not(.scrollbar-none),
+  .overflow-x-auto:not(.scrollbar-none),
+  .overflow-y-auto:not(.scrollbar-none),
+  .scrollbar-app,
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(59 130 246 / 0.3) rgb(30 58 138 / 0.2);
   }
-  @keyframes fadeInUp {
-    to { opacity: 1; transform: translateY(0); }
-  }
-} */
+}
+
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Product tour (driver.js) — glass/blu come MapControls / SettingsMenu */
+.driver-popover.lm-driver-popover,
+.lm-driver-popover {
+  background: rgb(0 0 0 / 0.82) !important;
+  color: #dbeafe !important;
+  border: 1px solid rgb(59 130 246 / 0.4) !important;
+  border-radius: 1rem !important;
+  box-shadow: 0 0 30px rgb(0 149 255 / 0.18) !important;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  padding: 1rem 1.1rem !important;
+  max-width: min(92vw, 340px) !important;
+}
+
+.lm-driver-popover .driver-popover-title {
+  color: #fff !important;
+  font-size: 0.95rem !important;
+  font-weight: 600 !important;
+}
+
+.lm-driver-popover .driver-popover-description {
+  color: rgb(191 219 254 / 0.88) !important;
+  font-size: 0.8125rem !important;
+  line-height: 1.5 !important;
+}
+
+.lm-driver-popover .driver-popover-progress-text {
+  color: #93c5fd !important;
+  font-size: 0.75rem !important;
+}
+
+.lm-driver-popover .driver-popover-footer {
+  margin-top: 0.75rem !important;
+  gap: 0.5rem !important;
+}
+
+.lm-driver-popover .driver-popover-prev-btn,
+.lm-driver-popover .driver-popover-next-btn,
+.lm-driver-popover .driver-popover-close-btn {
+  text-shadow: none !important;
+  font-weight: 600 !important;
+}
+
+.lm-driver-popover .driver-popover-next-btn {
+  background: #2563eb !important;
+  color: #fff !important;
+  border: none !important;
+  border-radius: 0.5rem !important;
+  padding: 0.45rem 0.9rem !important;
+}
+
+.lm-driver-popover .driver-popover-next-btn:hover {
+  background: #3b82f6 !important;
+}
+
+.lm-driver-popover .driver-popover-prev-btn {
+  background: rgb(0 0 0 / 0.35) !important;
+  color: #dbeafe !important;
+  border: 1px solid rgb(59 130 246 / 0.4) !important;
+  border-radius: 0.5rem !important;
+  padding: 0.45rem 0.9rem !important;
+}
+
+.lm-driver-popover .driver-popover-prev-btn:hover {
+  background: rgb(30 58 138 / 0.45) !important;
+}
+
+.lm-driver-popover .driver-popover-close-btn {
+  color: #93c5fd !important;
+}
+
+.lm-driver-popover .driver-popover-arrow-side-left .driver-popover-arrow,
+.lm-driver-popover .driver-popover-arrow-side-right .driver-popover-arrow,
+.lm-driver-popover .driver-popover-arrow-side-top .driver-popover-arrow,
+.lm-driver-popover .driver-popover-arrow-side-bottom .driver-popover-arrow {
+  border-color: rgb(59 130 246 / 0.4) !important;
+}
+
+.driver-active-element,
+[data-tour].driver-active-element {
+  border-radius: 0.75rem;
+  /* Evita che lo spotlight “tagli” il contenuto nelle card glass */
+  overflow: visible !important;
+}

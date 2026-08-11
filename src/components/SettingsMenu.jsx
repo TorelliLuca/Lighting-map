@@ -8,8 +8,10 @@ import {
   AlertTriangle,
   DownloadCloud,
   ChevronDown,
+  Hexagon,
 } from "lucide-react"
 import toast from "react-hot-toast"
+import { useNavigate } from "react-router-dom"
 import InfoTooltip from "./ui/InfoTooltip"
 import MapFabBottomSheet from "./ui/MapFabBottomSheet"
 import { usePrintAvailability, PRINT_DISABLED_MESSAGE } from "../hooks/usePrintAvailability"
@@ -83,6 +85,7 @@ function SettingsMenu({
   selectedCity,
   interactionsDisabled = false,
 }) {
+  const navigate = useNavigate()
   const [isExpanded, setIsExpanded] = useState(false)
   const [isPrintPanelOpen, setIsPrintPanelOpen] = useState(false)
   const [showPrintDisabledHint, setShowPrintDisabledHint] = useState(false)
@@ -386,6 +389,18 @@ function SettingsMenu({
           <Info className="h-4 w-4" />
           Statistiche impianto
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            const qs = selectedCity ? `?comune=${encodeURIComponent(selectedCity)}` : ""
+            navigate(`/extraordinary${qs}`)
+            closeMenu()
+          }}
+          className={actionBtnClass}
+        >
+          <Hexagon className="h-4 w-4" />
+          Dashboard straordinarie
+        </button>
         <button type="button" onClick={onDownloadReport} className={actionBtnClass}>
           <Download className="h-4 w-4" />
           Scarica report
@@ -436,7 +451,10 @@ function SettingsMenu({
   )
 
   return (
-    <div className={`fixed bottom-24 left-6 z-3 ${interactionsDisabled ? "opacity-50" : ""}`}>
+    <div
+      data-tour="settings-menu"
+      className={`fixed bottom-24 left-6 z-3 ${interactionsDisabled ? "opacity-50" : ""}`}
+    >
       <button
         ref={buttonRef}
         onClick={() => !interactionsDisabled && setIsExpanded(!isExpanded)}

@@ -3,15 +3,35 @@
  * Ruoli: DEFAULT_USER | MAINTAINER | ADMINISTRATOR | SUPER_ADMIN | SURVEYOR
  */
 
-import { normalizeLightPointForDisplay } from "./utils"
+import { normalizeLightPointForDisplay, canStartInspection, canStartOperation, canCompileQuote } from "./utils"
+import { hasTopologyParent } from "./topologyLines"
 
 export const INFO_WINDOW_ACTIONS = [
+  {
+    id: "sopralluogo",
+    label: "Sopralluogo",
+    title: "Effettua sopralluogo sulla segnalazione ordinaria",
+    priority: "primary",
+    roles: ["MAINTAINER", "SUPER_ADMIN"],
+    requiresInspectableReport: true,
+    order: 0,
+  },
+  {
+    id: "preventivo",
+    label: "Preventivo",
+    title: "Compila o riprendi la bozza di preventivo IMS",
+    priority: "primary",
+    roles: ["MAINTAINER", "SUPER_ADMIN"],
+    requiresPendingQuote: true,
+    order: 0.5,
+  },
   {
     id: "operazione",
     label: "Risolvi",
     title: "Avvia un'operazione per risolvere la segnalazione",
     priority: "primary",
-    roles: ["MAINTAINER", "ADMINISTRATOR", "SUPER_ADMIN"],
+    roles: ["MAINTAINER", "SUPER_ADMIN"],
+    requiresOperableReport: true,
     order: 1,
   },
   {
@@ -94,11 +114,20 @@ export const getVisibleActions = (actions = INFO_WINDOW_ACTIONS, userRole, marke
   actions
     .filter((action) => roleAllowed(action.roles, userRole))
     .filter((action) => {
+      if (action.requiresInspectableReport) {
+        return canStartInspection(userRole, marker?.segnalazioni_in_corso)
+      }
+      if (action.requiresPendingQuote) {
+        return canCompileQuote(userRole, marker?.segnalazioni_in_corso)
+      }
+      if (action.requiresOperableReport) {
+        return canStartOperation(userRole, marker?.segnalazioni_in_corso)
+      }
       if (action.requiresPl && marker) {
         if (marker.marker !== "PL" || marker.is_differente_group) return false
       }
       if (action.requiresParent && marker) {
-        if (!marker.parent) return false
+        if (!hasTopologyParent(marker)) return false
       }
       return true
     })
@@ -111,6 +140,12 @@ export const getVisibleActions = (actions = INFO_WINDOW_ACTIONS, userRole, marke
  * - altrimenti segnala se visibile
  */
 export const getPrimaryAction = (visibleActions = []) => {
+  const sopralluogo = visibleActions.find((a) => a.id === "sopralluogo")
+  if (sopralluogo) return sopralluogo
+
+  const preventivo = visibleActions.find((a) => a.id === "preventivo")
+  if (preventivo) return preventivo
+
   const modifica = visibleActions.find((a) => a.id === "modifica")
   const elimina = visibleActions.find((a) => a.id === "elimina")
   const operazione = visibleActions.find((a) => a.id === "operazione")
@@ -124,6 +159,25 @@ export const getPrimaryAction = (visibleActions = []) => {
  */
 export const getSecondaryActions = (visibleActions = [], primaryAction) => {
   if (!primaryAction) return []
+  if (primaryAction.id === "sopralluogo") {
+    // Prima del sopralluogo non si fanno operazioni: evidenzia Segnala se presente
+    if (visibleActions.find((a) => a.id === "preventivo")){
+      const sopralluogo = visibleActions.find((a) => a.id === "preventivo")
+      return sopralluogo ? [sopralluogo] : []
+    }else{
+      const segnala = visibleActions.find((a) => a.id === "segnala")
+      return segnala ? [segnala] : []
+    }
+  }
+  if (primaryAction.id === "preventivo") {
+    if (visibleActions.find((a) => a.id === "sopralluogo")){
+      const sopralluogo = visibleActions.find((a) => a.id === "sopralluogo")
+      return sopralluogo ? [sopralluogo] : []
+    }else{
+      const segnala = visibleActions.find((a) => a.id === "segnala")
+      return segnala ? [segnala] : []
+    }
+  }
   if (primaryAction.id === "operazione") {
     const segnala = visibleActions.find((a) => a.id === "segnala")
     return segnala ? [segnala] : []

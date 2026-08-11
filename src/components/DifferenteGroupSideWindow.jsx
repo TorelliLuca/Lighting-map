@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from "react"
-import { X, ChevronDown, CheckCircle2, AlertTriangle, MapPin, Navigation, Pencil, Trash } from "lucide-react"
+import { X, ChevronDown, CheckCircle2, AlertTriangle, MapPin, Navigation, Pencil, Trash, FileSpreadsheet, Cable, Unplug } from "lucide-react"
 import { clearBlanket, transformDateToIT, translateString, listIgnoratedFieldsPL, listIgnoratedFieldsQE, orderInfoWindowEntries, normalizeLightPointForDisplay } from "../utils/utils"
 import {
   INFO_WINDOW_ACTIONS,
@@ -42,6 +42,8 @@ export const DifferenteGroupSideWindow = ({
   onEditClick,
   onDeleteClick,
   onBeforeReport,
+  onSetParentClick,
+  onClearParentClick,
   mapType = "maplibre",
 }) => {
   const members = useMemo(() => {
@@ -82,7 +84,7 @@ export const DifferenteGroupSideWindow = ({
   )
 
   const userRole = userData?.user_type
-  const visibleActions = getVisibleActions(INFO_WINDOW_ACTIONS, userRole)
+  const visibleActions = getVisibleActions(INFO_WINDOW_ACTIONS, userRole, selectedMember)
   const primaryAction = getPrimaryAction(visibleActions, userRole)
   const secondaryActions = getSecondaryActions(visibleActions, primaryAction)
   const overflowActions = getOverflowActions(visibleActions, primaryAction, secondaryActions)
@@ -90,12 +92,34 @@ export const DifferenteGroupSideWindow = ({
   const runAction = (actionId) => {
     if (!selectedMember) return
     if (actionId === "operazione") {
+      const operable =
+        (selectedMember.segnalazioni_in_corso || []).find((s) =>
+          !s?.is_solved
+          && s?.maintenance_category === "EXTRAORDINARY"
+          && s?.workflow_status !== "PENDING_QUOTE"
+        )
+        || (selectedMember.segnalazioni_in_corso || []).find((s) =>
+          !s?.is_solved
+          && s?.maintenance_category !== "EXTRAORDINARY"
+          && ["SUSPENDED", "SCHEDULED"].includes(s?.workflow_status || "")
+        )
       window.startOperation(
         city,
         clearBlanket(selectedMember.numero_palo),
         selectedMember.lat,
         selectedMember.lng,
+        operable?._id,
       )
+      return
+    }
+    if (actionId === "preventivo") {
+      const pending = (selectedMember.segnalazioni_in_corso || []).find((s) =>
+        !s?.is_solved && s?.workflow_status === "PENDING_QUOTE"
+      )
+      const quoteId = pending?.linked_quote_id?._id || pending?.linked_quote_id
+      if (typeof window.startQuote === "function") {
+        window.startQuote(city, selectedMember._id, pending?._id, quoteId)
+      }
       return
     }
     if (actionId === "segnala") {
@@ -129,15 +153,27 @@ export const DifferenteGroupSideWindow = ({
     }
     if (actionId === "elimina" && onDeleteClick) {
       onDeleteClick(selectedMember)
+      return
+    }
+    if (actionId === "set_parent" && onSetParentClick) {
+      onClose?.()
+      onSetParentClick(selectedMember)
+      return
+    }
+    if (actionId === "clear_parent" && onClearParentClick) {
+      onClearParentClick(selectedMember)
     }
   }
 
   const actionIcon = (actionId) => {
     if (actionId === "operazione") return <CheckCircle2 className="h-4 w-4" />
+    if (actionId === "preventivo") return <FileSpreadsheet className="h-4 w-4" />
     if (actionId === "segnala") return <AlertTriangle className="h-4 w-4" />
     if (actionId === "streetview") return <MapPin className="h-4 w-4" />
     if (actionId === "goto") return <Navigation className="h-4 w-4" />
     if (actionId === "modifica") return <Pencil className="h-4 w-4" />
+    if (actionId === "set_parent") return <Cable className="h-4 w-4" />
+    if (actionId === "clear_parent") return <Unplug className="h-4 w-4" />
     return <Trash className="h-4 w-4" />
   }
 

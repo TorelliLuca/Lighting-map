@@ -19,7 +19,6 @@ const AddLightPointForm = ({
     proprieta: "",
     tipo_apparecchio: "",
     tipo_apparecchio_altro: "",
-    armatura: "",
     marca_apparecchio: "",
     modello_apparecchio: "",
     numero_apparecchi: "",
@@ -371,7 +370,6 @@ const AddLightPointForm = ({
             )
           }
           {renderField("tipo_apparecchio", "Tipo Apparecchio")}
-          {renderField("armatura", "Armatura")}
           {renderField("marca_apparecchio", "Marca Apparecchio")}
           {renderField("modello_apparecchio", "Modello Apparecchio")}
           {renderField("tipo_sostegno", "Tipo Sostegno")}

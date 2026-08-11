@@ -7,8 +7,12 @@ import {
   listIgnoratedFieldsPL,
   listIgnoratedFieldsQE,
   orderInfoWindowEntries,
+  getInspectableOrdinaryReport,
+  getOperableOrdinaryReport,
+  getOperableExtraordinaryReport,
+  getPendingQuoteReport,
 } from "../utils/utils"
-import { canSeeTopologyAnomalies, toIdString } from "../utils/topologyLines"
+import { canSeeTopologyAnomalies, hasTopologyParent } from "../utils/topologyLines"
 import {
   MapPin,
   Navigation,
@@ -22,6 +26,8 @@ import {
   Unplug,
   TriangleAlert,
   Copy,
+  ClipboardCheck,
+  FileSpreadsheet,
 } from "lucide-react"
 import { clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
@@ -59,6 +65,8 @@ const TITLE_CLASS = "text-base font-semibold text-blue-900 sm:text-lg uppercase"
 
 const ACTION_STYLES = {
   operazione: "border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800",
+  sopralluogo: "border-sky-700 bg-sky-600 text-white hover:bg-sky-700",
+  preventivo: "border-violet-700 bg-violet-600 text-white hover:bg-violet-700",
   segnala: "border-amber-700 bg-amber-600 text-white hover:bg-amber-700",
   streetview: "border-slate-300 bg-white text-slate-800 hover:bg-slate-100",
   goto: "border-blue-700 bg-blue-700 text-white hover:bg-blue-800",
@@ -148,8 +156,36 @@ const InfoWindow = ({
     window.navigateToLocation(marker.lat, marker.lng)
   }
 
+  const handleStartInspection = () => {
+    const activeReport = getInspectableOrdinaryReport(marker?.segnalazioni_in_corso)
+    if (typeof window.startInspection === "function") {
+      window.startInspection(city, idMarker, activeReport?._id)
+    } else {
+      console.error("startInspection not initialized")
+    }
+  }
+
   const handleStartOperation = () => {
-    window.startOperation(city, clearBlanket(marker.numero_palo), marker.lat, marker.lng)
+    const operable =
+      getOperableExtraordinaryReport(marker?.segnalazioni_in_corso)
+      || getOperableOrdinaryReport(marker?.segnalazioni_in_corso)
+    window.startOperation(
+      city,
+      clearBlanket(marker.numero_palo),
+      marker.lat,
+      marker.lng,
+      operable?._id,
+    )
+  }
+
+  const handleStartQuote = () => {
+    const pending = getPendingQuoteReport(marker?.segnalazioni_in_corso)
+    const quoteId = pending?.linked_quote_id?._id || pending?.linked_quote_id
+    if (typeof window.startQuote === "function") {
+      window.startQuote(city, idMarker, pending?._id, quoteId)
+    } else {
+      console.error("startQuote not initialized")
+    }
   }
 
   const handleReportPoint = () => {
@@ -190,6 +226,8 @@ const InfoWindow = ({
   }
 
   const handlers = {
+    sopralluogo: handleStartInspection,
+    preventivo: handleStartQuote,
     operazione: handleStartOperation,
     segnala: handleReportPoint,
     streetview: handleToggleStreetView,
@@ -202,6 +240,8 @@ const InfoWindow = ({
   }
 
   const icons = {
+    sopralluogo: <ClipboardCheck className={iconClass} strokeWidth={2} aria-hidden="true" />,
+    preventivo: <FileSpreadsheet className={iconClass} strokeWidth={2} aria-hidden="true" />,
     operazione: <CheckCircle2 className={iconClass} strokeWidth={2} aria-hidden="true" />,
     segnala: <AlertTriangle className={iconClass} strokeWidth={2} aria-hidden="true" />,
     streetview: <MapPin className={iconClass} strokeWidth={2} aria-hidden="true" />,
@@ -218,9 +258,9 @@ const InfoWindow = ({
     canSeeTopologyAnomalies(userData) &&
     marker?.marker === "PL" &&
     !marker?.is_differente_group &&
-    !toIdString(marker?.parent ?? content?.parent)
+    !hasTopologyParent(marker ?? content)
   const visibleActions = getVisibleActions(INFO_WINDOW_ACTIONS, userRole, marker)
-  const primaryAction = getPrimaryAction(visibleActions, userRole)
+  const primaryAction = getPrimaryAction(visibleActions)
   const secondaryActions = getSecondaryActions(visibleActions, primaryAction)
   const overflowActions = getOverflowActions(
     visibleActions,
@@ -288,14 +328,14 @@ const InfoWindow = ({
               <p className={LABEL_CLASS}>{key.replace(/_/g, " ")}</p>
               <ul className="space-y-2">
                 {value.reverse().map((item, index) => {
-                  if (item.report_type) {
+                  if (item.report_type || item.fault_label) {
                     const dateString = transformDateToIT(item.report_date)
                     return (
                       <li key={`${key}-report-${index}`}>
                         {renderHistoryDetails(
                           `${key}-report-${index}`,
                           dateString,
-                          translateString(item.report_type).replace(/_/g, " "),
+                          translateString(item.fault_label || item.report_type),
                           item.description,
                         )}
                       </li>

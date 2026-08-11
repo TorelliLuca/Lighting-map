@@ -281,7 +281,7 @@ function MyOrganization() {
                   <ExternalLink className="h-3 w-3 text-blue-400 group-hover:text-blue-300 transition-colors" />
                 </div>
 
-                <div className="space-y-3 max-h-96 overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-blue-500/30 hover:scrollbar-thumb-blue-500/50">
+                <div className="space-y-3 max-h-96 overflow-y-auto scrollbar-app">
                   {org.members.slice(0, 4).map((member, index) => (
                     <motion.div
                       key={member.id || index}

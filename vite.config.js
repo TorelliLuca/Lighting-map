@@ -67,27 +67,52 @@ export default defineConfig(({ mode }) => {
       }
     })],
     test: {
-      projects: [{
-        extends: true,
-        plugins: [
-        // The plugin will run tests for the stories defined in your Storybook config
-        // See options at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon#storybooktest
-        storybookTest({
-          configDir: path.join(dirname, '.storybook')
-        })],
-        test: {
-          name: 'storybook',
-          browser: {
-            enabled: true,
-            headless: true,
-            provider: 'playwright',
-            instances: [{
-              browser: 'chromium'
-            }]
+      coverage: {
+        provider: 'v8',
+        include: ['src/utils/**', 'src/hooks/**'],
+        exclude: [
+          'src/utils/createMarkers.jsx',
+          'src/utils/createTopologyPolylines.js',
+          'src/utils/topologyLines.js',
+          'src/utils/topologyApi.js',
+          'src/utils/pushNotifications.js',
+          'src/**/*.{test,spec}.{js,jsx}',
+        ],
+      },
+      projects: [
+        {
+          extends: true,
+          test: {
+            name: 'unit',
+            environment: 'jsdom',
+            globals: false,
+            include: ['src/**/*.{test,spec}.{js,jsx}'],
+            setupFiles: ['src/test/setup.js'],
           },
-          setupFiles: ['.storybook/vitest.setup.js']
-        }
-      }]
-    }
+        },
+        {
+          extends: true,
+          plugins: [
+            // The plugin will run tests for the stories defined in your Storybook config
+            // See options at: https://storybook.js.org/docs/next/writing-tests/integrations/vitest-addon#storybooktest
+            storybookTest({
+              configDir: path.join(dirname, '.storybook'),
+            }),
+          ],
+          test: {
+            name: 'storybook',
+            browser: {
+              enabled: true,
+              headless: true,
+              provider: 'playwright',
+              instances: [{
+                browser: 'chromium',
+              }],
+            },
+            setupFiles: ['.storybook/vitest.setup.js'],
+          },
+        },
+      ],
+    },
   };
 });

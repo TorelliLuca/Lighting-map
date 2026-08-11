@@ -1,396 +1,569 @@
 "use client"
 
-import { useState, useEffect, useContext } from "react"
+import { useState, useEffect, useContext, useMemo } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
-import { UserContext } from "../context/UserContext"
-import { AlertCircle, CheckCircle, ChevronLeft, PenToolIcon as Tool, User, Hash } from "lucide-react"
+import { UserContext, api } from "../context/UserContext"
+import {
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle,
+  Hash,
+  Home,
+  Info,
+  MapPin,
+  PenToolIcon as Tool,
+  User,
+} from "lucide-react"
 import { LightbulbLoader } from "../components/lightbulb-loader"
-import { api } from "../context/UserContext"
-import { translateString } from "../utils/utils"
+import { BackNavigationButton } from "../components/BackNavigationButton"
+import { GlassSelect } from "../components/ui/GlassSelect"
 import { sendPushNotification } from "../utils/pushNotifications"
+import { formatReportFaultLabel, canResolveExtraordinaryReport } from "../utils/utils"
+import { PAGE_SCROLL_SHELL } from "../utils/pageScrollShell"
+import { buildLightPointDashboardPushUrl } from "../utils/notificationDeepLinks"
 
-const BASE_URL = import.meta.env.VITE_SERVER_URL
+
+/** Stati post-sopralluogo su cui si chiude l'intervento ordinario. */
+const CLOSABLE_ORDINARY = new Set(["SUSPENDED", "SCHEDULED"])
+
+const fieldClass =
+  "block w-full px-4 py-3 rounded-xl border border-blue-500/30 bg-blue-900/20 text-white placeholder-blue-300/50 backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-colors duration-200"
+const labelClass = "block text-sm font-medium text-blue-100 mb-1.5"
+const hintClass = "mt-1.5 text-xs text-blue-300/75 leading-relaxed"
+
+const reportLabel = (report) => {
+  if (!report) return ""
+  const cat = report.maintenance_category === "EXTRAORDINARY" ? "Straord." : "Ord."
+  const type = formatReportFaultLabel(report)
+  const date = report.report_date ? new Date(report.report_date).toLocaleDateString() : ""
+  return [`[${cat}]`, type, date].filter(Boolean).join(" — ")
+}
+
+const DEMO_OPERATION = {
+  comune: "Comune demo",
+  numeroPalo: "DEMO-01",
+  lat: "45.4642",
+  lng: "9.1900",
+  reportId: "tour-demo-report",
+}
+
+const DEMO_ACTIVE_REPORT = {
+  _id: "tour-demo-report",
+  maintenance_category: "ORDINARY",
+  workflow_status: "SUSPENDED",
+  is_solved: false,
+  report_date: new Date().toISOString(),
+  report_type: "LIGHT_POINT_OFF",
+  suspension: { reason: "Esempio sospensione (tutorial)" },
+}
 
 export default function Operation() {
   const { userData, getActiveReports } = useContext(UserContext)
   const navigate = useNavigate()
   const location = useLocation()
-  const [formData, setFormData] = useState({
-    reportId: "operationWithoutReport",
-    operationType: "MADE_SAFE_BUT_SYSTEM_NEEDS_RESTORING",
-    notes: "",
-    maintenanceType: "ORDINARY", // default value
-  })
+  const isTourDemo =
+    new URLSearchParams(location.search).get("tourDemo") === "1" ||
+    Boolean(location.state?.lmTour?.force || location.state?.tourDemo)
+
+  const [reportId, setReportId] = useState("")
+  const [notes, setNotes] = useState("")
   const [activeReports, setActiveReports] = useState([])
-  const [isLoading, setIsLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
   const [isSuccess, setIsSuccess] = useState(false)
+  const [successMeta, setSuccessMeta] = useState(null)
   const [error, setError] = useState("")
   const [queryParams, setQueryParams] = useState({})
 
-  const operationTypes = {
-    MADE_SAFE_BUT_SYSTEM_NEEDS_RESTORING: "Messa in sicurezza ma da ripristinare impianto",
-    FAULT_ELIMINATED_AND_SYSTEM_RESTORED: "Guasto eliminato e impianto ripristinato",
-    OTHER: "Altro",
-  }
+  const selectedReport = useMemo(
+    () => activeReports.find((r) => String(r._id) === String(reportId)) || null,
+    [activeReports, reportId],
+  )
 
-  const reportTypes = {
-    LIGHT_POINT_OFF: "Punto luce spento",
-    PLANT_OFF: "Impianto spento",
-    DAMAGED_COMPLEX: "Complesso danneggiato",
-    DAMAGED_SUPPORT: "Morsettiera rotta",
-    BROKEN_TERMINAL_BLOCK: "Sostegno danneggiato",
-    BROKEN_PANEL: "Quadro danneggiato",
-    OTHER: "Altro",
-  }
+  const isExtraordinary = selectedReport?.maintenance_category === "EXTRAORDINARY"
+
+  const reportOptions = useMemo(
+    () => activeReports.map((item) => ({
+      value: String(item._id),
+      label: reportLabel(item),
+    })),
+    [activeReports],
+  )
 
   useEffect(() => {
     if (!userData) {
       navigate("/")
       return
     }
-    if (userData.user_type === "SURVEYOR") {
+    // Solo manutentori (e super admin): gli amministratori e sottoruoli non chiudono interventi
+    if (!["MAINTAINER", "SUPER_ADMIN"].includes(userData.user_type)) {
       navigate("/dashboard")
       return
     }
 
-    // Parse query parameters
     const params = new URLSearchParams(location.search)
     const paramsObj = {
       comune: params.get("comune"),
       numeroPalo: params.get("numeroPalo"),
       lat: params.get("lat"),
       lng: params.get("lng"),
+      reportId: params.get("reportId"),
+    }
+
+    // Replay tutorial dal profilo
+    if (isTourDemo && !paramsObj.comune) {
+      setQueryParams(DEMO_OPERATION)
+      setActiveReports([DEMO_ACTIVE_REPORT])
+      setReportId(DEMO_ACTIVE_REPORT._id)
+      setError("")
+      setLoading(false)
+      return
     }
 
     setQueryParams(paramsObj)
 
-    // Fetch active reports for this light point
-    if (paramsObj.comune && paramsObj.numeroPalo) {
-      fetchActiveReports(paramsObj.comune, paramsObj.numeroPalo)
-    }
-  }, [userData, navigate, location.search])
+    const load = async () => {
+      try {
+        setLoading(true)
+        if (!paramsObj.comune || !paramsObj.numeroPalo) {
+          setError("Parametri punto luce mancanti.")
+          return
+        }
 
-  const sendMailOfReport = async () => {
-    try {
-      const date = new Date().toISOString()
+        const response = await getActiveReports(paramsObj.comune, paramsObj.numeroPalo)
+        const allActive = (response?.data || []).filter((r) => !r?.is_solved)
+        const reports = allActive.filter((r) => {
+          if (r?.maintenance_category === "EXTRAORDINARY") {
+            return canResolveExtraordinaryReport(r)
+          }
+          return CLOSABLE_ORDINARY.has(r?.workflow_status || "")
+        })
 
-      const mailData = {
-        name: queryParams.comune,
-        user: {
-          name: userData.name,
-          surname: userData.surname,
-          email: userData.email,
-          cell: userData.cell || "",
-        },
-        date: date,
-        light_point: {
-          numero_palo: queryParams.numeroPalo,
-          //indirizzo: address,
-        },
-        operation: {
-          operation_type: operationTypes[formData.operationType],
-          description: formData.description || "",
-        },
+        setActiveReports(reports)
+
+        const preferred = paramsObj.reportId
+          && reports.find((r) => String(r._id) === String(paramsObj.reportId))
+
+        if (preferred) {
+          setReportId(preferred._id)
+        } else if (reports.length === 1) {
+          setReportId(reports[0]._id)
+        } else if (reports.length > 1) {
+          const extraordinary = reports.find((r) => r.maintenance_category === "EXTRAORDINARY")
+          const suspended = reports.find((r) => r.workflow_status === "SUSPENDED")
+          setReportId((extraordinary || suspended || reports[0])._id)
+        } else {
+          const pendingExtra = allActive.find(
+            (r) => r.maintenance_category === "EXTRAORDINARY" && !canResolveExtraordinaryReport(r),
+          )
+          if (pendingExtra) {
+            setError("Il preventivo IMS deve essere approvato dal DEC prima di chiudere la straordinaria.")
+          } else {
+            setError("Nessuna segnalazione da chiudere su questo punto.")
+          }
+        }
+      } catch (err) {
+        console.error(err)
+        setError("Impossibile caricare le segnalazioni.")
+      } finally {
+        setLoading(false)
       }
-      const response = await api.post("/send-email-to-user/reportSolved", mailData)
-      return true
-    } catch (error) {
-      console.error("Error sending email notification:", error)
-      return false
     }
-  }
 
-  const fetchActiveReports = async (city, lightPointId) => {
-    try {
-      const response = await getActiveReports(city, lightPointId)
-      const reports = response.data
-      setActiveReports(reports)
-    } catch (error) {
-      console.error("Error fetching active reports:", error)
-    }
-  }
-
-  const handleChange = (e) => {
-    const { name, value } = e.target
-    setFormData((prev) => ({ ...prev, [name]: value }))
-  }
+    load()
+  }, [userData, navigate, location.search, getActiveReports, isTourDemo])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    setIsLoading(true)
     setError("")
 
-    try {
-      const isSolved = formData.operationType === "FAULT_ELIMINATED_AND_SYSTEM_RESTORED"
+    if (isTourDemo) {
+      setError("Modalità tutorial: la chiusura reale è disabilitata. Apri un punto luce dalla mappa per operare.")
+      return
+    }
 
-      const operationData = {
-        operation_type: formData.operationType,
-        note: formData.notes,
+    if (!reportId || !selectedReport) {
+      setError("Seleziona la segnalazione da chiudere.")
+      return
+    }
+
+    const maintenanceType = selectedReport.maintenance_category === "EXTRAORDINARY"
+      ? "EXTRAORDINARY"
+      : "ORDINARY"
+
+    setSubmitting(true)
+    try {
+      const opRes = await api.post("/addOperation", {
+        operation_type: "FAULT_ELIMINATED_AND_SYSTEM_RESTORED",
+        note: notes,
         name: queryParams.comune,
         numero_palo: queryParams.numeroPalo,
         email: userData.email,
-        id_segnalazione: formData.reportId === "operationWithoutReport" ? null : formData.reportId,
-        is_solved: isSolved,
+        id_segnalazione: reportId,
+        is_solved: true,
         date: new Date(),
-        maintenance_type: formData.maintenanceType, 
-      }
+        maintenance_type: maintenanceType,
+      })
 
-      const response = await api.post("/addOperation", operationData)
+      const rawLinked = opRes?.data?.report?.linked_quote_id
+        || selectedReport.linked_quote_id
+        || null
+      const linkedQuoteId = rawLinked?._id || rawLinked || null
+
+      setSuccessMeta({
+        isExtraordinary: maintenanceType === "EXTRAORDINARY",
+        linkedQuoteId: linkedQuoteId ? String(linkedQuoteId) : null,
+      })
       setIsSuccess(true)
-      await sendMailOfReport()
 
       try {
-        const opLabel = operationTypes[formData.operationType] || formData.operationType
+        await api.post("/send-email-to-user/reportSolved", {
+          name: queryParams.comune,
+          user: {
+            name: userData.name,
+            surname: userData.surname,
+            email: userData.email,
+            cell: userData.cell || "",
+          },
+          date: new Date().toISOString(),
+          light_point: {
+            numero_palo: queryParams.numeroPalo,
+            lat: queryParams.lat,
+            lng: queryParams.lng,
+          },
+          operation: {
+            operation_type: "Guasto eliminato e impianto ripristinato",
+            notes: notes || "",
+            description: notes || "",
+          },
+        })
+      } catch (mailErr) {
+        console.error("Email notification failed:", mailErr)
+      }
+
+      try {
         await sendPushNotification({
-          title: `Operazione su punto luce ${queryParams.numeroPalo}`,
-          body: `Nel comune di ${queryParams.comune}: ${opLabel}.${formData.notes ? ` Note: ${formData.notes}` : ""}`,
+          title: `Intervento chiuso — punto ${queryParams.numeroPalo}`,
+          body: `Nel comune di ${queryParams.comune}: guasto eliminato e impianto ripristinato.${notes ? ` Note: ${notes}` : ""}`,
           townHallName: queryParams.comune,
-          url: `${import.meta.env.BASE_URL}dashboard`,
+          url: buildLightPointDashboardPushUrl({
+            townHallName: queryParams.comune,
+            numeroPalo: queryParams.numeroPalo,
+            lat: queryParams.lat,
+            lng: queryParams.lng,
+          }),
         })
       } catch (pushError) {
         console.error("Push notification failed:", pushError)
       }
-    } catch (error) {
-      console.error("Error submitting operation:", error)
-      setError("Failed to submit operation. Please try again.")
+    } catch (err) {
+      console.error(err)
+      setError(err.response?.data?.error || "Errore durante la chiusura dell'intervento.")
     } finally {
-      setIsLoading(false)
+      setSubmitting(false)
     }
   }
 
-  if (isSuccess) {
+  if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4">
-        <div className="w-full max-w-md relative overflow-hidden rounded-2xl shadow-[0_0_40px_rgba(0,149,255,0.15)]">
-          {/* Glass effect container */}
-          <div className="relative z-10 p-8 backdrop-blur-xl bg-black/40 border border-blue-500/20">
-            <div className="text-center">
-              <div className="mx-auto flex items-center justify-center h-20 w-20 rounded-full bg-blue-500/20 backdrop-blur-sm mb-6 border border-blue-400/30">
-                <CheckCircle className="h-10 w-10 text-blue-400" />
-              </div>
-              <h2 className="text-2xl font-bold text-white">Operazione Registrata con Successo</h2>
-              <p className="mt-2 text-blue-200/80">L'operazione è stata registrata e il sistema è stato aggiornato.</p>
-              <div className="mt-8">
-                <button
-                  onClick={() => navigate("/dashboard")}
-                  className="w-full py-3 px-4 rounded-xl font-medium text-white 
-                  bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400
-                  focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:ring-offset-2 focus:ring-offset-black
-                  shadow-[0_0_15px_rgba(59,130,246,0.5)] transition-all duration-200"
-                >
-                  Torna alla Dashboard
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Decorative elements */}
-          <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl"></div>
-          <div className="absolute -bottom-32 -left-32 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl"></div>
+      <div className={`${PAGE_SCROLL_SHELL} flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4`}>
+        <div className="w-full max-w-md flex flex-col items-center justify-center">
+          <LightbulbLoader />
+          <p className="mt-4 text-blue-200">Caricamento intervento...</p>
         </div>
       </div>
     )
   }
 
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4">
-      <div className="w-full max-w-md relative overflow-hidden rounded-2xl shadow-[0_0_40px_rgba(0,149,255,0.15)]">
-        {/* Glass effect container */}
-        <div className="relative z-10 p-8 backdrop-blur-xl bg-black/40 border border-blue-500/20">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-white">Registra Operazione</h2>
-            <button
-              onClick={() => navigate("/dashboard")}
-              className="p-2 rounded-full bg-blue-500/10 hover:bg-blue-500/20 transition-colors"
-            >
-              <ChevronLeft className="h-5 w-5 text-blue-400" />
-              <span className="sr-only">Back to dashboard</span>
-            </button>
-          </div>
-
-          <div className="space-y-3 mb-6 p-4 rounded-xl bg-blue-900/20 border border-blue-500/20">
-            <div className="flex items-center space-x-2">
-              <Hash className="h-4 w-4 text-blue-400" />
-              <p className="text-blue-100">
-                <span className="font-medium">ID Punto Luce:</span>{" "}
-                <span className="text-blue-200">{queryParams.numeroPalo}</span>
+  if (isSuccess) {
+    return (
+      <div className={`${PAGE_SCROLL_SHELL} flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4`}>
+        <div className="w-full max-w-md relative overflow-hidden rounded-2xl shadow-[0_0_40px_rgba(0,149,255,0.15)]">
+          <div className="relative z-10 p-8 backdrop-blur-xl bg-black/40 border border-blue-500/20">
+            <div className="text-center">
+              <div className="mx-auto flex items-center justify-center h-20 w-20 rounded-full bg-blue-500/20 backdrop-blur-sm mb-6 border border-blue-400/30">
+                <CheckCircle className="h-10 w-10 text-blue-400" aria-hidden="true" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">Intervento chiuso</h2>
+              <p className="mt-2 text-blue-200/80 text-sm leading-relaxed">
+                {successMeta?.isExtraordinary
+                  ? "Intervento straordinario completato. Compila il consuntivo IMS per chiudere il ciclo documentale."
+                  : "Guasto eliminato: la segnalazione è stata completata e l'impianto risulta ripristinato."}
               </p>
-            </div>
-            <div className="flex items-center space-x-2">
-              <User className="h-4 w-4 text-blue-400" />
-              <p className="text-blue-100">
-                <span className="font-medium">Utente:</span> <span className="text-blue-200">{userData?.email}</span>
-              </p>
-            </div>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <label htmlFor="reportId" className="block text-sm font-medium text-blue-200 mb-2">
-                Seleziona Problema da Risolvere
-              </label>
-              <div className="relative">
-                <select
-                  id="reportId"
-                  name="reportId"
-                  value={formData.reportId}
-                  onChange={handleChange}
-                  className="block w-full px-4 py-3 rounded-xl border border-blue-500/30 
-                  bg-blue-900/20 text-white placeholder-blue-300/50 backdrop-blur-sm
-                  focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50
-                  appearance-none"
+              {successMeta?.isExtraordinary && successMeta?.linkedQuoteId ? (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/quote/${successMeta.linkedQuoteId}/consuntivo`)}
+                  className="mt-6 w-full cursor-pointer py-3 px-4 rounded-xl font-medium text-white bg-amber-600 hover:bg-amber-500 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-amber-400/50"
                 >
-                  <option value="operationWithoutReport" className="bg-blue-900 text-white">
-                    Risolvi guasto senza segnalazione
-                  </option>
-                  {activeReports.map((report) => {
-                    const date = new Date(report.report_date).toLocaleDateString()
-                    const type = reportTypes[report.report_type] || report.report_type
-                    return (
-                      <option key={report._id} value={report._id} className="bg-blue-900 text-white">
-                        {type} - {date}
-                      </option>
-                    )
-                  })}
-                </select>
-                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                  <svg className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
-              <p className="mt-2 text-xs text-blue-300/70">
-                Seleziona "Risolvi guasto senza segnalazione" se stai risolvendo un guasto non segnalato.
-              </p>
-            </div>
-
-            <div>
-              <label htmlFor="operationType" className="block text-sm font-medium text-blue-200 mb-2">
-                Tipo di Operazione
-              </label>
-              <div className="relative">
-                <select
-                  id="operationType"
-                  name="operationType"
-                  value={formData.operationType}
-                  onChange={handleChange}
-                  className="block w-full px-4 py-3 rounded-xl border border-blue-500/30 
-                  bg-blue-900/20 text-white placeholder-blue-300/50 backdrop-blur-sm
-                  focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50
-                  appearance-none"
-                >
-                  {Object.entries(operationTypes).map(([value, label]) => (
-                    <option key={value} value={value} className="bg-blue-900 text-white">
-                      {label}
-                    </option>
-                  ))}
-                </select>
-                <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                  <svg className="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
-            </div>
-
-            {/* Maintenance Type Radio Buttons */}
-            <div>
-              <label className="block text-sm font-medium text-blue-200 mb-2">
-                Tipo di Manutenzione
-              </label>
-              <div className="flex space-x-4">
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="radio"
-                    name="maintenanceType"
-                    value="ORDINARY"
-                    checked={formData.maintenanceType === "ORDINARY"}
-                    onChange={handleChange}
-                    className="form-radio text-blue-500 focus:ring-blue-500"
-                  />
-                  <span className="ml-2 text-blue-100 ">
-                    Ordinaria
-                  </span>
-                </label>
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="radio"
-                    name="maintenanceType"
-                    value="EXTRAORDINARY"
-                    checked={formData.maintenanceType === "EXTRAORDINARY"}
-                    onChange={handleChange}
-                    className="form-radio text-blue-500 focus:ring-blue-500"
-                  />
-                  <span className="ml-2 text-blue-100 ">
-                    Straordinaria
-                  </span>
-                </label>
-              </div>
-            </div>
-
-            <div>
-              <label htmlFor="notes" className="block text-sm font-medium text-blue-200 mb-2">
-                Note
-              </label>
-              <textarea
-                id="notes"
-                name="notes"
-                rows="4"
-                value={formData.notes}
-                onChange={handleChange}
-                placeholder="Fornisci dettagli sull'operazione eseguita"
-                className="block w-full px-4 py-3 rounded-xl border border-blue-500/30 
-                bg-blue-900/20 text-white placeholder-blue-300/50 backdrop-blur-sm
-                focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
-              ></textarea>
-            </div>
-
-            {error && (
-              <div className="flex items-center space-x-2 p-3 rounded-lg bg-red-900/20 border border-red-500/30 text-red-200">
-                <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0" />
-                <p>{error}</p>
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={isLoading}
-              className="w-full py-3 px-4 rounded-xl font-medium text-white 
-              bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400
-              focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:ring-offset-2 focus:ring-offset-black
-              shadow-[0_0_15px_rgba(59,130,246,0.5)] transition-all duration-200
-              disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
-            >
-              {isLoading ? (
-                <span className="flex items-center justify-center">
-                  <LightbulbLoader />
-                  <span className="ml-2">Elaborazione in corso...</span>
-                </span>
-              ) : (
-                <span className="flex items-center justify-center">
-                  <Tool className="mr-2 h-5 w-5" />
-                  Registra Operazione
-                </span>
-              )}
-            </button>
-
-            <div className="text-center pt-2">
+                  Compila consuntivo
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => navigate("/dashboard")}
-                className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+                className={`mt-3 w-full cursor-pointer py-3 px-4 rounded-xl font-medium text-white transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 ${
+                  successMeta?.isExtraordinary && successMeta?.linkedQuoteId
+                    ? "bg-blue-600/40 hover:bg-blue-600/60 border border-blue-500/30"
+                    : "bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.5)]"
+                }`}
               >
-                Annulla e torna alla dashboard
+                Torna alla dashboard
               </button>
             </div>
-          </form>
+          </div>
+          <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl" aria-hidden="true" />
+          <div className="absolute -bottom-32 -left-32 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl" aria-hidden="true" />
+        </div>
+      </div>
+    )
+  }
+
+  const singleReport = activeReports.length === 1
+  const report = selectedReport || activeReports[0]
+  const operatorName = [userData?.name, userData?.surname].filter(Boolean).join(" ") || userData?.email || "—"
+  const suspensionReason = singleReport
+    ? report?.workflow_status === "SUSPENDED" && report?.suspension?.reason
+      ? report.suspension
+      : null
+    : selectedReport?.workflow_status === "SUSPENDED" && selectedReport?.suspension?.reason
+      ? selectedReport.suspension
+      : null
+
+  return (
+    <div className={`${PAGE_SCROLL_SHELL} flex items-start justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4 py-6 sm:py-8`}>
+      <div className="w-full max-w-lg relative rounded-2xl shadow-[0_0_40px_rgba(0,149,255,0.15)]">
+        <div className="relative z-10 p-6 sm:p-8 backdrop-blur-xl bg-black/40 border border-blue-500/20 rounded-2xl">
+          <div className="flex items-start justify-between gap-3 mb-5" data-tour="page-operation-title">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <Tool className="h-6 w-6 text-blue-400 shrink-0" aria-hidden="true" />
+                <h1 className="text-2xl font-bold text-white truncate">Chiudi intervento</h1>
+              </div>
+              <p className="mt-1 text-sm text-blue-300/80">
+                {isTourDemo
+                  ? "Esempio guidato — nessun punto reale selezionato"
+                  : "Conferma il ripristino dell'impianto sul punto selezionato"}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <BackNavigationButton />
+              <button
+                type="button"
+                onClick={() => navigate("/dashboard")}
+                aria-label="Torna alla mappa"
+                title="Torna alla mappa"
+                className="cursor-pointer inline-flex items-center justify-center min-h-11 min-w-11 p-2 rounded-full bg-blue-500/10 hover:bg-blue-500/20 transition-colors duration-200"
+              >
+                <Home className="h-5 w-5 text-blue-400" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+
+          {isTourDemo ? (
+            <div
+              role="status"
+              className="mb-4 p-3 rounded-lg bg-blue-900/30 border border-blue-500/30 text-sm text-blue-100"
+            >
+              Modalità tutorial: stai vedendo un esempio. La chiusura reale è disabilitata.
+            </div>
+          ) : null}
+
+          {error && !activeReports.length ? (
+            <div
+              role="alert"
+              className="flex items-start gap-2 p-3 rounded-lg bg-red-900/20 border border-red-500/30 text-red-200 text-sm"
+            >
+              <AlertCircle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" aria-hidden="true" />
+              <p>{error}</p>
+            </div>
+          ) : (
+            <>
+              <section
+                aria-label="Dettagli punto"
+                data-tour="page-operation-point"
+                className="mb-5 p-4 rounded-xl bg-blue-900/20 border border-blue-500/20 space-y-3"
+              >
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <Hash className="w-4 h-4 mt-0.5 text-blue-400 shrink-0" aria-hidden="true" />
+                  <p className="text-sm text-blue-100 min-w-0 break-words">
+                    <span className="font-medium text-blue-50">Punto:</span>{" "}
+                    <span className="text-blue-200 font-mono">{queryParams.numeroPalo}</span>
+                    {queryParams.comune ? (
+                      <span className="text-blue-300/80"> · {queryParams.comune}</span>
+                    ) : null}
+                  </p>
+                </div>
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <MapPin className="w-4 h-4 mt-0.5 text-blue-400 shrink-0" aria-hidden="true" />
+                  <p className="text-sm text-blue-100 min-w-0 break-words">
+                    <span className="font-medium text-blue-50">Manutenzione:</span>{" "}
+                    <span className="text-blue-200">
+                      {isExtraordinary ? "Straordinaria" : "Ordinaria"}
+                    </span>
+                    {isExtraordinary && selectedReport?.due_date ? (
+                      <span className="text-blue-300/80">
+                        {" "}· scadenza {new Date(selectedReport.due_date).toLocaleDateString("it-IT")}
+                      </span>
+                    ) : null}
+                  </p>
+                </div>
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <User className="w-4 h-4 mt-0.5 text-blue-400 shrink-0" aria-hidden="true" />
+                  <p className="text-sm text-blue-100 min-w-0 break-words">
+                    <span className="font-medium text-blue-50">Operatore:</span>{" "}
+                    <span className="text-blue-200">{operatorName}</span>
+                  </p>
+                </div>
+              </section>
+
+              <form onSubmit={handleSubmit} className="space-y-5" data-tour="page-operation-form">
+              <div
+                className="p-3.5 rounded-xl bg-blue-900/25 border border-blue-500/30 text-sm text-blue-100"
+                role="note"
+              >
+                <div className="flex gap-2.5">
+                  <Info className="h-4 w-4 mt-0.5 text-blue-300 shrink-0" aria-hidden="true" />
+                  <div className="space-y-1 leading-relaxed">
+                    <p className="font-medium text-blue-50">Esito registrato</p>
+                    <p className="text-blue-100/90">
+                      Verrà chiusa la segnalazione con esito{" "}
+                      <span className="font-medium text-white">
+                        Guasto eliminato e impianto ripristinato
+                      </span>
+                      . Verifica di aver selezionato la segnalazione corretta prima di confermare.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {singleReport && report ? (
+                <div className="rounded-xl border border-blue-500/20 bg-blue-950/20 p-4 space-y-2">
+                  <p className={labelClass}>Segnalazione</p>
+                  <p className="text-base font-semibold text-white leading-snug">
+                    {formatReportFaultLabel(report)}
+                  </p>
+                  {suspensionReason && (
+                    <p className="text-sm text-blue-100/90">
+                      <span className="text-blue-300/80">Motivo sospensione:</span>{" "}
+                      {suspensionReason.reason}
+                      {suspensionReason.days ? ` (${suspensionReason.days} giorni)` : ""}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <label htmlFor="reportId" className={labelClass}>
+                    Segnalazione da chiudere
+                  </label>
+                  <GlassSelect
+                    id="reportId"
+                    value={reportId ? String(reportId) : ""}
+                    onChange={(value) => setReportId(value)}
+                    options={reportOptions}
+                    aria-label="Segnalazione da chiudere"
+                    placeholder="Seleziona segnalazione…"
+                    className="bg-blue-900/20 border-blue-500/30"
+                    maxVisible={6}
+                  />
+                  <p className={hintClass}>
+                    Sul punto risultano più segnalazioni chiudibili: scegli quella appena risolta.
+                  </p>
+                  {suspensionReason && (
+                    <p className="mt-2 text-sm text-blue-100/90">
+                      <span className="text-blue-300/80">Motivo sospensione:</span>{" "}
+                      {suspensionReason.reason}
+                      {suspensionReason.days ? ` (${suspensionReason.days} giorni)` : ""}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {isExtraordinary && (
+                <div
+                  className="p-3.5 rounded-xl bg-amber-900/20 border border-amber-500/30 text-sm text-amber-100"
+                  role="status"
+                >
+                  <div className="flex gap-2.5">
+                    <AlertTriangle className="h-4 w-4 mt-0.5 text-amber-300 shrink-0" aria-hidden="true" />
+                    <div className="space-y-1 leading-relaxed">
+                      <p className="font-medium text-amber-50">Consuntivo IMS richiesto</p>
+                      <p className="text-amber-100/90">
+                        Stai chiudendo una segnalazione straordinaria. Dopo l&apos;invio
+                        dovrai compilare il consuntivo IMS per completare il ciclo documentale.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label htmlFor="notes" className={labelClass}>
+                  Note{" "}
+                  <span className="font-normal text-blue-300/70">(opzionale)</span>
+                </label>
+                <textarea
+                  id="notes"
+                  rows={4}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Dettagli sull'intervento di chiusura…"
+                  className={fieldClass}
+                />
+                <p className={hintClass}>
+                  Annotazioni utili per il report e le notifiche agli interessati.
+                </p>
+              </div>
+
+              {error && (
+                <div
+                  role="alert"
+                  className="flex items-start gap-2 p-3 rounded-lg bg-red-900/20 border border-red-500/30 text-red-200 text-sm"
+                >
+                  <AlertCircle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" aria-hidden="true" />
+                  <p>{error}</p>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={submitting || !reportId}
+                className="w-full cursor-pointer py-3.5 px-4 rounded-xl font-medium text-white
+                bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400
+                focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:ring-offset-2 focus:ring-offset-black
+                shadow-[0_0_15px_rgba(59,130,246,0.5)] transition-all duration-200
+                disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
+              >
+                {submitting ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <LightbulbLoader />
+                    Chiusura in corso…
+                  </span>
+                ) : (
+                  <span className="flex items-center justify-center gap-2">
+                    <Tool className="h-5 w-5" aria-hidden="true" />
+                    Chiudi segnalazione
+                  </span>
+                )}
+              </button>
+
+              <div className="text-center">
+                <button
+                  type="button"
+                  onClick={() => navigate("/dashboard")}
+                  className="cursor-pointer text-sm text-blue-400 hover:text-blue-300 transition-colors duration-200"
+                >
+                  Annulla
+                </button>
+              </div>
+            </form>
+            </>
+          )}
         </div>
 
-        {/* Decorative elements */}
-        <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl"></div>
-        <div className="absolute -bottom-32 -left-32 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl"></div>
+        <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" aria-hidden="true" />
+        <div className="absolute -bottom-32 -left-32 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" aria-hidden="true" />
       </div>
     </div>
   )
 }
-

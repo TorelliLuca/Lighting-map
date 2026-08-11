@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useContext, useRef, useCallback, useMemo } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useLocation } from "react-router-dom"
 import { api, UserContext } from "../context/UserContext"
 import Header from "../components/Header"
 import MapControls from "../components/MapControls"
@@ -23,8 +23,9 @@ import DifferenteGroupSideWindow from "../components/DifferenteGroupSideWindow.j
 import { LassoToolbar } from "../components/LassoToolbar.jsx"
 import ConfirmDialog from "../components/ui/ConfirmDialog.jsx"
 import { useMediaQuery } from "../hooks/useMediaQuery.js"
+import ProductTourHost from "../components/ProductTourHost"
 
-import { translateString, transformDateToIT } from "../utils/utils"
+import { mapReportForExcelExport, mapOperationForExcelExport } from "../utils/utils"
 import { createMarkers, setupMarkerClustering, filterMarkers, cleanupMapResources, updateMarkerColors, initEmptyClusterer, appendMarkersToClusterer } from "../utils/createMarkers.jsx"
 import useFilteredMarkers from '../hooks/useFilteredMarkers';
 import { generateLegendColorMap } from '../hooks/useFilteredMarkers';
@@ -37,6 +38,9 @@ import {
   EMPTY_TOPOLOGY_GEOJSON,
   toIdString,
   resolveTopologyPick,
+  hasTopologyParent,
+  syncQuadroFromTopologyChain,
+  mergeTopologyUpdates,
 } from "../utils/topologyLines"
 import { drawTopologyPolylines, clearTopologyPolylines } from "../utils/createTopologyPolylines"
 import {
@@ -99,6 +103,10 @@ function Dashboard() {
     getTownhallGeojsonPage,
   } = useContext(UserContext)
   const navigate = useNavigate()
+  const location = useLocation()
+  const pendingMapFocusRef = useRef(null)
+  const consumedNavStateKeyRef = useRef(null)
+  const [mapFocusNonce, setMapFocusNonce] = useState(0)
   const isDesktop = useMediaQuery("(min-width: 1024px)")
   const mapRef = useRef(null)
   const infoWindowRef = useRef(null)
@@ -180,6 +188,8 @@ function Dashboard() {
   const [isTopologyEditMode, setIsTopologyEditMode] = useState(false)
   const isTopologyEditModeRef = useRef(false)
   const [topologyEditFirst, setTopologyEditFirst] = useState(null)
+  /** true = click su PL collegato rimuove il parent (scollega) */
+  const [topologyDisconnectMode, setTopologyDisconnectMode] = useState(false)
   /** Se valorizzato (da InfoWindow): prossimo click = parent, questo = child */
   const [topologyPendingChild, setTopologyPendingChild] = useState(null)
   const topologyTreeCacheRef = useRef(new Map())
@@ -380,6 +390,11 @@ function Dashboard() {
     loadSimpleBatched()
     return () => {
       cancelled = true
+      // Invalida il load corrente così i check loadId falliscono anche se
+      // il nuovo effect non è ancora partito (cambio città a metà download)
+      if (simpleLoadAbortRef.current === loadId) {
+        simpleLoadAbortRef.current += 1
+      }
     }
   }, [visualizationMode, selectedCity])
 
@@ -470,15 +485,29 @@ function Dashboard() {
       return upd ? { ...m, ...upd } : m
     }
 
-    setSimpleMarkers((prev) => prev.map(patch))
-    setAllMarkersData((prev) =>
-      prev.map((entry) =>
+    const applySynced = (list) => syncQuadroFromTopologyChain(list.map(patch))
+
+    setSimpleMarkers((prev) => applySynced(prev))
+    setAllMarkersData((prev) => {
+      const patchedEntries = prev.map((entry) =>
         entry.data && byId.has(String(entry.data._id))
           ? { ...entry, data: patch(entry.data) }
           : entry,
-      ),
-    )
-    setSelectedMarkerForInfo((prev) => (prev ? patch(prev) : prev))
+      )
+      const syncedData = syncQuadroFromTopologyChain(patchedEntries.map((e) => e.data).filter(Boolean))
+      const syncedById = new Map(syncedData.map((m) => [String(m._id), m]))
+      return patchedEntries.map((entry) =>
+        entry.data && syncedById.has(String(entry.data._id))
+          ? { ...entry, data: syncedById.get(String(entry.data._id)) }
+          : entry,
+      )
+    })
+    setSelectedMarkerForInfo((prev) => {
+      if (!prev) return prev
+      const patched = patch(prev)
+      const synced = syncQuadroFromTopologyChain([patched])[0]
+      return synced || patched
+    })
   }, [])
 
   const applyLocalParentUpdate = useCallback(
@@ -486,6 +515,38 @@ function Dashboard() {
       applyTopologyUpdates([{ _id: childId, parent: parentId ?? null }])
     },
     [applyTopologyUpdates],
+  )
+
+  const disconnectTopologyNode = useCallback(
+    async (marker) => {
+      const pick = resolveTopologyPick(marker)
+      const target = pick?.representative || marker
+      const childId = toIdString(target?._id)
+      if (!childId) {
+        toast.error("Punto luce non valido.", { id: "topology-link" })
+        return false
+      }
+      if (!hasTopologyParent(target)) {
+        toast.error("Questo punto non è collegato a una linea.", { id: "topology-link" })
+        return false
+      }
+      const prevQuadro = target.quadro
+      try {
+        await clearTopologyParent(childId)
+        applyLocalParentUpdate(childId, null)
+        invalidateTopologyTreeCache(prevQuadro)
+        toast.success(`Linea scollegata${target.numero_palo ? `: ${target.numero_palo}` : ""}.`, {
+          id: "topology-link",
+        })
+        return true
+      } catch (err) {
+        const msg =
+          err?.response?.data?.error || err.message || "Errore nello scollegamento"
+        toast.error(msg, { id: "topology-link" })
+        return false
+      }
+    },
+    [applyLocalParentUpdate, invalidateTopologyTreeCache],
   )
 
   const ensureTopologyTree = useCallback(
@@ -573,7 +634,7 @@ function Dashboard() {
           }
         }
 
-        if (allUpdates.length) applyTopologyUpdates(allUpdates)
+        if (allUpdates.length) applyTopologyUpdates(mergeTopologyUpdates(allUpdates))
 
         const quadroKey =
           lastResult?.quadro ||
@@ -644,6 +705,20 @@ function Dashboard() {
         return
       }
 
+      if (topologyDisconnectMode) {
+        if (pick.isGroup) {
+          const linkedMembers = pick.members.filter((m) => hasTopologyParent(m))
+          if (!linkedMembers.length) {
+            toast.error("Nessun punto del differente è collegato a una linea.", { id: "topology-link" })
+            return
+          }
+          await Promise.all(linkedMembers.map((member) => disconnectTopologyNode(member)))
+          return
+        }
+        await disconnectTopologyNode(pick.representative)
+        return
+      }
+
       // Flusso InfoWindow: child già scelto, questo click è il parent
       if (topologyPendingChild) {
         await linkTopologyParent(topologyPendingChild, marker, { continueChain: false })
@@ -679,7 +754,7 @@ function Dashboard() {
 
       await linkTopologyParent(marker, topologyEditFirst, { continueChain: true })
     },
-    [topologyPendingChild, topologyEditFirst, linkTopologyParent],
+    [topologyDisconnectMode, topologyPendingChild, topologyEditFirst, linkTopologyParent, disconnectTopologyNode],
   )
 
   const handleCancelTopologySelection = useCallback((event) => {
@@ -695,6 +770,7 @@ function Dashboard() {
     setIsTopologyEditMode(false)
     setTopologyEditFirst(null)
     setTopologyPendingChild(null)
+    setTopologyDisconnectMode(false)
     toast.dismiss("topology-pick")
     toast.dismiss("topology-mode")
   }, [])
@@ -704,6 +780,7 @@ function Dashboard() {
       const next = !prev
       if (next) {
         setShowTopologyLines(true)
+        setTopologyDisconnectMode(false)
         if (isLassoActive) {
           setIsLassoActive(false)
           setLassoSelectedIds([])
@@ -715,6 +792,7 @@ function Dashboard() {
       } else {
         setTopologyEditFirst(null)
         setTopologyPendingChild(null)
+        setTopologyDisconnectMode(false)
         toast.dismiss("topology-pick")
       }
       return next
@@ -727,6 +805,7 @@ function Dashboard() {
       setIsTopologyEditMode(true)
       setShowTopologyLines(true)
       setTopologyEditFirst(null)
+      setTopologyDisconnectMode(false)
       setTopologyPendingChild(marker)
       setSelectedMarkerForInfo(null)
       if (currentInfoWindow) {
@@ -746,19 +825,10 @@ function Dashboard() {
 
   const handleClearParentFromInfo = useCallback(
     async (marker) => {
-      if (!canEditTopo || !marker?._id) return
-      try {
-        await clearTopologyParent(marker._id)
-        applyLocalParentUpdate(marker._id, null)
-        invalidateTopologyTreeCache(marker.quadro)
-        toast.success("Linea scollegata.", { id: "topology-link" })
-      } catch (err) {
-        const msg =
-          err?.response?.data?.error || err.message || "Errore nello scollegamento"
-        toast.error(msg, { id: "topology-link" })
-      }
+      if (!canEditTopo || !marker) return
+      await disconnectTopologyNode(marker)
     },
-    [canEditTopo, applyLocalParentUpdate, invalidateTopologyTreeCache],
+    [canEditTopo, disconnectTopologyNode],
   )
 
   // Precarica potenze quando si apre un marker con quadro
@@ -772,6 +842,7 @@ function Dashboard() {
     setIsTopologyEditMode(false)
     setTopologyEditFirst(null)
     setTopologyPendingChild(null)
+    setTopologyDisconnectMode(false)
     topologyTreeCacheRef.current.clear()
     setTopologyPowerById({})
     setShowUnlinkedChip(false)
@@ -1063,13 +1134,25 @@ function Dashboard() {
 
   // Effect to load map data when map is ready and city is selected (solo modalità complessa)
   useEffect(() => {
-    if (visualizationMode !== "complessa") return
-    if (map && selectedCity) {
-      // Reset city data loaded flag
-      setCityDataLoaded(false)
+    if (visualizationMode !== "complessa" || !map || !selectedCity) {
+      return undefined
+    }
 
-      // Clean up previous data and load new data
-      cleanupAndLoadMapData()
+    setCityDataLoaded(false)
+    cleanupAndLoadMapData()
+
+    const loadIdAtStart = complexLoadAbortRef.current
+    return () => {
+      // Invalida il load corrente (cambio città / smontaggio / cambio modalità)
+      if (complexLoadAbortRef.current === loadIdAtStart) {
+        complexLoadAbortRef.current += 1
+      }
+      // Rimuove cluster/marker Google creati dal load interrotto prima che parta il successivo
+      try {
+        cleanupMapResources()
+      } catch {
+        /* ignore */
+      }
     }
   }, [map, selectedCity, visualizationMode])
 
@@ -1088,13 +1171,17 @@ function Dashboard() {
 
     if (!map || visualizationMode !== 'complessa' || !selectedCity) {
       cleanupBorder()
-      return
+      return undefined
     }
+
+    let cancelled = false
 
     const fetchAndRenderBorders = async () => {
       try {
         // Endpoint: restituisce GeoJSON con struttura fissa: Feature con geometry.type === 'Polygon'
         const res = await api.get(`/borders/townhall-name/${encodeURIComponent(selectedCity)}`)
+        if (cancelled) return
+
         const geojson = res.data
 
         // Normalizza in array di poligoni. Struttura attesa: Feature con Polygon
@@ -1113,6 +1200,8 @@ function Dashboard() {
         } else if (geojson?.type === 'MultiPolygon') {
           polygons.push(...geojson.coordinates)
         }
+
+        if (cancelled) return
 
         if (polygons.length === 0) {
           cleanupBorder()
@@ -1135,8 +1224,15 @@ function Dashboard() {
 
         // Aggiungi GeoJSON direttamente al layer dati
         const added = map.data.addGeoJson(geojson)
+        if (cancelled) {
+          added.forEach(f => {
+            try { map.data.remove(f) } catch (_) {}
+          })
+          return
+        }
         townhallBorderFeaturesRef.current = added
       } catch (err) {
+        if (cancelled) return
         if (err?.name !== 'AbortError') {
           console.error('Errore caricando i confini del comune:', err)
         }
@@ -1149,6 +1245,7 @@ function Dashboard() {
 
     // Cleanup quando dipendenze cambiano o all'unmount
     return () => {
+      cancelled = true
       cleanupBorder()
     }
   }, [map, selectedCity, visualizationMode])
@@ -1319,8 +1416,10 @@ function Dashboard() {
       if (!userData?.id || !selectedCity) return;
       setIsLoadingCityLightPoints(true);
       try {
-        const res = await getTownhallLightpointsCount(); 
-        setCityLightPointsMap(prev => ({ ...prev, [selectedCity]: res.data[selectedCity] }));
+        const res = await getTownhallLightpointsCount()
+        if (res?.data) {
+          setCityLightPointsMap(prev => ({ ...prev, [selectedCity]: res.data[selectedCity] }))
+        }
       } catch (e) {
         console.error(e);
       } finally {
@@ -1843,57 +1942,33 @@ function Dashboard() {
     }
 
     th.punti_luce.forEach((pl) => {
+      const lightPointCtx = {
+        comune: selectedCity,
+        numeroPalo: pl.numero_palo,
+        indirizzo: pl.indirizzo,
+      }
+
       if (pl.segnalazioni_in_corso && pl.segnalazioni_in_corso.length > 0) {
         pl.segnalazioni_in_corso.forEach((report) => {
-          const objToInsert = {
-            COMUNE: selectedCity,
-            NUMERO_PALO: pl.numero_palo,
-            INDIRIZZO: pl.indirizzo,
-            DATA_SEGNALAZIONE: transformDateToIT(report.report_date),
-            TIPO_DI_SEGNALAZIONE: translateString(report.report_type),
-            DESCRIZIONE: report.description,
-            SEGNALATORE: report.user_creator_id
-              ? report.user_creator_id.name + " " + report.user_creator_id.surname
-              : "",
-          }
-          jsonToSend.segnalazioni_in_corso.push(objToInsert)
+          jsonToSend.segnalazioni_in_corso.push(
+            mapReportForExcelExport(report, lightPointCtx)
+          )
         })
       }
 
       if (pl.segnalazioni_risolte && pl.segnalazioni_risolte.length > 0) {
         pl.segnalazioni_risolte.forEach((report) => {
-          const objToInsert = {
-            COMUNE: selectedCity,
-            NUMERO_PALO: pl.numero_palo,
-            INDIRIZZO: pl.indirizzo,
-            DATA_SEGNALAZIONE: transformDateToIT(report.report_date),
-            TIPO_DI_SEGNALAZIONE: translateString(report.report_type),
-            DESCRIZIONE: report.description,
-            SEGNALATORE: report.user_creator_id
-              ? report.user_creator_id.name + " " + report.user_creator_id.surname
-              : "",
-            OPERATORE: report.user_responsible_id
-              ? report.user_responsible_id.name + " " + report.user_responsible_id.surname
-              : "",
-          }
-          jsonToSend.segnalazioni_risolte.push(objToInsert)
+          jsonToSend.segnalazioni_risolte.push(
+            mapReportForExcelExport(report, lightPointCtx)
+          )
         })
       }
 
       if (pl.operazioni_effettuate && pl.operazioni_effettuate.length > 0) {
         pl.operazioni_effettuate.forEach((operation) => {
-          const objToInsert = {
-            COMUNE: selectedCity,
-            NUMERO_PALO: pl.numero_palo,
-            INDIRIZZO: pl.indirizzo,
-            DATA_OPERAZIONE: transformDateToIT(operation.operation_date),
-            TIPO_DI_OPERAZIONE: translateString(operation.operation_type),
-            DESCRIZIONE: operation.note,
-            RESPONSABILE_OPERAZIONE: operation.operation_responsible
-              ? operation.operation_responsible.name + " " + operation.operation_responsible.surname
-              : "",
-          }
-          jsonToSend.operazioni_effettuate.push(objToInsert)
+          jsonToSend.operazioni_effettuate.push(
+            mapOperationForExcelExport(operation, lightPointCtx)
+          )
         })
       }
     })
@@ -2241,9 +2316,14 @@ function Dashboard() {
     }
   }
 
-  const handleNavigateToPointFromPanel = (lat, lng, numeroPalo) => {
-    const latNum = parseFloat(lat)
-    const lngNum = parseFloat(lng)
+  const parseCoordinate = (value) => {
+    if (value == null) return Number.NaN
+    return Number.parseFloat(String(value).trim().replace(",", "."))
+  }
+
+  const handleNavigateToPointFromPanel = useCallback((lat, lng, numeroPalo) => {
+    const latNum = parseCoordinate(lat)
+    const lngNum = parseCoordinate(lng)
     if (Number.isNaN(latNum) || Number.isNaN(lngNum)) return
 
     setShowInfoPanel(false)
@@ -2253,14 +2333,16 @@ function Dashboard() {
         mapLibreRef.current.flyTo({
           center: [lngNum, latNum],
           zoom: 30,
+          essential: true,
         })
       }
     } else if (map) {
       map.setCenter(new window.google.maps.LatLng(latNum, lngNum))
+      map.setZoom(21)
       const found = allMarkersData.find(
         (m) =>
           m.data.numero_palo === numeroPalo ||
-          (parseFloat(m.data.lat) === latNum && parseFloat(m.data.lng) === lngNum),
+          (parseCoordinate(m.data.lat) === latNum && parseCoordinate(m.data.lng) === lngNum),
       )
       if (found?.ref) {
         if (!infoWindowRef.current) {
@@ -2273,12 +2355,185 @@ function Dashboard() {
     const foundMarker = allMarkersData.find(
       (m) =>
         m.data.numero_palo === numeroPalo ||
-        (parseFloat(m.data.lat) === latNum && parseFloat(m.data.lng) === lngNum),
+        (parseCoordinate(m.data.lat) === latNum && parseCoordinate(m.data.lng) === lngNum),
     )
     if (foundMarker) {
       setSelectedMarkerForInfo(foundMarker.data)
+    } else if (visualizationMode === "semplice") {
+      const fromSimple = simpleMarkers.find(
+        (m) =>
+          String(m.numero_palo) === String(numeroPalo) ||
+          (parseCoordinate(m.lat) === latNum && parseCoordinate(m.lng) === lngNum),
+      )
+      if (fromSimple) setSelectedMarkerForInfo(fromSimple)
     }
-  }
+  }, [visualizationMode, map, allMarkersData, simpleMarkers])
+
+  // Focus one-shot da location.state oppure da query (?comune=&focusPalo=&focusLat=&focusLng=).
+  // Salva l'intento in pendingMapFocusRef e pulisce subito URL/state; lo zoom avviene
+  // solo quando selectedCity coincide e i dati mappa sono pronti (effetto successivo).
+  useEffect(() => {
+    if (consumedNavStateKeyRef.current === location.key) return
+
+    const navState =
+      location.state && typeof location.state === "object" ? location.state : null
+    const params = new URLSearchParams(location.search)
+
+    const fromState = Boolean(
+      navState &&
+        (navState.comune ||
+          navState.focusLat != null ||
+          navState.focusLng != null ||
+          navState.focusPalo),
+    )
+    const fromQuery =
+      params.has("comune") ||
+      params.has("focusLat") ||
+      params.has("focusLng") ||
+      params.has("focusPalo")
+
+    if (!fromState && !fromQuery) return
+
+    const comune = fromState
+      ? navState.comune
+      : params.get("comune") || undefined
+    const focusLat = fromState
+      ? navState.focusLat
+      : params.get("focusLat")
+    const focusLng = fromState
+      ? navState.focusLng
+      : params.get("focusLng")
+    const focusPalo = fromState
+      ? navState.focusPalo
+      : params.get("focusPalo") || undefined
+
+    if (!comune && focusLat == null && focusLng == null && !focusPalo) return
+
+    // Aspetta i comuni dell'utente prima di validare/applicare
+    if (comune && !userData?.town_halls_list) return
+
+    consumedNavStateKeyRef.current = location.key
+
+    const hasCoords =
+      focusLat != null && focusLat !== "" && focusLng != null && focusLng !== ""
+
+    pendingMapFocusRef.current = {
+      comune: comune || null,
+      lat: hasCoords ? focusLat : null,
+      lng: hasCoords ? focusLng : null,
+      numeroPalo: focusPalo || "",
+      resolveByPalo: Boolean(focusPalo) && !hasCoords,
+    }
+    // Riattiva l'effetto di zoom anche se città/dati mappa non cambiano
+    setMapFocusNonce((n) => n + 1)
+
+    if (comune) {
+      const allowed = userData.town_halls_list.some(
+        (city) => (typeof city === "string" ? city : city?.name) === comune,
+      )
+      if (allowed && comune !== selectedCity) {
+        // Stesso reset di MapControls: evita focus sulla mappa della città precedente
+        simpleLoadAbortRef.current += 1
+        complexLoadAbortRef.current += 1
+        setIsMapDataComplete(false)
+        setIsMapLoading(true)
+        setLoaderVariant("fullscreen")
+        setCityDataLoaded(false)
+        setSelectedMarkerForInfo(null)
+        setSimpleMarkers([])
+        setActiveMarkers([])
+        setAllMarkersData([])
+        try {
+          cleanupMapResources()
+        } catch {
+          /* ignore */
+        }
+        setSelectedCity(comune)
+      }
+    }
+
+    navigate("/dashboard", { replace: true, state: null })
+  }, [
+    location.state,
+    location.search,
+    location.key,
+    userData,
+    navigate,
+    selectedCity,
+  ])
+
+  useEffect(() => {
+    const pending = pendingMapFocusRef.current
+    if (!pending) return
+
+    // Non zoomare finché non siamo sulla città richiesta (altrimenti il reload successivo annulla il focus)
+    if (pending.comune && selectedCity !== pending.comune) return
+
+    const mapInstanceReady =
+      visualizationMode === "semplice"
+        ? Boolean(mapLibreRef.current || mapLibreInstance)
+        : Boolean(map)
+    if (!isMapDataComplete || !mapInstanceReady) return
+
+    let cancelled = false
+    // Breve settle: marker/cluster e camera iniziale devono stabilizzarsi dopo isMapDataComplete
+    const timer = window.setTimeout(() => {
+      if (cancelled) return
+      const still = pendingMapFocusRef.current
+      if (!still || still !== pending) return
+      if (still.comune && selectedCity !== still.comune) return
+      if (!isMapDataCompleteRef.current) return
+
+      if (still.resolveByPalo && still.numeroPalo) {
+        const markers =
+          visualizationMode === "semplice"
+            ? simpleMarkers
+            : allMarkersData.map((m) => m.data).filter(Boolean)
+        const found = markers.find(
+          (m) => String(m.numero_palo) === String(still.numeroPalo),
+        )
+        if (!found) {
+          // Dati pronti ma palo assente: rilascia. Se lista ancora vuota, ritenta al prossimo ciclo.
+          if (markers.length > 0) {
+            pendingMapFocusRef.current = null
+          }
+          return
+        }
+        handleNavigateToPointFromPanel(found.lat, found.lng, still.numeroPalo)
+        if (pendingMapFocusRef.current === pending) {
+          pendingMapFocusRef.current = null
+        }
+        return
+      }
+
+      const latNum = parseCoordinate(still.lat)
+      const lngNum = parseCoordinate(still.lng)
+      if (Number.isNaN(latNum) || Number.isNaN(lngNum)) {
+        pendingMapFocusRef.current = null
+        return
+      }
+
+      handleNavigateToPointFromPanel(latNum, lngNum, still.numeroPalo)
+      if (pendingMapFocusRef.current === pending) {
+        pendingMapFocusRef.current = null
+      }
+    }, 450)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [
+    isMapDataComplete,
+    mapLibreInstance,
+    map,
+    visualizationMode,
+    selectedCity,
+    simpleMarkers,
+    allMarkersData,
+    handleNavigateToPointFromPanel,
+    mapFocusNonce,
+  ])
 
   const goToUserLocation = () => {
     if (userLocationRef.current) {
@@ -2298,9 +2553,28 @@ function Dashboard() {
     )
   }
 
-  window.startOperation = (city, numeroPalo, lat, lng) => {
+  window.startOperation = (city, numeroPalo, lat, lng, reportId) => {
+    const reportQuery = reportId ? `&reportId=${encodeURIComponent(reportId)}` : ""
     navigate(
-      `/operation?comune=${encodeURIComponent(city)}&numeroPalo=${encodeURIComponent(numeroPalo)}&lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`,
+      `/operation?comune=${encodeURIComponent(city)}&numeroPalo=${encodeURIComponent(numeroPalo)}&lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}${reportQuery}`,
+    )
+  }
+
+  window.startInspection = (city, id, reportId) => {
+    const reportQuery = reportId ? `&reportId=${encodeURIComponent(reportId)}` : ""
+    navigate(
+      `/inspection?comune=${encodeURIComponent(city)}&id=${encodeURIComponent(id)}${reportQuery}`,
+    )
+  }
+
+  window.startQuote = (city, id, reportId, quoteId) => {
+    if (quoteId) {
+      navigate(`/quote/${encodeURIComponent(String(quoteId))}`)
+      return
+    }
+    const reportQuery = reportId ? `&reportId=${encodeURIComponent(reportId)}` : ""
+    navigate(
+      `/quote?comune=${encodeURIComponent(city)}&id=${encodeURIComponent(id)}${reportQuery}`,
     )
   }
 
@@ -3250,7 +3524,7 @@ function Dashboard() {
           lastQuadro = result?.quadro || lastQuadro
           okCount += 1
         }
-        if (allUpdates.length) applyTopologyUpdates(allUpdates)
+        if (allUpdates.length) applyTopologyUpdates(mergeTopologyUpdates(allUpdates))
         invalidateTopologyTreeCache(lastQuadro)
         invalidateTopologyTreeCache(parentPick.representative.quadro)
         if (lastQuadro) await ensureTopologyTree(lastQuadro)
@@ -3397,17 +3671,47 @@ function Dashboard() {
         )}
         {(isTopologyEditMode || topologyPendingChild) && (
           <div
-            className="pointer-events-auto absolute top-4 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-lg border border-blue-400/50 bg-black/85 px-3 py-2 text-sm text-blue-100 backdrop-blur-md"
+            className="pointer-events-auto absolute top-4 left-1/2 z-[60] flex -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded-lg border border-blue-400/50 bg-black/85 px-3 py-2 text-sm text-blue-100 backdrop-blur-md max-w-[min(96vw,720px)]"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
             <span>
-              {topologyPendingChild
-                ? `Seleziona il genitore per il palo ${topologyPendingChild.numero_palo || ""}`
-                : topologyEditFirst
-                  ? `A monte: ${topologyEditFirst.numero_palo || "…"} — seleziona il punto a valle`
-                  : "Modalità linee: seleziona il punto a monte, poi quello a valle · ESC per uscire"}
+              {topologyDisconnectMode
+                ? "Modalità scollega: clicca un punto luce collegato per rimuoverlo dalla linea"
+                : topologyPendingChild
+                  ? `Seleziona il genitore per il palo ${topologyPendingChild.numero_palo || ""}`
+                  : topologyEditFirst
+                    ? `A monte: ${topologyEditFirst.numero_palo || "…"} — seleziona il punto a valle`
+                    : "Modalità linee: seleziona il punto a monte, poi quello a valle · ESC per uscire"}
             </span>
+            {isTopologyEditMode && !topologyPendingChild && (
+              <button
+                type="button"
+                className={`rounded border px-2 py-0.5 text-xs ${
+                  topologyDisconnectMode
+                    ? "border-orange-400/60 bg-orange-700/40 hover:bg-orange-600/40"
+                    : "border-blue-400/40 hover:bg-blue-700/40"
+                }`}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }}
+                onClick={() => {
+                  setTopologyDisconnectMode((prev) => {
+                    const next = !prev
+                    if (next) {
+                      setTopologyEditFirst(null)
+                      toast("Scollega: clicca un PL collegato a una linea.", { id: "topology-pick" })
+                    } else {
+                      toast.dismiss("topology-pick")
+                    }
+                    return next
+                  })
+                }}
+              >
+                {topologyDisconnectMode ? "Collega" : "Scollega"}
+              </button>
+            )}
             {(topologyEditFirst || topologyPendingChild) && (
               <button
                 type="button"
@@ -3448,8 +3752,31 @@ function Dashboard() {
       <MapControls
         selectedCity={selectedCity}
         setSelectedCity={(city) => {
+          if (!city || city === selectedCity) return
+          // Abort immediato dei load in volo (semplice + complessa) prima del re-render
+          simpleLoadAbortRef.current += 1
+          complexLoadAbortRef.current += 1
+          setIsMapDataComplete(false)
+          setIsMapLoading(true)
+          setLoaderVariant("fullscreen")
+          setCityDataLoaded(false)
+          setSelectedMarkerForInfo(null)
+          setSimpleMarkers([])
+          setActiveMarkers([])
+          setAllMarkersData([])
+          try {
+            cleanupMapResources()
+          } catch {
+            /* ignore */
+          }
+          mapLoadOverlayRef.current?.reset(cityLightPointsMap[city] || 0)
+          mapLoadOverlayRef.current?.update({
+            progress: null,
+            stage: "Cambio mappa...",
+            processed: null,
+            total: cityLightPointsMap[city] || 0,
+          })
           setSelectedCity(city)
-          // Don't need to call saveStateToStorage here as it will be triggered by the useEffect
         }}
         highlightOption={highlightOption}
         setHighlightOption={(option) => {
@@ -3562,6 +3889,8 @@ function Dashboard() {
         onDeleteClick={visualizationMode === "semplice" ? handleDeleteSimpleMarker : handleDeleteMarker}
         onBeforeReport={visualizationMode === "semplice" ? handleBeforeReport : undefined}
         mapType={visualizationMode === "semplice" ? "maplibre" : undefined}
+        onSetParentClick={canEditTopo ? handleSetParentFromInfo : null}
+        onClearParentClick={canEditTopo ? handleClearParentFromInfo : null}
       />
       <EditLightPointModal
         isOpen={isEditModalOpen}
@@ -3810,6 +4139,7 @@ function Dashboard() {
           }
         }
       `}</style>
+      <ProductTourHost ready={Boolean(isMapDataComplete && selectedCity)} />
     </div>
   )
 }

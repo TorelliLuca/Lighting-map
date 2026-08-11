@@ -26,5 +26,16 @@ dist-ssr
 .env
 .htaccess
 .env.*
+!.env.e2e.example
 *storybook.log
 storybook-static
+
+# Playwright / Vitest
+test-results/
+playwright-report/
+blob-report/
+e2e/.auth/
+coverage/
+videos/**
+!videos/.gitkeep
+.env.*

@@ -1,12 +1,10 @@
 import { createRoot } from "react-dom/client"
 import { MarkerClusterer, GridAlgorithm } from "@googlemaps/markerclusterer"
-import { IoPin } from "rocketicons/io5"
 import { DEFAULT_COLOR, FC_QUADRO_COLOR, applyFcQuadroToLegendMap, getColorList, isFcQuadro } from "../utils/ColorGenerator"
 import InfoWindow from "../components/InfoWindow"
 import { isMobileInfoWindowViewport } from "./infoWindowActions"
-import { MdReportProblem } from "rocketicons/md"
-import { PlugIcon as HousePlug } from "lucide-react"
-import { isOlderThan, getTipoLampada, normalizeLightPointForDisplay } from "./utils"
+import { isOlderThan, getTipoLampada, normalizeLightPointForDisplay, getReportBadgeInfo } from "./utils"
+import { getEffectiveQuadro, toIdString } from "./topologyLines"
 
 // Global variable to store the clusterer instance
 let currentClusterer = null
@@ -29,13 +27,52 @@ const ensureMarkerStyles = () => {
     .animate-pulse {
       animation: pulse 1.5s ease-in-out infinite;
     }
+    .map-marker-root {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      cursor: pointer;
+      user-select: none;
+      filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+      transform-origin: 50% 100%;
+      transition: transform 0.15s ease;
+    }
+    .map-marker-root:hover {
+      transform: scale(1.08);
+    }
+    .map-marker-label {
+      margin-top: 2px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      font-size: 10px;
+      line-height: 1.3;
+      font-weight: 600;
+      color: #fff;
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      white-space: nowrap;
+      max-width: 72px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .map-marker-group {
+      margin-top: 2px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      font-size: 10px;
+      line-height: 1.3;
+      font-weight: 700;
+      color: #fff;
+      background: #2563eb;
+      border: 1px solid rgba(147, 197, 253, 0.7);
+    }
     .editing-marker {
       cursor: move !important;
       z-index: 1000 !important;
     }
     .editing-marker:hover {
-      transform: scale(1.1);
-      transition: transform 0.2s ease;
+      transform: scale(1.12);
     }
   `
   document.head.appendChild(style)
@@ -50,139 +87,199 @@ const parseCoord = (value) => {
   return Number.isFinite(n) ? n : 0
 }
 
-// Custom Electric Panel component with notification status indicator
-const ElectricPanelMarker = ({ color, hasActiveNotifications, isOutOfLaw, nPanel, showPanelNumber }) => {
-  return (
-    <div
-      className="flex flex-col items-center justify-center"
-      style={{ width: "55px", height: "65px", filter: "drop-shadow(0px 0px 1px white)" }}
-    >
-      {/* Main lamp icon */}
-      <HousePlug color={color} style={{ minWidth: "35px", minHeight: "35px" }} />
+const ReportBadge = ({ type, dueUrgency = "ok" }) => {
+  if (type === "ordinary") {
+    return (
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 14 14"
+        style={{ position: "absolute", top: 0, right: 0, zIndex: 2, pointerEvents: "none" }}
+        aria-hidden="true"
+      >
+        <polygon points="7,1 13,13 1,13" fill="#FFCC00" stroke="#ffffff" strokeWidth="1.2" />
+      </svg>
+    )
+  }
+  if (type === "extraordinary") {
+    const fill =
+      dueUrgency === "overdue" ? "#EF4444"
+        : dueUrgency === "soon" ? "#F97316"
+          : "#E11D48"
+    return (
+      <svg
+        width="15"
+        height="15"
+        viewBox="0 0 15 15"
+        style={{
+          position: "absolute",
+          top: 0,
+          right: 0,
+          zIndex: 2,
+          pointerEvents: "none",
+          animation: dueUrgency === "overdue" ? "pulse 1.5s ease-in-out infinite" : undefined,
+        }}
+        aria-hidden="true"
+      >
+        <polygon
+          points="7.5,1 14,5.5 11.5,13.5 3.5,13.5 1,5.5"
+          fill={fill}
+          stroke="#ffffff"
+          strokeWidth="1.2"
+        />
+      </svg>
+    )
+  }
+  return null
+}
 
-      {/* Notification indicator */}
-      {hasActiveNotifications && !isOutOfLaw ? (
-        <MdReportProblem
-          size={10}
-          color="#FFBF00"
-          style={{
-            position: "absolute",
-            bottom: "40px",
-            left: "35px",
-            minWidth: "10px",
-            minHeight: "10px",
-            animation: "pulse 1.5s ease-in-out infinite",
-          }}
-        />
-      ) : hasActiveNotifications && isOutOfLaw ? (
-        <MdReportProblem
-          size={10}
-          color="#FF4545"
-          style={{
-            position: "absolute",
-            bottom: "40px",
-            left: "35px",
-            minWidth: "10px",
-            minHeight: "10px",
-            animation: "pulse 1.5s ease-in-out infinite",
-          }}
-        />
-      ) : (
-        <></>
-      )}
-      {showPanelNumber && nPanel && (
-        <div className="text-xs text-white bg-black/50 rounded-full px-2 py-1">
-          {nPanel}
-        </div>
-      )}
-    </div>
+const StatusDot = ({ color }) => (
+  <span
+    aria-hidden="true"
+    style={{
+      position: "absolute",
+      top: 1,
+      right: 1,
+      zIndex: 2,
+      width: 9,
+      height: 9,
+      borderRadius: "50%",
+      background: color,
+      border: "1.5px solid #fff",
+      boxShadow: "0 0 0 1px rgba(0,0,0,0.2)",
+      animation: "pulse 1.5s ease-in-out infinite",
+    }}
+  />
+)
+
+/** Pin punto luce: testa lampada + stelo, bordo bianco per contrasto su satellitare */
+const StreetLampPinSvg = ({ color, unlinked = false }) => {
+  const stroke = unlinked ? "#f97316" : "#ffffff"
+  const strokeWidth = unlinked ? 2.2 : 1.8
+  return (
+    <svg width="28" height="36" viewBox="0 0 28 36" aria-hidden="true">
+      <path
+        d="M14 1.5C7.65 1.5 2.5 6.65 2.5 13c0 4.6 2.55 8.55 6.25 10.55L14 34.5l5.25-10.95C23 21.55 25.5 17.6 25.5 13 25.5 6.65 20.35 1.5 14 1.5z"
+        fill={color}
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+      <ellipse cx="14" cy="11.2" rx="6.2" ry="4.4" fill="rgba(255,255,255,0.92)" />
+      <path
+        d="M9.2 12.4c1.1 2.4 2.7 3.6 4.8 3.6s3.7-1.2 4.8-3.6"
+        fill="none"
+        stroke={color}
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+      <rect x="13.1" y="16" width="1.8" height="7.5" rx="0.6" fill={color} opacity="0.85" />
+      <circle cx="14" cy="13" r="1.15" fill={color} />
+    </svg>
   )
 }
 
-const StreetLampMarker = ({ color, hasActiveNotifications, isOutOfLaw, nPanel, groupCount = 0, isTopologyUnlinked = false }) => {
-  return (
-    <div
-      className="flex flex-col items-center justify-center"
-      style={{
-        width: "45px",
-        height: "55px",
-        filter: "drop-shadow(0px 0px 1px white)",
-        display: "inline-flex",
-        position: "relative",
-      }}
-    >
-      {/* Main lamp icon */}
-      <IoPin
-        size={24}
-        color={color}
+/** Pin quadro elettrico: corpo rettangolare tipico QE */
+const ElectricPanelPinSvg = ({ color }) => (
+  <svg width="30" height="38" viewBox="0 0 30 38" aria-hidden="true">
+    <path
+      d="M15 1.5C8.1 1.5 2.5 7.1 2.5 14c0 5.1 2.9 9.4 7.1 11.5L15 36.5l5.4-11C24.6 23.4 27.5 19.1 27.5 14 27.5 7.1 21.9 1.5 15 1.5z"
+      fill={color}
+      stroke="#ffffff"
+      strokeWidth="1.8"
+      strokeLinejoin="round"
+    />
+    <rect x="8.2" y="7.2" width="13.6" height="12.2" rx="1.6" fill="rgba(255,255,255,0.95)" />
+    <rect x="10" y="9" width="10" height="2.2" rx="0.6" fill={color} opacity="0.9" />
+    <rect x="10" y="12.4" width="10" height="1.5" rx="0.5" fill={color} opacity="0.45" />
+    <rect x="10" y="15" width="10" height="1.5" rx="0.5" fill={color} opacity="0.45" />
+    <circle cx="19.4" cy="17.6" r="1.1" fill={color} />
+  </svg>
+)
+
+const MarkerStatusOverlays = ({
+  reportBadgeType,
+  dueUrgency,
+  hasActiveNotifications,
+  isOutOfLaw,
+  isTopologyUnlinked = false,
+}) => {
+  if (reportBadgeType === "ordinary" || reportBadgeType === "extraordinary") {
+    return <ReportBadge type={reportBadgeType} dueUrgency={dueUrgency} />
+  }
+  if (hasActiveNotifications) {
+    return <StatusDot color={isOutOfLaw ? "#EF4444" : "#FFBF00"} />
+  }
+  if (isTopologyUnlinked) {
+    return (
+      <span
+        title="Nessuna linea elettrica collegata"
+        aria-hidden="true"
         style={{
-          minWidth: "30px",
-          minHeight: "30px",
-          outline: isTopologyUnlinked ? "2px solid #f97316" : undefined,
-          borderRadius: isTopologyUnlinked ? "50%" : undefined,
+          position: "absolute",
+          top: 1,
+          right: 1,
+          zIndex: 2,
+          width: 9,
+          height: 9,
+          borderRadius: "50%",
+          background: "#f97316",
+          border: "1.5px solid #fff",
         }}
       />
-      {isTopologyUnlinked && (
-        <span
-          title="Nessuna linea elettrica collegata"
-          style={{
-            position: "absolute",
-            top: "2px",
-            right: "4px",
-            width: "8px",
-            height: "8px",
-            borderRadius: "50%",
-            background: "#f97316",
-            border: "1px solid #fff",
-          }}
-        />
-      )}
-
-      {/* Notification indicator */}
-      {hasActiveNotifications && !isOutOfLaw ? (
-        <MdReportProblem
-          size={10}
-          color="#FFBF00"
-          style={{
-            position: "absolute",
-            top: "20px",
-            right: "10px",
-            left: "10px",
-            minWidth: "10px",
-            minHeight: "10px",
-            animation: "pulse 1.5s ease-in-out infinite",
-          }}
-        />
-      ) : hasActiveNotifications && isOutOfLaw ? (
-        <MdReportProblem
-          size={10}
-          color="#FF4545"
-          style={{
-            position: "absolute",
-            top: "20px",
-            right: "10px",
-            left: "10px",
-            minWidth: "10px",
-            minHeight: "10px",
-            animation: "pulse 1.5s ease-in-out infinite",
-          }}
-        />
-      ) : (
-        <></>
-      )}
-      {nPanel && (
-        <div className="text-xs text-white bg-black/50 rounded-full px-2 py-1 mt-1">
-          {nPanel}
-        </div>
-      )}
-      {groupCount > 1 && (
-        <div className="text-[10px] text-white bg-blue-600 rounded-full px-2 py-0.5 mt-1 border border-blue-300/60">
-          x{groupCount}
-        </div>
-      )}
-    </div>
-  )
+    )
+  }
+  return null
 }
+
+const ElectricPanelMarker = ({
+  color,
+  hasActiveNotifications,
+  isOutOfLaw,
+  nPanel,
+  showPanelNumber,
+  reportBadgeType,
+  dueUrgency,
+}) => (
+  <div className="map-marker-root" style={{ width: 34, minHeight: 38 }}>
+    <div style={{ position: "relative", width: 30, height: 38 }}>
+      <ElectricPanelPinSvg color={color} />
+      <MarkerStatusOverlays
+        reportBadgeType={reportBadgeType}
+        dueUrgency={dueUrgency}
+        hasActiveNotifications={hasActiveNotifications}
+        isOutOfLaw={isOutOfLaw}
+      />
+    </div>
+    {showPanelNumber && nPanel ? <div className="map-marker-label">{nPanel}</div> : null}
+  </div>
+)
+
+const StreetLampMarker = ({
+  color,
+  hasActiveNotifications,
+  isOutOfLaw,
+  nPanel,
+  groupCount = 0,
+  isTopologyUnlinked = false,
+  reportBadgeType,
+  dueUrgency,
+}) => (
+  <div className="map-marker-root" style={{ width: 32, minHeight: 36 }}>
+    <div style={{ position: "relative", width: 28, height: 36 }}>
+      <StreetLampPinSvg color={color} unlinked={isTopologyUnlinked} />
+      <MarkerStatusOverlays
+        reportBadgeType={reportBadgeType}
+        dueUrgency={dueUrgency}
+        hasActiveNotifications={hasActiveNotifications}
+        isOutOfLaw={isOutOfLaw}
+        isTopologyUnlinked={isTopologyUnlinked}
+      />
+    </div>
+    {nPanel ? <div className="map-marker-label">{nPanel}</div> : null}
+    {groupCount > 1 ? <div className="map-marker-group">x{groupCount}</div> : null}
+  </div>
+)
 
 const groupDifferenteMarkers = (markers) => {
   const differenteRegex = /^differente/i
@@ -327,9 +424,15 @@ const createMarkers = async (
   } = options
   const markersForRender = skipGrouping ? markers : groupDifferenteMarkers(markers)
 
+  const markerById = new Map(
+    markersForRender
+      .map((marker) => [toIdString(marker?._id), marker])
+      .filter(([id]) => Boolean(id)),
+  )
+
   // Usa la mappa colori passata dal parent (dataset completo) oppure calcolala sul batch
   const colorMappings =
-    colorMappingsOverride || generateLegendColorMap(markersForRender, highlightOption)
+    colorMappingsOverride || generateLegendColorMap(markersForRender, highlightOption, markerById)
   
   const newMarkers = []
 
@@ -351,6 +454,9 @@ const createMarkers = async (
     const safeLng = parseCoord(marker.lng)
     const position = new window.google.maps.LatLng(safeLat, safeLng)
     const hasActiveNotifications = marker.segnalazioni_in_corso && marker.segnalazioni_in_corso.length > 0
+    const badgeInfo = getReportBadgeInfo(marker.segnalazioni_in_corso)
+    const reportBadgeType = badgeInfo.type
+    const dueUrgency = badgeInfo.dueUrgency || "none"
     const isOutOfLaw =
       marker.segnalazioni_in_corso &&
       marker.segnalazioni_in_corso.some((report) => {
@@ -370,8 +476,9 @@ const createMarkers = async (
     if (highlightOption === "") {
       markerColor = hasActiveNotifications ? "#FFCC00" : DEFAULT_COLOR
     } else if (highlightOption === "MARKER") {
-      if (marker.quadro && colorMappings.quadro[marker.quadro]) {
-        markerColor = colorMappings.quadro[marker.quadro]
+      const quadro = getEffectiveQuadro(marker, markerById)
+      if (quadro && colorMappings.quadro[quadro]) {
+        markerColor = colorMappings.quadro[quadro]
       }
     } else if (highlightOption === "PROPRIETA") {
       const prop = marker.proprieta ? marker.proprieta.trim().toLowerCase() : ""
@@ -401,7 +508,7 @@ const createMarkers = async (
         markerColor = colorMappings.tipo_apparecchio[tipoApparecchio];
       }
     }
-    if (isFcQuadro(marker.quadro)) {
+    if (isFcQuadro(marker.quadro) || isFcQuadro(getEffectiveQuadro(marker, markerById))) {
       markerColor = FC_QUADRO_COLOR
     }
 
@@ -420,7 +527,9 @@ const createMarkers = async (
           isOutOfLaw={isOutOfLaw}
           nPanel={marker.numero_palo}
           showPanelNumber={showPanelNumber}
-        />, 
+          reportBadgeType={reportBadgeType}
+          dueUrgency={dueUrgency}
+        />,
       )
     } else {
       customRoot.render(
@@ -431,6 +540,8 @@ const createMarkers = async (
           nPanel={showStreetLampNumber ? marker.numero_palo : undefined}
           groupCount={marker.differente_group_count || 0}
           isTopologyUnlinked={isTopologyUnlinked}
+          reportBadgeType={reportBadgeType}
+          dueUrgency={dueUrgency}
         />, 
       )
     }
@@ -565,6 +676,9 @@ const updateMarkerColors = (
 
     let markerColor = DEFAULT_COLOR
     const hasActiveNotifications = data.segnalazioni_in_corso && data.segnalazioni_in_corso.length > 0
+    const badgeInfo = getReportBadgeInfo(data.segnalazioni_in_corso)
+    const reportBadgeType = badgeInfo.type
+    const dueUrgency = badgeInfo.dueUrgency || "none"
     const isOutOfLaw =
       data.segnalazioni_in_corso &&
       data.segnalazioni_in_corso.some((report) => {
@@ -626,6 +740,8 @@ const updateMarkerColors = (
           isOutOfLaw={isOutOfLaw}
           nPanel={data.numero_palo}
           showPanelNumber={showPanelNumber}
+          reportBadgeType={reportBadgeType}
+          dueUrgency={dueUrgency}
         />
       )
     } else {
@@ -637,6 +753,8 @@ const updateMarkerColors = (
           nPanel={showStreetLampNumber ? data.numero_palo : undefined}
           groupCount={data.differente_group_count || 0}
           isTopologyUnlinked={isTopologyUnlinked}
+          reportBadgeType={reportBadgeType}
+          dueUrgency={dueUrgency}
         />
       )
     }
@@ -748,9 +866,16 @@ const setupMarkerClustering = async (
 }
 
 // New: funzione per generare la mappa colori coordinata
-function generateLegendColorMap(markers, highlightOption) {
+function generateLegendColorMap(markers, highlightOption, byIdInput = null) {
   let colorMappings = { quadro: {}, proprieta: {}, lotto: {}, tipo_lampada: {}, tipo_apparecchio: {} }
   let uniqueValues = []
+  const byId =
+    byIdInput ||
+    new Map(
+      (markers || [])
+        .map((marker) => [toIdString(marker?._id), marker])
+        .filter(([id]) => Boolean(id)),
+    )
   
   if (highlightOption === "PROPRIETA") {
     uniqueValues = Array.from(new Set(markers.map(marker => marker.proprieta).filter(Boolean)))
@@ -760,7 +885,13 @@ function generateLegendColorMap(markers, highlightOption) {
       colorMappings.proprieta[val] = colorList[idx]
     })
   } else if (highlightOption === "MARKER") {
-    uniqueValues = Array.from(new Set(markers.map(marker => marker.quadro).filter(Boolean)))
+    uniqueValues = Array.from(
+      new Set(
+        markers
+          .map((marker) => getEffectiveQuadro(marker, byId))
+          .filter(Boolean),
+      ),
+    )
     const colorList = getColorList(uniqueValues.length)
     uniqueValues.forEach((val, idx) => {
       colorMappings.quadro[val] = colorList[idx]

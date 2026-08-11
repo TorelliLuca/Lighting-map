@@ -162,7 +162,6 @@ const EditLightPointModal = ({
     "quadro",
     "proprieta",
     "tipo_apparecchio",
-    "armatura",
     "marca_apparecchio",
     "modello_apparecchio",
     "numero_apparecchi",
@@ -489,6 +488,7 @@ const EditLightPointModal = ({
         "lampada_potenza",
         "modello",
         "modello_armatura",
+        "armatura",
         "lampada_e_potenza",
       ].includes(key)
     ) {

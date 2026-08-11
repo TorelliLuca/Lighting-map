@@ -440,11 +440,63 @@ const MapLibreMap = forwardRef(({
       id: "reported-symbol",
       type: "symbol",
       source: "markers",
-      filter: ["all", ["!", ["has", "point_count"]], [">=", ["get", "segnalazioni_in_corso_length"], 1]],
+      filter: ["all", ["!", ["has", "point_count"]], [">=", ["get", "segnalazioni_in_corso_length"], 1], ["!=", ["get", "has_ordinary_report"], true], ["!=", ["get", "has_extraordinary_report"], true]],
       layout: {
         "icon-image": "pulsing-dot",
         "icon-size": 0.5,
         "icon-allow-overlap": true
+      }
+    });
+
+    if (mapRef.current.getLayer('reported-ordinary-triangle')) {
+      mapRef.current.removeLayer('reported-ordinary-triangle');
+    }
+    // Triangolo ordinario: stesso canvas animato del pulsing-dot
+    mapRef.current.addLayer({
+      id: "reported-ordinary-triangle",
+      type: "symbol",
+      source: "markers",
+      filter: ["all", ["!", ["has", "point_count"]], ["==", ["get", "has_ordinary_report"], true]],
+      layout: {
+        "icon-image": "pulsing-dot",
+        "icon-size": 0.55,
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
+      }
+    });
+
+    const pentagonColors = {
+      overdue: '#EF4444',
+      soon: '#F97316',
+      ok: '#E11D48',
+      none: '#E11D48',
+    };
+    Object.entries(pentagonColors).forEach(([key, color]) => {
+      const imageId = `report-pentagon-pulse-${key}`;
+      if (map && typeof map.hasImage === 'function' && !map.hasImage(imageId)) {
+        map.addImage(imageId, createPulsingPentagon(color, map), { pixelRatio: 2 });
+      }
+    });
+    if (mapRef.current.getLayer('reported-extraordinary-pentagon')) {
+      mapRef.current.removeLayer('reported-extraordinary-pentagon');
+    }
+    mapRef.current.addLayer({
+      id: "reported-extraordinary-pentagon",
+      type: "symbol",
+      source: "markers",
+      filter: ["all", ["!", ["has", "point_count"]], ["==", ["get", "has_extraordinary_report"], true]],
+      layout: {
+        "icon-image": [
+          "match",
+          ["get", "due_urgency"],
+          "overdue", "report-pentagon-pulse-overdue",
+          "soon", "report-pentagon-pulse-soon",
+          "ok", "report-pentagon-pulse-ok",
+          "report-pentagon-pulse-none",
+        ],
+        "icon-size": 0.55,
+        "icon-allow-overlap": true,
+        "icon-ignore-placement": true,
       }
     });
     if (mapRef.current && typeof mapRef.current.getLayer === 'function' && mapRef.current.getLayer("clusters-pulse-bg")) mapRef.current.removeLayer("clusters-pulse-bg");
@@ -837,6 +889,107 @@ const MapLibreMap = forwardRef(({
     return ctx.getImageData(0, 0, size, size);
   }
 
+  function createPentagonImage(color, size = 36) {
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, size, size);
+    const cx = size / 2;
+    const cy = size / 2;
+    const r = size / 2 - 3;
+    ctx.beginPath();
+    for (let i = 0; i < 5; i++) {
+      const angle = -Math.PI / 2 + (i * 2 * Math.PI) / 5;
+      const x = cx + r * Math.cos(angle);
+      const y = cy + r * Math.sin(angle);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    return ctx.getImageData(0, 0, size, size);
+  }
+
+  /** Pentagono animato (stesso pattern del triangolo pulsing-dot). */
+  function createPulsingPentagon(color, mapInstance, size = 140) {
+    const hexToRgba = (hex, alpha) => {
+      const raw = String(hex || '#E11D48').replace('#', '');
+      const full = raw.length === 3
+        ? raw.split('').map((c) => c + c).join('')
+        : raw.padEnd(6, '0').slice(0, 6);
+      const n = Number.parseInt(full, 16);
+      const r = (n >> 16) & 255;
+      const g = (n >> 8) & 255;
+      const b = n & 255;
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    };
+
+    const drawPentagonPath = (ctx, radius) => {
+      ctx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const angle = -Math.PI / 2 + (i * 2 * Math.PI) / 5;
+        const x = Math.cos(angle) * radius;
+        const y = Math.sin(angle) * radius;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+    };
+
+    return {
+      width: size,
+      height: size,
+      data: new Uint8Array(size * size * 4),
+      onAdd() {
+        const canvas = document.createElement('canvas');
+        canvas.width = this.width;
+        canvas.height = this.height;
+        this.context = canvas.getContext('2d');
+      },
+      render() {
+        const duration = 1000;
+        const t = (performance.now() % duration) / duration;
+        const baseRadius = (size / 2) * 0.22;
+        const outerRadius = (size / 2) * (0.6 * t + 0.4);
+        const context = this.context;
+        context.clearRect(0, 0, this.width, this.height);
+
+        context.save();
+        context.translate(this.width / 2, this.height / 2);
+        drawPentagonPath(context, outerRadius);
+        context.globalAlpha = 0.35 * (1 - t) + 0.15;
+        context.fillStyle = hexToRgba(color, 1);
+        context.shadowColor = hexToRgba(color, 0.7);
+        context.shadowBlur = 30;
+        context.fill();
+        context.shadowBlur = 0;
+        context.globalAlpha = 1;
+        context.restore();
+
+        context.save();
+        context.translate(this.width / 2, this.height / 2);
+        drawPentagonPath(context, baseRadius * 1.5);
+        context.fillStyle = color;
+        context.strokeStyle = '#fff';
+        context.lineWidth = 6;
+        context.fill();
+        context.stroke();
+        context.restore();
+
+        this.data = context.getImageData(0, 0, this.width, this.height).data;
+        if (mapInstance && typeof mapInstance.triggerRepaint === 'function') {
+          mapInstance.triggerRepaint();
+        }
+        return true;
+      },
+    };
+  }
+
   const isDifferenteGroupFilter = [
     'any',
     ['==', ['get', 'is_differente_group'], true],
@@ -1006,6 +1159,24 @@ const MapLibreMap = forwardRef(({
         }
       });
     };
+  }, [geojsonData, mapLoaded, editingMarkerId, isSatellite]);
+
+  // Badge segnalazioni sopra i marker (i layer PL/QE vengono creati dopo)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!isMapActive.current || !map || !mapLoaded) return;
+    if (typeof map.getLayer !== 'function' || typeof map.moveLayer !== 'function') return;
+
+    const badgeLayers = [
+      'reported-symbol',
+      'reported-ordinary-triangle',
+      'reported-extraordinary-pentagon',
+    ];
+    badgeLayers.forEach((layerId) => {
+      if (map.getLayer(layerId)) {
+        try { map.moveLayer(layerId); } catch { /* ignore */ }
+      }
+    });
   }, [geojsonData, mapLoaded, editingMarkerId, isSatellite]);
 
 
@@ -1223,11 +1394,36 @@ const MapLibreMap = forwardRef(({
     }
   }, [onBeforeReportCleanupTrigger]);
 
+  const getBorderLabelPoint = (geometry) => {
+    if (!geometry?.coordinates) return null;
+
+    // Polygon: coordinates[0] = anello esterno; MultiPolygon: coordinates[0][0]
+    const outerRing =
+      geometry.type === 'MultiPolygon'
+        ? geometry.coordinates?.[0]?.[0]
+        : geometry.coordinates?.[0];
+
+    if (!Array.isArray(outerRing) || outerRing.length === 0) return null;
+
+    let lngSum = 0;
+    let latSum = 0;
+    let count = 0;
+    for (const point of outerRing) {
+      if (!Array.isArray(point) || point.length < 2) continue;
+      lngSum += point[0];
+      latSum += point[1];
+      count += 1;
+    }
+    if (count === 0) return null;
+    return [lngSum / count, latSum / count];
+  };
+
   const addBordersToMap = (borderData) => {
   const map = mapRef.current;
   if (!map || !borderData) return;
 
   const sourceId = 'municipality-borders';
+  const labelSourceId = 'municipality-borders-label-point';
   const layerId = 'municipality-borders-layer';
   const labelLayerId = 'municipality-borders-label';
   const fillLayerId = 'municipality-borders-fill';
@@ -1236,6 +1432,7 @@ const MapLibreMap = forwardRef(({
   if (map.getLayer(labelLayerId)) map.removeLayer(labelLayerId);
   if (map.getLayer(layerId)) map.removeLayer(layerId);
   if (map.getLayer(fillLayerId)) map.removeLayer(fillLayerId);
+  if (map.getSource(labelSourceId)) map.removeSource(labelSourceId);
   if (map.getSource(sourceId)) map.removeSource(sourceId);
 
 
@@ -1274,14 +1471,28 @@ const MapLibreMap = forwardRef(({
       'fill-opacity': 0.1 // Molto trasparente
     }
   }, layerId); // Inserito sotto il layer del contorno
-  // Layer opzionale per il nome del comune
-  if (borderData.properties && borderData.properties.comune) {
+  // Una sola etichetta sul centroide: etichettare il poligono ripete il testo su più tile
+  const comuneName = borderData.properties?.comune;
+  const labelPoint = comuneName ? getBorderLabelPoint(borderData.geometry) : null;
+  if (comuneName && labelPoint) {
+    map.addSource(labelSourceId, {
+      type: 'geojson',
+      data: {
+        type: 'Feature',
+        properties: { comune: comuneName },
+        geometry: {
+          type: 'Point',
+          coordinates: labelPoint,
+        },
+      },
+    });
+
     map.addLayer({
       id: labelLayerId,
       type: 'symbol',
-      source: sourceId,
+      source: labelSourceId,
       layout: {
-        'text-field': borderData.properties.comune,
+        'text-field': ['get', 'comune'],
         'text-font': ['DIN Offc Pro Medium', 'Arial Unicode MS Bold'],
         'text-size': [
           'interpolate',
@@ -1291,7 +1502,8 @@ const MapLibreMap = forwardRef(({
           15, 18  // zoom 15 = size 18
         ],
         'text-anchor': 'center',
-        'text-allow-overlap': false,
+        'text-allow-overlap': true,
+        'text-ignore-placement': true,
         'symbol-placement': 'point'
       },
       paint: {
@@ -1305,22 +1517,49 @@ const MapLibreMap = forwardRef(({
 };
 
   useEffect(() => {
+  let cancelled = false
+
+  const removeBordersFromMap = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    const sourceId = 'municipality-borders';
+    const labelSourceId = 'municipality-borders-label-point';
+    const layerId = 'municipality-borders-layer';
+    const labelLayerId = 'municipality-borders-label';
+    const fillLayerId = 'municipality-borders-fill';
+    try {
+      if (map.getLayer(labelLayerId)) map.removeLayer(labelLayerId);
+      if (map.getLayer(layerId)) map.removeLayer(layerId);
+      if (map.getLayer(fillLayerId)) map.removeLayer(fillLayerId);
+      if (map.getSource(labelSourceId)) map.removeSource(labelSourceId);
+      if (map.getSource(sourceId)) map.removeSource(sourceId);
+    } catch {
+      /* ignore */
+    }
+  };
+
   const fetchTownhallsBorders = async () => {
     if (!selectedCity || !mapLoaded) return;
     
     try {
-      // Assumendo che istat_id sia disponibile dalle props o dal context
-      const response = await api.get(`/borders/townhall-name/${selectedCity}`); 
-      
+      const response = await api.get(`/borders/townhall-name/${selectedCity}`);
+      if (cancelled) return;
+
       if (response.data && response.data.geometry) {
         addBordersToMap(response.data);
       }
     } catch (error) {
+      if (cancelled) return;
       console.error('Errore nel caricamento dei confini comunali:', error);
     }
   };
 
   fetchTownhallsBorders();
+
+  return () => {
+    cancelled = true;
+    removeBordersFromMap();
+  };
 }, [selectedCity, mapLoaded, isSatellite]);
 
   // Linee topologiche (sempre tutte; niente filtro viewport/cluster)
@@ -1741,6 +1980,8 @@ useEffect(() => {
       "unclustered-point-pl-diff",
       "unclustered-point-qe",
       "reported-symbol",
+      "reported-ordinary-triangle",
+      "reported-extraordinary-pentagon",
     ].filter((layerId) => map.getLayer(layerId));
 
     const pickMarkerAtPoint = (point) => {

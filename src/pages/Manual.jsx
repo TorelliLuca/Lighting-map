@@ -269,7 +269,6 @@ const MANUAL_SECTIONS = [
           "Quadro — quadro elettrico di appartenenza (es. PC04)",
           "Proprietà — es. Municipale",
           "Tipo apparecchio — es. Lanterna, Stradale, Decorativo, Lampara, Proiettore",
-          "Armatura — tipo di armatura",
           "Marca apparecchio — marca dell’apparecchio",
           "Modello apparecchio — modello specifico dell’apparecchio",
           "Numero apparecchi — quanti apparecchi sono montati sul palo",
@@ -615,7 +614,7 @@ const Manual = () => {
         )}
         <aside
           className={`shrink-0 overflow-hidden border-r border-blue-500/30 transition-all duration-200
-            fixed left-0 top-14 z-20 h-[calc(100vh-3.5rem)] w-72 overflow-y-auto bg-black/90
+            fixed left-0 top-14 z-20 h-[calc(100vh-3.5rem)] w-72 overflow-y-auto scrollbar-app bg-black/90
             lg:sticky lg:top-14 lg:z-0 lg:h-[calc(100vh-3.5rem)] lg:translate-x-0 lg:bg-transparent
             ${isSidebarOpen ? "translate-x-0 lg:w-72" : "-translate-x-full lg:w-0 lg:border-r-0"}
           `}

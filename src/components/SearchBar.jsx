@@ -85,6 +85,7 @@ export default function SearchBar({
 
   return (
     <div
+      data-tour="search-bar"
       className={`w-full max-w-md mx-auto sticky top-0 z-[9999] ${disabled ? "opacity-50" : ""}`}
       title={disabled ? "Disponibile al termine del caricamento" : undefined}
     >

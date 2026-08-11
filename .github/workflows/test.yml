@@ -1,0 +1,67 @@
+name: Test
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+
+jobs:
+  unit:
+    name: Vitest unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run test:unit
+
+  e2e:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    # Parte solo se i secrets E2E sono configurati nel repository.
+    if: ${{ secrets.E2E_EMAIL != '' && secrets.E2E_PASSWORD != '' }}
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Write .env.e2e
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ secrets.PLAYWRIGHT_BASE_URL }}
+          E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+          E2E_APPROVAL_EXPECTATION: ${{ secrets.E2E_APPROVAL_EXPECTATION }}
+          E2E_MAINTAINER_EMAIL: ${{ secrets.E2E_MAINTAINER_EMAIL }}
+          E2E_MAINTAINER_PASSWORD: ${{ secrets.E2E_MAINTAINER_PASSWORD }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+          E2E_API_URL: ${{ secrets.E2E_API_URL }}
+        run: |
+          {
+            echo "PLAYWRIGHT_BASE_URL=${PLAYWRIGHT_BASE_URL:-http://localhost:5174/LIGHTING-MAP/}"
+            echo "E2E_EMAIL=${E2E_EMAIL}"
+            echo "E2E_PASSWORD=${E2E_PASSWORD}"
+            echo "E2E_APPROVAL_EXPECTATION=${E2E_APPROVAL_EXPECTATION}"
+            echo "E2E_MAINTAINER_EMAIL=${E2E_MAINTAINER_EMAIL}"
+            echo "E2E_MAINTAINER_PASSWORD=${E2E_MAINTAINER_PASSWORD}"
+            echo "E2E_ADMIN_EMAIL=${E2E_ADMIN_EMAIL}"
+            echo "E2E_ADMIN_PASSWORD=${E2E_ADMIN_PASSWORD}"
+            echo "E2E_API_URL=${E2E_API_URL:-http://localhost:3000}"
+          } > .env.e2e
+      - name: Run E2E
+        run: npm run test:e2e
+        env:
+          CI: true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

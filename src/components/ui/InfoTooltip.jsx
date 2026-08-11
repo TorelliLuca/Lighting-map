@@ -57,10 +57,22 @@ export default function InfoTooltip({ text, className = "" }) {
     }
   }, [open])
 
+  function handleTriggerClick(e) {
+    e.stopPropagation()
+    setOpen((v) => !v)
+  }
+
   // Gestione focus tastiera (accessibilità)
   function handleKeyDown(e) {
-    if (e.key === "Escape") setOpen(false)
-    if ((e.key === "Enter" || e.key === " ") && !open) setOpen(true)
+    e.stopPropagation()
+    if (e.key === "Escape") {
+      e.preventDefault()
+      setOpen(false)
+    }
+    if ((e.key === "Enter" || e.key === " ") && !open) {
+      e.preventDefault()
+      setOpen(true)
+    }
   }
 
   // Tooltip glass dark/blue style, posizionato fixed a destra dell'icona
@@ -93,20 +105,23 @@ export default function InfoTooltip({ text, className = "" }) {
   }
 
   return (
-    <span className={`flex relative bottom-1 ${className} `} >
-      <button
+    <span
+      className={`inline-flex relative bottom-1 ${className}`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <span
         ref={iconRef}
-        type="button"
+        role="button"
         aria-label="Mostra informazioni"
         aria-expanded={open}
         tabIndex={0}
-        className="ml-3 p-0 rounded-full focus:ring-2 focus:ring-blue-400 focus:outline-none border-none bg-transparent text-blue-400 hover:text-blue-200 transition-colors self-center"
-        onClick={() => setOpen((v) => !v)}
+        className="ml-3 p-0 rounded-full focus:ring-2 focus:ring-blue-400 focus:outline-none border-none bg-transparent text-blue-400 hover:text-blue-200 transition-colors self-center cursor-pointer"
+        onClick={handleTriggerClick}
         onKeyDown={handleKeyDown}
-        style={{ background: "none", verticalAlign: 'middle' }}
+        style={{ background: "none", verticalAlign: "middle" }}
       >
         <Info className="h-4 w-4 align-middle" />
-      </button>
+      </span>
       {open && <TooltipBubble />}
     </span>
   )

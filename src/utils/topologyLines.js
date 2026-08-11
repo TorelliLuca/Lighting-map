@@ -19,6 +19,11 @@ export function toIdString(id) {
   return String(id)
 }
 
+/** True se il nodo ha un genitore topologico (ObjectId o oggetto popolato). */
+export function hasTopologyParent(marker) {
+  return Boolean(toIdString(marker?.parent))
+}
+
 /**
  * Membri reali di un gruppo "differente" aggregato sulla mappa.
  */
@@ -154,6 +159,50 @@ export function resolveConnectedQuadroLabel(marker, byId) {
 }
 
 /**
+ * Quadro effettivo per colorazione: catena parent→QE se presente, altrimenti campo `quadro`.
+ */
+export function getEffectiveQuadro(marker, byId) {
+  if (!marker) return ''
+  if (marker.marker === 'QE') {
+    return marker.quadro != null ? String(marker.quadro).trim() : ''
+  }
+  const connected = resolveConnectedQuadroLabel(marker, byId)
+  if (connected) return connected
+  return marker.quadro != null ? String(marker.quadro).trim() : ''
+}
+
+/**
+ * Propaga `quadro` ai PL la cui catena parent arriva a un QE (post-collegamento locale).
+ */
+export function syncQuadroFromTopologyChain(markers = []) {
+  const byId = new Map()
+  for (const m of markers) {
+    const id = toIdString(m?._id)
+    if (id) byId.set(id, m)
+  }
+
+  return markers.map((m) => {
+    if (!m || m.marker === 'QE') return m
+    const effective = getEffectiveQuadro(m, byId)
+    if (!effective) return m
+    const prev = m.quadro != null ? String(m.quadro).trim() : ''
+    if (prev === effective) return m
+    return { ...m, quadro: effective }
+  })
+}
+
+/** Unisce aggiornamenti topologia per _id (ultimo vince). */
+export function mergeTopologyUpdates(updates = []) {
+  const byId = new Map()
+  for (const u of updates) {
+    const id = toIdString(u?._id)
+    if (!id) continue
+    byId.set(id, { ...byId.get(id), ...u, _id: id })
+  }
+  return [...byId.values()]
+}
+
+/**
  * FeatureCollection di LineString parent → child.
  * @param {Array} markers lista piatta di punti (con _id, parent, lat, lng, quadro, tipo_linea)
  * @param {{ quadroColors?: Record<string,string> }} [options]
@@ -165,7 +214,11 @@ export function buildTopologyLineFeatures(markers = [], options = {}) {
     if (id) byId.set(id, m)
   }
 
-  const quadroColors = buildQuadroColorMap(markers, options.quadroColors || null)
+  const markersForPalette = markers.map((m) => {
+    const effective = getEffectiveQuadro(m, byId)
+    return effective ? { ...m, quadro: effective } : m
+  })
+  const quadroColors = buildQuadroColorMap(markersForPalette, options.quadroColors || null)
 
   const features = []
   for (const m of markers) {

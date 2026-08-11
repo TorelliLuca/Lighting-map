@@ -1,8 +1,16 @@
 "use client"
 
-import { createContext, useState, useEffect, useContext, useCallback } from "react"
+import { createContext, useState, useEffect, useContext, useCallback, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import axios from "axios"
+import {
+  readStoredAuth,
+  persistAuthToken,
+  persistUserData,
+  clearStoredAuth,
+  isTokenExpiringSoon,
+  shouldAttemptTokenRefresh,
+} from "../utils/authStorage"
 
 // Create a custom axios instance with default config
 export const api = axios.create({
@@ -13,108 +21,198 @@ export const UserContext = createContext()
 
 export const useUser = () => useContext(UserContext)
 
+const REFRESH_TOKEN_PATH = "/users/refresh-token"
+
+const authTokenRef = { current: null }
+const refreshAuthRef = { current: async () => false }
+
+const getActiveAuthToken = () => authTokenRef.current ?? readStoredAuth().token
+
+api.interceptors.request.use(
+  (config) => {
+    if (!config._skipAuthRefresh) {
+      const currentToken = getActiveAuthToken()
+      if (currentToken) {
+        config.headers.Authorization = `Bearer ${currentToken}`
+      }
+    }
+    return config
+  },
+  (error) => Promise.reject(error),
+)
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config
+
+    if (
+      !originalRequest ||
+      originalRequest._skipAuthRefresh ||
+      originalRequest.url?.includes(REFRESH_TOKEN_PATH)
+    ) {
+      return Promise.reject(error)
+    }
+
+    const status = error.response?.status
+    if (shouldAttemptTokenRefresh(status) && !originalRequest._retry) {
+      originalRequest._retry = true
+
+      const refreshed = await refreshAuthRef.current(getActiveAuthToken())
+      if (refreshed) {
+        const latestToken = getActiveAuthToken()
+        originalRequest.headers.Authorization = `Bearer ${latestToken}`
+        return api(originalRequest)
+      }
+    }
+
+    return Promise.reject(error)
+  },
+)
+
 export const UserProvider = ({ children }) => {
   const [userData, setUserData] = useState(null)
   const [token, setToken] = useState(null)
+  const [rememberMe, setRememberMe] = useState(true)
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
+  const refreshPromiseRef = useRef(null)
 
-  // Initialize from localStorage on component mount
+  const updateToken = useCallback((newToken, persistRememberMe = rememberMe) => {
+    authTokenRef.current = newToken
+    setToken(newToken)
+    persistAuthToken(newToken, persistRememberMe)
+  }, [rememberMe])
+
+  const updateUserData = useCallback((data, persistRememberMe = rememberMe) => {
+    setUserData(data)
+    persistUserData(data, persistRememberMe)
+  }, [rememberMe])
+
+  const updatePreferences = useCallback(async (partial) => {
+    try {
+      const response = await api.post("/users/me/preferences", partial)
+      const preferences = response.data?.preferences
+      if (!preferences) return null
+
+      setUserData((prev) => {
+        if (!prev) return prev
+        const next = { ...prev, preferences }
+        persistUserData(next, rememberMe)
+        return next
+      })
+      return preferences
+    } catch (error) {
+      console.error("Failed to update preferences:", error)
+      throw error
+    }
+  }, [rememberMe])
+
+  const clearToken = useCallback(() => {
+    authTokenRef.current = null
+    setToken(null)
+  }, [])
+
+  const clearUserData = useCallback(() => {
+    setUserData(null)
+  }, [])
+
+  const logout = useCallback(() => {
+    clearUserData()
+    clearToken()
+    clearStoredAuth()
+    setRememberMe(true)
+    navigate("/login")
+  }, [navigate, clearToken, clearUserData])
+
+  const refreshToken = useCallback(async (currentToken = token) => {
+    if (!currentToken) return false
+
+    if (refreshPromiseRef.current) {
+      return refreshPromiseRef.current
+    }
+
+    refreshPromiseRef.current = (async () => {
+      try {
+        const response = await api.post(REFRESH_TOKEN_PATH, null, {
+          headers: { Authorization: `Bearer ${currentToken}` },
+          _skipAuthRefresh: true,
+        })
+        updateToken(response.data.token)
+        return true
+      } catch (error) {
+        console.error("Failed to refresh token:", error)
+        logout()
+        return false
+      } finally {
+        refreshPromiseRef.current = null
+      }
+    })()
+
+    return refreshPromiseRef.current
+  }, [token, updateToken, logout])
+
   useEffect(() => {
-    const storedUserData = localStorage.getItem("userData")
-    const storedToken = localStorage.getItem("token")
-    
-    if (storedUserData) {
-      setUserData(JSON.parse(storedUserData))
+    refreshAuthRef.current = refreshToken
+  }, [refreshToken])
+
+  const checkTokenExpiration = useCallback(() => {
+    if (!token) return false
+
+    try {
+      if (isTokenExpiringSoon(token)) {
+        refreshToken(token)
+        return true
+      }
+      return false
+    } catch (error) {
+      console.error("Error checking token expiration:", error)
+      logout()
+      return false
     }
-    
-    if (storedToken) {
-      setToken(storedToken)
+  }, [token, refreshToken, logout])
+
+  // Initialize from storage on component mount
+  useEffect(() => {
+    const storedAuth = readStoredAuth()
+
+    if (storedAuth.userData) {
+      try {
+        setUserData(JSON.parse(storedAuth.userData))
+      } catch (error) {
+        console.error("Stored user data is invalid:", error)
+        clearStoredAuth()
+      }
     }
-    
+
+    if (storedAuth.token) {
+      authTokenRef.current = storedAuth.token
+      setToken(storedAuth.token)
+    }
+
+    setRememberMe(storedAuth.rememberMe)
     setLoading(false)
   }, [])
 
-  // Set up axios interceptors for JWT handling
-  useEffect(() => {
-    // Request interceptor to add token to all requests
-    const requestInterceptor = api.interceptors.request.use(
-      config => {
-        if (token) {
-          config.headers["Authorization"] = `Bearer ${token}`
-        }
-        return config
-      },
-      error => Promise.reject(error)
-    )
-
-    // Response interceptor to handle token expiration
-    const responseInterceptor = api.interceptors.response.use(
-      response => response,
-      async error => {
-        const originalRequest = error.config
-        
-        // If the error is 401 and we haven't tried to refresh yet
-        if (error.response?.status === 401 && !originalRequest._retry) {
-          originalRequest._retry = true
-          
-          try {
-            // Try to refresh the token
-            const response = await api.post("/refresh-token")
-            const newToken = response.data.token
-            
-            // Update token in state and localStorage
-            updateToken(newToken)
-            // Retry the original request with new token
-            originalRequest.headers["Authorization"] = `Bearer ${newToken}`
-            return api(originalRequest)
-          } catch (refreshError) {
-            // If refresh fails, log the user out
-            logout()
-            return Promise.reject(refreshError)
-          }
-        }
-        
-        return Promise.reject(error)
-      }
-    )
-
-    // Clean up interceptors on unmount
-    return () => {
-      api.interceptors.request.eject(requestInterceptor)
-      api.interceptors.response.eject(responseInterceptor)
-    }
-  }, [token]) // Re-run when token changes
-
-  // Login function
-  const login = async (email, password) => {
+  const login = async (email, password, stayLoggedIn = true) => {
     try {
-      const response = await api.post(`/login`, { email, password })
+      const response = await api.post(`/login`, { email, password, rememberMe: stayLoggedIn })
       const { user, token: newToken } = response.data
-      
-      updateUserData(user)
-      updateToken(newToken)
-      
+
+      setRememberMe(stayLoggedIn)
+      updateUserData(user, stayLoggedIn)
+      updateToken(newToken, stayLoggedIn)
+
       return user
     } catch (error) {
       console.error("Login failed:", error)
       throw error
     }
   }
+
   const forgotPassword = async (email) => {
     try {
       const response = await api.post(`/forgot-password`, { email })
-
-      return response
-    } catch (error) {
-      console.error("Reset password failed:", error)
-      throw error
-    }
-  }
-  const resetPassword = async (password, token) => {
-    try {
-      const response = await api.post(`/reset-password`, { password, token })
-
       return response
     } catch (error) {
       console.error("Reset password failed:", error)
@@ -122,116 +220,52 @@ export const UserProvider = ({ children }) => {
     }
   }
 
-  // Register function
-  const register = async (userData) => {
+  const resetPassword = async (password, resetToken) => {
     try {
-      await api.post("/addPendingUser", userData)
+      const response = await api.post(`/reset-password`, { password, token: resetToken })
+      return response
+    } catch (error) {
+      console.error("Reset password failed:", error)
+      throw error
+    }
+  }
+
+  const register = async (registrationData) => {
+    try {
+      await api.post("/addPendingUser", registrationData)
     } catch (error) {
       console.error("Registration failed:", error)
       throw error
     }
   }
 
-  // Get user profile data using token
   const fetchUserProfile = useCallback(async () => {
     if (!token) return null
-    
+
     try {
-      const response = await api.get(`/profile`)
+      const response = await api.get(`/users/profile`)
       updateUserData(response.data.user)
       return response.data.user
     } catch (error) {
       console.error("Failed to fetch user profile:", error)
-      if (error.response?.status === 401) {
+      if (shouldAttemptTokenRefresh(error.response?.status)) {
         logout()
       }
       return null
     }
-  }, [token])
-
-  // Logout function
-  const logout = useCallback(() => {
-    clearUserData()
-    clearToken()
-    navigate("/login") // Use React Router's navigate
-  }, [navigate])
-
-  // Update token helper
-  const updateToken = (newToken) => {
-    setToken(newToken)
-    localStorage.setItem("token", newToken)
-  }
-
-  // Clear token helper
-  const clearToken = () => {
-    setToken(null)
-    localStorage.removeItem("token")
-  }
-
-  // User data helpers
-  const updateUserData = (data) => {
-    setUserData(data)
-    localStorage.setItem("userData", JSON.stringify(data))
-  }
-
-  const clearUserData = () => {
-    setUserData(null)
-    localStorage.removeItem("userData")
-  }
-
-  // Check if token is about to expire and refresh if needed
-  const checkTokenExpiration = useCallback(() => {
-    if (!token) return false
-    
-    try {
-      // JWT tokens are in format: header.payload.signature
-      const payload = token.split('.')[1]
-      const decodedPayload = JSON.parse(atob(payload))
-      const expirationTime = decodedPayload.exp * 1000 // Convert to milliseconds
-      const currentTime = Date.now()
-      
-      // If token expires in less than 5 minutes (300000 ms), refresh it
-      if (expirationTime - currentTime < 300000) {
-        refreshToken()
-        return true
-      }
-      
-      return false
-    } catch (error) {
-      console.error("Error checking token expiration:", error)
-      return false
-    }
-  }, [token])
-
-  // Manually refresh token
-  const refreshToken = async () => {
-    if (!token) return false
-    
-    try {
-      const response = await api.post("/users/refresh-token")
-      const newToken = response.data.token
-      updateToken(newToken)
-      return true
-    } catch (error) {
-      console.error("Failed to refresh token:", error)
-      logout()
-      return false
-    }
-  }
+  }, [token, updateUserData, logout])
 
   useEffect(() => {
-    if (!token) return;
-    
-    // Controlla il token all'avvio
-    checkTokenExpiration();
-    
-    // Imposta un intervallo per controllare periodicamente il token
+    if (!token) return
+
+    checkTokenExpiration()
+
     const tokenCheckInterval = setInterval(() => {
-      checkTokenExpiration();
-    }, 60000); // Controlla ogni minuto
-    
-    return () => clearInterval(tokenCheckInterval);
-  }, [token, checkTokenExpiration]);
+      checkTokenExpiration()
+    }, 60000)
+
+    return () => clearInterval(tokenCheckInterval)
+  }, [token, checkTokenExpiration])
 
   const loadSelectedTownhalls = async (selectedCity) => {
     try {
@@ -408,11 +442,81 @@ export const UserProvider = ({ children }) => {
     }
   }
 
+  const getMaintenanceConfig = async (townHallIdOrName) => {
+    try {
+      const isObjectId = /^[a-f\d]{24}$/i.test(String(townHallIdOrName))
+      const path = isObjectId
+        ? `/api/maintenance-config/${townHallIdOrName}`
+        : `/api/maintenance-config/by-name/${encodeURIComponent(townHallIdOrName)}`
+      const response = await api.get(path)
+      return response
+    } catch (error) {
+      console.error(error)
+      return
+    }
+  }
+
+  const createQuote = async (data) => {
+    const response = await api.post('/api/quotes', data)
+    return response
+  }
+
+  const updateQuote = async (id, data) => {
+    const response = await api.patch(`/api/quotes/${id}`, data)
+    return response
+  }
+
+  const submitQuote = async (id) => {
+    const response = await api.post(`/api/quotes/${id}/submit`)
+    return response
+  }
+
+  const getQuote = async (id) => {
+    const response = await api.get(`/api/quotes/${id}`)
+    return response
+  }
+
+  const listQuotes = async (params = {}) => {
+    const response = await api.get('/api/quotes', { params })
+    return response
+  }
+
+  const approveQuote = async (id) => {
+    const response = await api.post(`/api/quotes/${id}/approve`)
+    return response
+  }
+
+  const rejectQuote = async (id, reason, extra = {}) => {
+    const response = await api.post(`/api/quotes/${id}/reject`, { reason, ...extra })
+    return response
+  }
+
+  const deleteQuote = async (id) => {
+    const response = await api.delete(`/api/quotes/${id}`)
+    return response
+  }
+
+  const createConsuntivo = async (parentQuoteId, data = {}) => {
+    const response = await api.post(`/api/quotes/${parentQuoteId}/consuntivo`, data)
+    return response
+  }
+
+  const finalizeConsuntivo = async (id) => {
+    const response = await api.post(`/api/quotes/${id}/finalize-consuntivo`)
+    return response
+  }
+
+  const getExtraordinaryReports = async (params = {}) => {
+    const response = await api.get('/api/reports/extraordinary', { params })
+    return response
+  }
+
   return (
     <UserContext.Provider 
       value={{ 
         userData, 
         token,
+        rememberMe,
         loading,
         login,
         resetPassword,
@@ -422,6 +526,7 @@ export const UserProvider = ({ children }) => {
         updateUserData,
         clearUserData,
         fetchUserProfile,
+        updatePreferences,
         refreshToken,
         checkTokenExpiration,
         loadSelectedTownhalls,
@@ -432,7 +537,7 @@ export const UserProvider = ({ children }) => {
         addLightPoint,
         deleteLightPoint,
         getAverageResponseTime,
-        getTownhallGeojson, // aggiunto qui
+        getTownhallGeojson,
         getTownhallMeta,
         loadTownhallLightPointsPage,
         getTownhallGeojsonPage,
@@ -440,6 +545,18 @@ export const UserProvider = ({ children }) => {
         getLightpoint,
         addReport,
         getOrganizationByUserId,
+        getMaintenanceConfig,
+        createQuote,
+        updateQuote,
+        submitQuote,
+        getQuote,
+        listQuotes,
+        approveQuote,
+        rejectQuote,
+        deleteQuote,
+        createConsuntivo,
+        finalizeConsuntivo,
+        getExtraordinaryReports,
         confirmEmail,
         isAuthenticated: !!token
       }}
