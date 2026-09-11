@@ -8,13 +8,33 @@ import { useContext } from "react";
 import { UserContext, api } from "../context/UserContext"
 import MapStyleSwitcher from "./MapStyleSwitcher";
 import MapButton from "./MapButton";
-import { LocateFixed } from "lucide-react";
+import { LocateFixed, RefreshCw } from "lucide-react";
+import toast from "react-hot-toast";
 import {
   isMobileInfoWindowViewport,
   getMapLibrePopupPlacement,
 } from "../utils/infoWindowActions";
 import { normalizeLightPointForDisplay } from "../utils/utils";
 import { selectFeatureIdsInPolygon } from "../utils/pointInPolygon";
+
+const COORD_COPY_ROLES = new Set(["SUPER_ADMIN", "SURVEYOR"]);
+
+async function copyLatLngToClipboard(lat, lng) {
+  const text = `${Number(lat)}\t${Number(lng)}`.replaceAll(".", ",");
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand("copy");
+  document.body.removeChild(ta);
+}
 
 
 
@@ -79,6 +99,8 @@ const MapLibreMap = forwardRef(({
   onSetParentClick,
   onClearParentClick,
   getTopologyPower,
+  onRefreshMap,
+  isRefreshing = false,
 }, ref) => {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
@@ -1923,6 +1945,34 @@ useEffect(() => {
     }
   }, [selectedLassoIds, geojsonData, mapLoaded, isSatellite]);
 
+  // Tasto destro: SUPER_ADMIN / SURVEYOR → copia lat, lng (modalità semplice)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapLoaded) return undefined;
+    if (!COORD_COPY_ROLES.has(userData?.user_type)) return undefined;
+
+    const canvas = map.getCanvas();
+    const onContextMenu = async (e) => {
+      e.preventDefault();
+      // In lazo il tasto destro serve al pan: non copiare
+      if (isLassoActive) return;
+      try {
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const { lat, lng } = map.unproject([x, y]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        await copyLatLngToClipboard(lat, lng);
+        toast.success("Coordinate copiate");
+      } catch (_) {
+        /* ignore */
+      }
+    };
+
+    canvas.addEventListener("contextmenu", onContextMenu);
+    return () => canvas.removeEventListener("contextmenu", onContextMenu);
+  }, [mapLoaded, userData?.user_type, isLassoActive]);
+
   // Modalità lazo: disegno, drag, scala/ruota, pan tasto destro
   useEffect(() => {
     const map = mapRef.current;
@@ -2367,8 +2417,17 @@ useEffect(() => {
         isSatellite={isSatellite}
         onModeChange={(mode) => setIsSatellite(mode)}
       />
-      <div className="absolute top-30 right-2 z-2">
+      <div className="absolute top-36 right-2 z-10 flex flex-col gap-2 sm:top-40 sm:right-3">
         <MapButton icon={LocateFixed} onClick={goToUserLocation} title="Vai alla mia posizione" />
+        {typeof onRefreshMap === "function" && (
+          <MapButton
+            icon={RefreshCw}
+            onClick={onRefreshMap}
+            title="Aggiorna mappa"
+            disabled={!selectedCity || isRefreshing}
+            iconClassName={isRefreshing ? "animate-spin" : ""}
+          />
+        )}
       </div>
     </div>
   );

@@ -26,6 +26,7 @@ import SearchBar from "./SearchBar";
 import { api } from "../context/UserContext";
 import { usePushNotifications } from "../context/PushNotificationsContext";
 import { resolveNotificationNavigateTarget } from "../utils/notificationDeepLinks";
+import { syncAppBadge, clearAppBadge } from "../utils/appBadge";
 
 const UNREAD_POLL_MS = 60_000;
 
@@ -144,7 +145,7 @@ const NotificationsPanel = ({
 
   return (
     <div className="flex flex-col max-h-[min(70vh,420px)]">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-blue-500/20 ">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-blue-500/20">
         <button
           type="button"
           onClick={onBack}
@@ -292,8 +293,21 @@ const UserMenu = ({
   useEffect(() => {
     fetchUnreadCount();
     const id = setInterval(fetchUnreadCount, UNREAD_POLL_MS);
-    return () => clearInterval(id);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") fetchUnreadCount();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
   }, [fetchUnreadCount]);
+
+  useEffect(() => {
+    syncAppBadge(unreadCount);
+  }, [unreadCount]);
 
   useEffect(() => {
     if (!isUserMenuOpen) setView("main");
@@ -579,6 +593,7 @@ function Header({
   const [searchHistory, setSearchHistory] = useState([]);
 
   const handleLogout = () => {
+    clearAppBadge();
     logout();
     clearUserData();
     navigate("/");
@@ -692,13 +707,13 @@ function Header({
   const canManageQuotes = canManageQuotesByRole(userData);
 
   return (
-    <header className="top-0 bg-black/40 backdrop-blur-xl border-b border-blue-500/20 shadow-[0_0_15px_rgba(0,149,255,0.15)] p-2 relative z-3">
+    <header className="app-titlebar top-0 bg-black/40 backdrop-blur-xl border-b border-blue-500/20 shadow-[0_0_15px_rgba(0,149,255,0.15)] p-2 relative z-20">
       <div className="container mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-        <div className="flex items-center shrink-0">
+        <div className="flex items-center shrink-0 app-titlebar-drag">
           <Logo className="cursor-pointer h-17 sm:h-17 md:h-18 lg:h-18 flex items-center transition-all duration-300" />
         </div>
 
-        <div className="flex-1 max-w-md relative">
+        <div className="flex-1 max-w-md relative app-titlebar-no-drag">
           <SearchBar
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
@@ -716,7 +731,7 @@ function Header({
           />
         </div>
 
-        <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-4 app-titlebar-no-drag">
           {selectedCity && (
             <CityOrganizationsMenu
               selectedCity={selectedCity}

@@ -17,6 +17,9 @@ import { BackNavigationButton } from "../components/BackNavigationButton"
 import { canApproveQuoteByRole, QUOTE_STATUS_LABELS, computeQuoteTotalsClient } from "../utils/utils"
 import toast from "react-hot-toast"
 import { PAGE_SCROLL_SHELL } from "../utils/pageScrollShell"
+import { TruncatedTextDetails } from "../components/ui/TruncatedTextDetails"
+import { isEmptyNpLine, lineDetailsTitle } from "../utils/npBom"
+import { formatUdmLabel } from "../utils/udm"
 
 const btnSecondaryClass =
   "cursor-pointer transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 disabled:cursor-not-allowed"
@@ -155,6 +158,16 @@ export default function QuoteReview() {
   }
 
   const handleApprove = async () => {
+    const emptyNp = (quote?.lineItems || []).filter((item) => isEmptyNpLine(item))
+    if (emptyNp.length > 0) {
+      const msg = emptyNp.length === 1
+        ? "Impossibile approvare: un nuovo prezzo non ha componenti nella distinta."
+        : `Impossibile approvare: ${emptyNp.length} nuovi prezzi non hanno componenti nella distinta.`
+      setError(msg)
+      toast.error(msg)
+      return
+    }
+
     setActing(true)
     setError("")
     try {
@@ -170,7 +183,9 @@ export default function QuoteReview() {
       toast.success(`Preventivo ${res.data.protocolNumber} approvato`)
     } catch (err) {
       console.error(err)
-      setError(err.response?.data?.error || "Errore approvazione")
+      const msg = err.response?.data?.error || "Errore approvazione"
+      setError(msg)
+      toast.error(msg)
     } finally {
       setActing(false)
     }
@@ -181,7 +196,9 @@ export default function QuoteReview() {
     for (const index of selectedIndexes) {
       const note = String(contestNotes[index] || "").trim()
       if (!note) {
-        setError(`Indicare il motivo di contestazione per la voce ${index + 1}.`)
+        const msg = `Indicare il motivo di contestazione per la voce ${index + 1}.`
+        setError(msg)
+        toast.error(msg)
         return
       }
       contestedLines.push({ index, note })
@@ -189,7 +206,9 @@ export default function QuoteReview() {
 
     const generalReason = rejectReason.trim()
     if (contestedLines.length === 0 && !generalReason) {
-      setError("Selezionare almeno una voce da contestare oppure indicare un motivo generale.")
+      const msg = "Selezionare almeno una voce da contestare oppure indicare un motivo generale."
+      setError(msg)
+      toast.error(msg)
       return
     }
 
@@ -211,7 +230,9 @@ export default function QuoteReview() {
       toast.success("Preventivo inviato al manutentore per revisione")
     } catch (err) {
       console.error(err)
-      setError(err.response?.data?.error || "Errore rifiuto")
+      const msg = err.response?.data?.error || "Errore rifiuto"
+      setError(msg)
+      toast.error(msg)
     } finally {
       setActing(false)
     }
@@ -370,14 +391,38 @@ export default function QuoteReview() {
                       />
                     )}
                     <div className="min-w-0 flex-1">
-                      <p className="text-blue-100">
+                      <p className="text-blue-100 flex flex-wrap items-center gap-1.5">
                         <span className="text-blue-400 font-mono text-xs">{item.materialCode || "—"}</span>
-                        {" · "}
-                        {item.description}
-                        {item.isAdHoc ? " (NP)" : ""}
+                        {item.isAdHoc ? (
+                          <span className="text-[10px] text-amber-300/90 border border-amber-500/30 rounded px-1">
+                            NP
+                          </span>
+                        ) : null}
                       </p>
+                      <div className="mt-1">
+                        <TruncatedTextDetails
+                          text={item.description}
+                          detailsText={item.fullDescription}
+                          title={lineDetailsTitle(
+                            item,
+                            `Voce ${idx + 1}${item.isAdHoc ? " · Nuovo prezzo" : ""}`,
+                          )}
+                          lines={2}
+                          className="text-sm text-blue-100"
+                          bom={item.children || []}
+                          fields={[
+                            { label: "Codice", value: item.materialCode || "—" },
+                            { label: "Categoria", value: item.category || "—" },
+                            { label: "U.M.", value: formatUdmLabel(item.udm) },
+                            {
+                              label: "Prezzo unitario",
+                              value: `€ ${Number(item.unitPrice || 0).toFixed(2)}`,
+                            },
+                          ]}
+                        />
+                      </div>
                       <p className="text-xs text-blue-300/80 mt-1">
-                        {item.udm || "—"} × {Number(item.quantity || 0)} × € {Number(item.unitPrice || 0).toFixed(2)}
+                        {formatUdmLabel(item.udm)} × {Number(item.quantity || 0)} × € {Number(item.unitPrice || 0).toFixed(2)}
                         {" = "}
                         <span className="text-white font-medium">€ {lineTotal.toFixed(2)}</span>
                       </p>

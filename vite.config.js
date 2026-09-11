@@ -32,6 +32,7 @@ export default defineConfig(({ mode }) => {
         start_url: '.',
         scope: base,
         display: 'standalone',
+        display_override: ['window-controls-overlay', 'standalone'],
         orientation: 'any',
         background_color: '#000000',
         theme_color: '#172554',
@@ -54,10 +55,50 @@ export default defineConfig(({ mode }) => {
             type: 'image/png',
             purpose: 'maskable'
           }
-        ]
+        ],
+        shortcuts: [
+          {
+            name: 'Mappa',
+            short_name: 'Mappa',
+            description: 'Apri la dashboard con la mappa dei punti luce',
+            url: 'dashboard',
+            icons: [{ src: 'faviconWhite.png', sizes: '192x192', type: 'image/png' }],
+          },
+          {
+            name: 'Preventivi IMS',
+            short_name: 'Preventivi',
+            description: 'Bozze e preventivi IMS',
+            url: 'quotes',
+            icons: [{ src: 'faviconWhite.png', sizes: '192x192', type: 'image/png' }],
+          },
+          {
+            name: 'Straordinarie',
+            short_name: 'Straordinarie',
+            description: 'Segnalazioni straordinarie e scadenze',
+            url: 'extraordinary',
+            icons: [{ src: 'faviconWhite.png', sizes: '192x192', type: 'image/png' }],
+          },
+        ],
+        screenshots: [
+          {
+            src: 'pwa-screenshot-wide.png',
+            sizes: '1280x720',
+            type: 'image/png',
+            form_factor: 'wide',
+            label: 'Dashboard mappa Lighting Map',
+          },
+          {
+            src: 'pwa-screenshot-narrow.png',
+            sizes: '720x1280',
+            type: 'image/png',
+            form_factor: 'narrow',
+            label: 'Mappa Lighting Map su mobile',
+          },
+        ],
       },
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        globIgnores: ['**/pwa-screenshot-*.png'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024
       },
       devOptions: {

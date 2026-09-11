@@ -226,6 +226,35 @@ async function buildWatermarkedCanvas({ mapCanvas, mapCapture, logo }) {
   return applyWatermark(mapImageDataUrl, logo, mapCanvas.width, mapCanvas.height)
 }
 
+/** Cattura la mappa su canvas senza watermark (per ritaglio precedente al logo). */
+async function captureMapCanvasWithoutWatermark({ mapCanvas, mapCapture }) {
+  const pixelCanvas = readMapCanvasPixels(mapCanvas)
+  if (pixelCanvas) return pixelCanvas
+
+  const mapImageDataUrl = await pickBestMapCapture(mapCapture)
+  const mapImage = await loadMapImageFromDataUrl(mapImageDataUrl)
+  const sourceWidth = mapImage.width ?? mapImage.naturalWidth
+  const sourceHeight = mapImage.height ?? mapImage.naturalHeight
+  if (!sourceWidth || !sourceHeight) {
+    mapImage.close?.()
+    throw new Error("Cattura mappa non valida")
+  }
+
+  const width = mapCanvas.width || sourceWidth
+  const height = mapCanvas.height || sourceHeight
+  const baseCanvas = document.createElement("canvas")
+  baseCanvas.width = width
+  baseCanvas.height = height
+  const baseCtx = baseCanvas.getContext("2d")
+  if (!baseCtx) {
+    mapImage.close?.()
+    throw new Error("Canvas non supportato")
+  }
+  baseCtx.drawImage(mapImage, 0, 0, width, height)
+  mapImage.close?.()
+  return baseCanvas
+}
+
 function waitForMapRenderFrame(map, signal) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -465,10 +494,44 @@ function downloadBlob(blob, filename) {
 }
 
 /**
- * Esporta la mappa MapLibre come PNG.
- * Se width/height sono forniti, ridimensiona temporaneamente il container.
+ * Ritaglia un canvas in pixel CSS del container mappa (tiene conto del devicePixelRatio).
+ * Se outputWidth/Height sono forniti, riscala il ritaglio a quelle dimensioni.
  */
-export async function exportMapToPng(map, { width, height, scaleDenominator, filename, signal, cityName }) {
+function cropCanvasToRect(sourceCanvas, cropRect, containerWidth, containerHeight, outputWidth, outputHeight) {
+  if (!cropRect) return sourceCanvas
+
+  const dprX = sourceCanvas.width / Math.max(1, containerWidth)
+  const dprY = sourceCanvas.height / Math.max(1, containerHeight)
+
+  const sx = Math.max(0, Math.round(cropRect.x * dprX))
+  const sy = Math.max(0, Math.round(cropRect.y * dprY))
+  const sw = Math.min(sourceCanvas.width - sx, Math.round(cropRect.width * dprX))
+  const sh = Math.min(sourceCanvas.height - sy, Math.round(cropRect.height * dprY))
+
+  if (sw < 32 || sh < 32) {
+    throw new Error("Area di stampa troppo piccola")
+  }
+
+  const targetW = outputWidth || sw
+  const targetH = outputHeight || sh
+  const cropped = document.createElement("canvas")
+  cropped.width = targetW
+  cropped.height = targetH
+  const ctx = cropped.getContext("2d")
+  if (!ctx) throw new Error("Canvas non supportato")
+
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = "high"
+  ctx.drawImage(sourceCanvas, sx, sy, sw, sh, 0, 0, targetW, targetH)
+  return cropped
+}
+
+/**
+ * Esporta la mappa MapLibre come PNG.
+ * Se width/height sono forniti senza cropRect, ridimensiona temporaneamente il container.
+ * Con cropRect (pixel CSS sul container) esporta solo l'area selezionata.
+ */
+export async function exportMapToPng(map, { width, height, scaleDenominator, filename, signal, cityName, cropRect }) {
   if (!map || typeof map.getCanvas !== "function") {
     throw new Error("Mappa non disponibile per l'export")
   }
@@ -490,10 +553,18 @@ export async function exportMapToPng(map, { width, height, scaleDenominator, fil
     targetZoom = getZoomForScaleDenominator(lat, Number(scaleDenominator))
   }
 
+  const hasCrop = Boolean(
+    cropRect &&
+      Number.isFinite(cropRect.x) &&
+      Number.isFinite(cropRect.y) &&
+      Number.isFinite(cropRect.width) &&
+      Number.isFinite(cropRect.height),
+  )
   const exportWidth = width || container.clientWidth
   const exportHeight = height || container.clientHeight
   const isViewportExport = width == null && height == null
-  const shouldResizeContainer = !isViewportExport
+  // Con area di stampa non ridimensioniamo il container: ritagliamo e poi riscaliamo.
+  const shouldResizeContainer = !isViewportExport && !hasCrop
 
   try {
     if (signal?.aborted) throw new DOMException("Export annullato", "AbortError")
@@ -522,14 +593,29 @@ export async function exportMapToPng(map, { width, height, scaleDenominator, fil
     const logo = await getWatermarkLogo()
     if (signal?.aborted) throw new DOMException("Export annullato", "AbortError")
 
-    const watermarkedCanvas = await buildWatermarkedCanvas({ mapCanvas, mapCapture, logo })
+    let exportCanvas
+    if (hasCrop) {
+      const rawCanvas = await captureMapCanvasWithoutWatermark({ mapCanvas, mapCapture })
+      const cropped = cropCanvasToRect(
+        rawCanvas,
+        cropRect,
+        container.clientWidth,
+        container.clientHeight,
+        isViewportExport ? null : exportWidth,
+        isViewportExport ? null : exportHeight,
+      )
+      exportCanvas = await applyWatermarkToCanvas(cropped, logo)
+    } else {
+      exportCanvas = await buildWatermarkedCanvas({ mapCanvas, mapCapture, logo })
+    }
+
     const metadata = buildExportMetadata({ cityName })
     let pngBytes
     try {
-      pngBytes = await canvasToPngBytes(watermarkedCanvas, metadata)
+      pngBytes = await canvasToPngBytes(exportCanvas, metadata)
     } catch (metadataError) {
       console.warn("Metadati PNG non applicati, export senza metadati:", metadataError)
-      pngBytes = await canvasToPngBytes(watermarkedCanvas, null)
+      pngBytes = await canvasToPngBytes(exportCanvas, null)
     }
     downloadBlob(new Blob([pngBytes], { type: "image/png" }), filename || "mappa-export.png")
   } finally {

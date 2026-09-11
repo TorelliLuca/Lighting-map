@@ -17,6 +17,7 @@ import { BackNavigationButton } from "../components/BackNavigationButton"
 import { canApproveQuoteByRole, QUOTE_STATUS_LABELS, computeQuoteTotalsClient } from "../utils/utils"
 import toast from "react-hot-toast"
 import { PAGE_SCROLL_SHELL } from "../utils/pageScrollShell"
+import { formatUdmLabel } from "../utils/udm"
 
 const btnSecondaryClass =
   "cursor-pointer transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 disabled:cursor-not-allowed"
@@ -177,25 +178,33 @@ export default function ConsuntivoReview() {
       toast.success(`Consuntivo ${res.data.protocolNumber} approvato`)
     } catch (err) {
       console.error(err)
-      setError(err.response?.data?.error || "Errore approvazione")
+      const msg = err.response?.data?.error || "Errore approvazione"
+      setError(msg)
+      toast.error(msg)
     } finally {
       setActing(false)
     }
   }
 
   const handleReject = async () => {
-    if (selectedIndexes.size === 0) {
-      setError("Selezionare almeno una voce non chiara.")
-      return
-    }
     const contestedLines = []
     for (const index of selectedIndexes) {
       const note = String(contestNotes[index] || "").trim()
       if (!note) {
-        setError(`Indicare il motivo di contestazione per la voce ${index + 1}.`)
+        const msg = `Indicare il motivo di contestazione per la voce ${index + 1}.`
+        setError(msg)
+        toast.error(msg)
         return
       }
       contestedLines.push({ index, note })
+    }
+
+    const generalReason = rejectReason.trim()
+    if (contestedLines.length === 0 && !generalReason) {
+      const msg = "Selezionare almeno una voce da contestare oppure indicare un motivo generale."
+      setError(msg)
+      toast.error(msg)
+      return
     }
 
     setActing(true)
@@ -203,19 +212,22 @@ export default function ConsuntivoReview() {
     try {
       const comune = townHallNameOf(consuntivo) || comuneFromNav
       const res = await api.post(`/api/quotes/${id}/reject`, {
-        reason: rejectReason.trim(),
+        reason: generalReason,
         contestedLines,
       })
       setConsuntivo(mergeDocKeepingTownHall(consuntivo, res.data))
       setDone({
         type: "rejected",
         contestedCount: contestedLines.length,
+        hasGeneralReason: Boolean(generalReason),
         comune,
       })
       toast.success("Consuntivo inviato al manutentore per revisione")
     } catch (err) {
       console.error(err)
-      setError(err.response?.data?.error || "Errore rifiuto")
+      const msg = err.response?.data?.error || "Errore rifiuto"
+      setError(msg)
+      toast.error(msg)
     } finally {
       setActing(false)
     }
@@ -253,7 +265,9 @@ export default function ConsuntivoReview() {
           )}
           {done.type === "rejected" && (
             <p className="mt-2 text-amber-100/90 text-sm">
-              {done.contestedCount} {done.contestedCount === 1 ? "voce contestata" : "voci contestate"}.
+              {done.contestedCount > 0
+                ? `${done.contestedCount} ${done.contestedCount === 1 ? "voce contestata" : "voci contestate"}. `
+                : ""}
               Il titolare manutentore potrà correggere e reinviare.
             </p>
           )}
@@ -353,7 +367,7 @@ export default function ConsuntivoReview() {
             <div className="flex items-center justify-between gap-2">
               <p className="text-sm text-blue-200 font-medium">Voci consuntivo</p>
               {canDecide && showReject && (
-                <p className="text-xs text-amber-200/90">Seleziona le voci non chiare</p>
+                <p className="text-xs text-amber-200/90">Seleziona le voci da contestare (opzionale)</p>
               )}
             </div>
             {(consuntivo.lineItems || []).map((item, idx) => {
@@ -385,7 +399,7 @@ export default function ConsuntivoReview() {
                         {item.description}
                       </p>
                       <p className="text-xs text-blue-300/80 mt-1">
-                        {item.udm || "—"} × {Number(item.quantity || 0)} × € {Number(item.unitPrice || 0).toFixed(2)}
+                        {formatUdmLabel(item.udm)} × {Number(item.quantity || 0)} × € {Number(item.unitPrice || 0).toFixed(2)}
                         {" = "}
                         <span className="text-white font-medium">€ {lineTotal.toFixed(2)}</span>
                       </p>
@@ -448,20 +462,20 @@ export default function ConsuntivoReview() {
                     }}
                     className={`flex-1 py-3 rounded-xl border border-amber-500/40 text-amber-100 hover:bg-amber-900/20 disabled:opacity-50 ${btnSecondaryClass}`}
                   >
-                    Rifiuta con contestazioni
+                    Respingi per revisione
                   </button>
                 </div>
               ) : (
                 <div className="space-y-3 p-4 rounded-xl border border-amber-500/30 bg-amber-950/20">
                   <label htmlFor="consuntivo-reject-reason" className="block text-sm font-medium text-amber-100">
-                    Nota generale (opzionale)
+                    Motivo generale {selectedIndexes.size === 0 ? "*" : "(opzionale se hai contestato delle voci)"}
                   </label>
                   <textarea
                     id="consuntivo-reject-reason"
                     rows={2}
                     value={rejectReason}
                     onChange={(e) => setRejectReason(e.target.value)}
-                    placeholder="Eventuale commento complessivo per il manutentore…"
+                    placeholder="Es. quantità non coerenti, documentazione incompleta…"
                     className={fieldInputClass}
                   />
                   <div className="flex flex-col sm:flex-row gap-2">
@@ -472,7 +486,7 @@ export default function ConsuntivoReview() {
                       className={`flex-1 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-medium disabled:opacity-50 flex items-center justify-center gap-2 ${btnPrimaryClass}`}
                     >
                       {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                      Conferma rifiuto
+                      Conferma respingimento
                     </button>
                     <button
                       type="button"

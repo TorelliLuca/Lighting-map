@@ -36,6 +36,9 @@ export function GlassSelect({
   placeholder = "Seleziona…",
   className = "",
   listClassName = "",
+  wrapperClassName = "",
+  truncateLabel = true,
+  title,
   zIndex = 11000,
   "aria-label": ariaLabel,
 }) {
@@ -59,14 +62,14 @@ export function GlassSelect({
     if (openUpward) {
       setCoords({
         left: rect.left,
-        width: rect.width,
+        width: Math.max(rect.width, 88),
         bottom: window.innerHeight - rect.top + 6,
         maxHeight,
       })
     } else {
       setCoords({
         left: rect.left,
-        width: rect.width,
+        width: Math.max(rect.width, 88),
         top: rect.bottom + 6,
         maxHeight,
       })
@@ -113,12 +116,13 @@ export function GlassSelect({
   }
 
   return (
-    <div className="relative w-full min-w-0">
+    <div className={cn("relative w-full min-w-0", wrapperClassName)}>
       <button
         ref={triggerRef}
         type="button"
         id={id}
         disabled={disabled}
+        title={title}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listboxId}
@@ -129,13 +133,18 @@ export function GlassSelect({
         }}
         className={cn(DEFAULT_TRIGGER_CLASS, className)}
       >
-        <span className={cn("truncate", !selected && "text-blue-300/80")}>
+        <span
+          className={cn(
+            truncateLabel ? "truncate min-w-0" : "whitespace-nowrap",
+            !selected && "text-blue-300/80",
+          )}
+        >
           {selected?.label ?? placeholder}
         </span>
         <ChevronDown
           className={cn(
-            "h-5 w-5 text-blue-400 shrink-0 transition-transform duration-200",
-            open && "rotate-180"
+            "h-4 w-4 sm:h-5 sm:w-5 text-blue-400 shrink-0 transition-transform duration-200",
+            open && "rotate-180",
           )}
         />
       </button>
@@ -173,7 +182,7 @@ export function GlassSelect({
                       type="button"
                       onClick={() => handleSelect(option.value)}
                       className={cn(
-                        "w-full text-left px-4 text-sm min-h-11 flex items-center transition-colors",
+                        "w-full text-left px-4 text-sm min-h-11 flex items-center transition-colors whitespace-nowrap",
                         isSelected
                           ? "bg-blue-700/50 text-white"
                           : "text-blue-100 hover:bg-blue-800/60 hover:text-white"

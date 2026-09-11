@@ -84,7 +84,7 @@ const renderFieldRow = (key, label, value, isTitle = false) => (
   <div
     key={key}
     className={cn(
-      "rounded-lg border border-white  px-1 py-1",
+      "rounded-lg border border-white  px-1 py-0",
       isTitle,
     )}
   >
@@ -93,7 +93,7 @@ const renderFieldRow = (key, label, value, isTitle = false) => (
     ) : (
       <>
         <p className={LABEL_CLASS}>{label}</p>
-        <p className={cn(VALUE_CLASS, "mt-0.5 break-words")}>{value}</p>
+        <p className={cn(VALUE_CLASS, "mt-0.2 break-words")}>{value}</p>
       </>
     )}
   </div>
@@ -355,7 +355,7 @@ const InfoWindow = ({
                   } else {
                     return (
                       <li
-                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-sm text-slate-700"
                         key={`${key}-item-${index}`}
                       >
                         {translateString(item).replace(/_/g, " ")}

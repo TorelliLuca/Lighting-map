@@ -130,18 +130,20 @@ export const transformDateToIT = (dateToConvert) => {
     "composizione_punto",
     "numero_apparecchi",
     "indirizzo",
-    "lotto",
+    
     "quadro",
-    "proprieta",
+    
     "tipo_apparecchio",
     "marca_apparecchio",
     "modello_apparecchio",
-    "altezza_sostegno",
     "tipo_lampada",
     "potenza_lampada",
     "tipo_sostegno",
+    "altezza_sostegno",
     "tipo_linea",
     "promiscuita",
+    "proprieta",
+    "lotto",
     "note",
     "garanzia",
     "pod",
@@ -609,7 +611,11 @@ export const QUOTE_STATUS_LABELS = {
 /** Stati in cui il manutentore può modificare e reinviare il documento. */
 export const QUOTE_EDITABLE_STATUSES = ['DRAFT', 'REJECTED', 'NEEDS_REVISION'];
 
-/** Totali preventivo IMS (allineati al backend) */
+/**
+ * Totali preventivo IMS (allineati al backend).
+ * Oneri sicurezza (default 2%): esclusi dalla base dello sconto.
+ * Sconto % su (lordo − oneri); totale netto = lordo − sconto.
+ */
 export function computeQuoteTotalsClient(lineItems = [], safetyChargeRate = 0.02, discountPercent = 0) {
   const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100
   const subtotal = round2(
@@ -622,7 +628,20 @@ export function computeQuoteTotalsClient(lineItems = [], safetyChargeRate = 0.02
   const rate = Number.isFinite(Number(safetyChargeRate)) ? Number(safetyChargeRate) : 0.02
   const safetyAmount = round2(subtotal * rate)
   const discPct = Number(discountPercent) || 0
-  const discountAmount = round2((subtotal + safetyAmount) * (discPct / 100))
-  const total = round2(subtotal + safetyAmount - discountAmount)
+  const discountBase = round2(subtotal - safetyAmount)
+  const discountAmount = round2(discountBase * (discPct / 100))
+  const total = round2(subtotal - discountAmount)
   return { subtotal, safetyAmount, discountAmount, total }
+}
+
+/** Prezzo unitario NP = somma (qty × prezzo) delle sotto-voci BOM. */
+export function sumBomUnitPrice(children = []) {
+  const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100
+  return round2(
+    (children || []).reduce((sum, item) => {
+      const qty = Number(item.quantity) || 0
+      const price = Number(item.unitPrice) || 0
+      return sum + qty * price
+    }, 0)
+  )
 }

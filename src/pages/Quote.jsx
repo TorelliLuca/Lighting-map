@@ -1,7 +1,16 @@
 "use client"
 
 import { useState, useEffect, useContext, useMemo, useRef, useCallback } from "react"
+import { createPortal } from "react-dom"
 import { useNavigate, useLocation, useParams } from "react-router-dom"
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  pointerWithin,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core"
 import { UserContext, api } from "../context/UserContext"
 import {
   AlertCircle,
@@ -10,6 +19,7 @@ import {
   Home,
   Loader2,
   Lock,
+  MapPin,
   Plus,
   Trash2,
 } from "lucide-react"
@@ -19,12 +29,13 @@ import ConfirmDialog from "../components/ui/ConfirmDialog"
 import InfoTooltip from "../components/ui/InfoTooltip"
 import { NumberInput } from "../components/ui/NumberInput"
 import { GlassSelect } from "../components/ui/GlassSelect"
-import { TruncatedTextDetails, CatalogMaterialRow, DetailsInfoDialog } from "../components/ui/TruncatedTextDetails"
+import { TruncatedTextDetails, DetailsInfoDialog } from "../components/ui/TruncatedTextDetails"
 import {
   canApproveQuoteByRole,
   canManageQuotesByRole,
   canSubmitQuoteByRole,
   computeQuoteTotalsClient,
+  sumBomUnitPrice,
   QUOTE_STATUS_LABELS,
   QUOTE_EDITABLE_STATUSES,
   formatReportFaultLabel,
@@ -32,15 +43,34 @@ import {
 import toast from "react-hot-toast"
 import { PAGE_SCROLL_SHELL, TABLE_SCROLL_X } from "../utils/pageScrollShell"
 import { CapitolatoValidityChip } from "../components/ui/CapitolatoValidityChip"
+import { CatalogPickerModal } from "../components/CatalogPickerModal"
+import { CatalogDragSkeleton } from "../components/DraggableCatalogMaterialRow"
+import { CatalogMaterialSections } from "../components/CatalogMaterialSections"
+import { QuoteLineItemsDropZone } from "../components/QuoteLineItemsDropZone"
+import { QuoteNpLineCard, QuoteNpTableRows } from "../components/QuoteNpLineCard"
+import { UdmSelect } from "../components/ui/UdmSelect"
+import { useMediaQuery } from "../hooks/useMediaQuery"
+import {
+  emptyBomChild,
+  isEmptyNpLine,
+  lineDetailsTitle,
+  mapBomFromCatalogItem,
+  mapChildrenFromBom,
+  nextNpCode,
+  serializeLineItemSnapshot,
+} from "../utils/npBom"
+import { formatUdmLabel, normalizeUdm } from "../utils/udm"
 
 const emptyLine = () => ({
   materialCode: "",
   description: "",
+  fullDescription: "",
   udm: "cad",
   quantity: 1,
   unitPrice: 0,
   category: "",
   isAdHoc: false,
+  children: [],
   isContested: false,
   contestNote: "",
 })
@@ -56,8 +86,6 @@ const clampDiscountPercent = (value, minDiscountPercent = 0) => {
   const normalizedValue = Number.isFinite(numericValue) ? numericValue : 0
   return Math.min(100, Math.max(minDiscountPercent, normalizedValue))
 }
-
-const CATALOG_PAGE_SIZE = 12
 
 const QUOTE_STATUS_TAG_STYLES = {
   DRAFT: "bg-slate-500/30 text-slate-100 border-slate-400/50",
@@ -86,6 +114,17 @@ const inputClassWithWarning = (baseClass, isMissing) =>
     ? `${baseClass} border-amber-500/50 ring-1 ring-amber-500/30`
     : baseClass
 
+/** Preferisce drop su NP rispetto all'elenco voci quando entrambi collidono. */
+const catalogDropCollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args)
+  if (pointerCollisions.length > 0) {
+    const npHit = pointerCollisions.find((c) => String(c.id).startsWith("np-"))
+    if (npHit) return [npHit]
+    return pointerCollisions
+  }
+  return closestCenter(args)
+}
+
 const SectionHeading = ({ children }) => (
   <h3 className="text-xs font-semibold uppercase tracking-wider text-blue-300 mb-3 pt-4 border-t border-blue-500/15 first:border-t-0 first:pt-0">
     {children}
@@ -99,17 +138,7 @@ const serializeFormSnapshot = (data) => JSON.stringify({
   discountPercent: Number(data.discountPercent) || 0,
   faultDescription: data.faultDescription || "",
   notes: data.notes || "",
-  lineItems: (data.lineItems || []).map((item) => ({
-    materialCode: item.materialCode || "",
-    description: item.description || "",
-    udm: item.udm || "",
-    quantity: Number(item.quantity) || 0,
-    unitPrice: Number(item.unitPrice) || 0,
-    category: item.category || "",
-    isAdHoc: !!item.isAdHoc,
-    isContested: !!item.isContested,
-    contestNote: item.contestNote || "",
-  })),
+  lineItems: (data.lineItems || []).map(serializeLineItemSnapshot),
 })
 
 export default function Quote() {
@@ -130,7 +159,6 @@ export default function Quote() {
   const [quote, setQuote] = useState(null)
   const [queryParams, setQueryParams] = useState({})
   const [catalogQuery, setCatalogQuery] = useState("")
-  const [catalogLimit, setCatalogLimit] = useState(CATALOG_PAGE_SIZE)
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [showSaveBeforeDownload, setShowSaveBeforeDownload] = useState(false)
@@ -139,8 +167,20 @@ export default function Quote() {
   const [lastSavedSnapshot, setLastSavedSnapshot] = useState("")
   const [pendingDownloadFormat, setPendingDownloadFormat] = useState(null)
   const [showFaultDetails, setShowFaultDetails] = useState(false)
+  /** Indice NP per cui è aperta la modal catalogo (sotto-voci) */
+  const [catalogPickerNpIndex, setCatalogPickerNpIndex] = useState(null)
+  const [activeCatalogDrag, setActiveCatalogDrag] = useState(null)
+  const catalogDragOverlayRef = useRef(null)
+  const isMdUp = useMediaQuery("(min-width: 768px)")
+  /** Drag catalogo solo desktop (esclude tablet/mobile). */
+  const isDesktopDnD = useMediaQuery("(min-width: 1024px)")
 
   const pendingNavigationRef = useRef(null)
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    })
+  )
 
   const [formData, setFormData] = useState({
     priorityClass: "C",
@@ -174,6 +214,27 @@ export default function Quote() {
   )
 
   const catalog = config?.materialCatalog || []
+
+  const materialCategoryOptions = useMemo(() => {
+    const fromConfig = (
+      config?.effectiveCategories?.length
+        ? config.effectiveCategories
+        : config?.materialCategories || []
+    )
+      .map((cat) => String(cat || "").trim())
+      .filter(Boolean)
+    const set = new Set(fromConfig)
+    for (const material of catalog) {
+      const value = String(material?.category || "").trim()
+      if (value) set.add(value)
+    }
+    for (const item of formData.lineItems) {
+      const value = String(item?.category || "").trim()
+      if (value) set.add(value)
+    }
+    return [...set].map((cat) => ({ value: cat, label: cat }))
+  }, [config?.effectiveCategories, config?.materialCategories, catalog, formData.lineItems])
+
   const catalogMatches = useMemo(() => {
     const q = catalogQuery.trim().toLowerCase()
     if (!q) return catalog
@@ -181,21 +242,25 @@ export default function Quote() {
       (m) =>
         m.code?.toLowerCase().includes(q)
         || m.description?.toLowerCase().includes(q)
+        || m.fullDescription?.toLowerCase().includes(q)
         || m.category?.toLowerCase().includes(q)
     )
   }, [catalog, catalogQuery])
 
-  const filteredCatalog = useMemo(
-    () => catalogMatches.slice(0, catalogLimit),
-    [catalogMatches, catalogLimit]
-  )
-
-  const hasMoreCatalogResults = catalogMatches.length > filteredCatalog.length
+  const isCatalogSearching = catalogQuery.trim().length > 0
 
   const missingDescriptionIndices = useMemo(() => {
     const indices = new Set()
     formData.lineItems.forEach((item, index) => {
       if (isLineMissingDescription(item)) indices.add(index)
+    })
+    return indices
+  }, [formData.lineItems])
+
+  const emptyNpIndices = useMemo(() => {
+    const indices = new Set()
+    formData.lineItems.forEach((item, index) => {
+      if (isEmptyNpLine(item)) indices.add(index)
     })
     return indices
   }, [formData.lineItems])
@@ -218,10 +283,6 @@ export default function Quote() {
     }
     return "Preventivo non modificabile — sola lettura."
   }, [canEdit, quote?.status])
-
-  useEffect(() => {
-    setCatalogLimit(CATALOG_PAGE_SIZE)
-  }, [catalogQuery])
 
   useEffect(() => {
     if (!userData) {
@@ -388,46 +449,202 @@ export default function Quote() {
   const updateLine = (index, patch) => {
     setFormData((prev) => {
       const lineItems = [...prev.lineItems]
-      lineItems[index] = { ...lineItems[index], ...patch }
+      const next = { ...lineItems[index], ...patch }
+      if (next.isAdHoc && Array.isArray(next.children)) {
+        next.unitPrice = sumBomUnitPrice(next.children)
+      }
+      lineItems[index] = next
       return { ...prev, lineItems }
     })
   }
 
-  const addLineFromCatalog = (fromCatalog) => {
-    setFormData((prev) => ({
-      ...prev,
-      lineItems: [
-        ...prev.lineItems,
-        {
-          materialCode: fromCatalog.code || "",
-          description: fromCatalog.description || "",
-          udm: fromCatalog.udm || "cad",
-          quantity: 1,
-          unitPrice: fromCatalog.unitPrice || 0,
-          category: fromCatalog.category || "",
-          isAdHoc: false,
-        },
-      ],
-    }))
-    setCatalogQuery("")
+  const updateChild = (parentIndex, childIndex, patch) => {
+    setFormData((prev) => {
+      const lineItems = [...prev.lineItems]
+      const parent = { ...lineItems[parentIndex] }
+      const children = [...(parent.children || [])]
+      children[childIndex] = { ...children[childIndex], ...patch }
+      parent.children = children
+      parent.unitPrice = sumBomUnitPrice(children)
+      lineItems[parentIndex] = parent
+      return { ...prev, lineItems }
+    })
   }
 
+  const removeChild = (parentIndex, childIndex) => {
+    setFormData((prev) => {
+      const lineItems = [...prev.lineItems]
+      const parent = { ...lineItems[parentIndex] }
+      const children = (parent.children || []).filter((_, i) => i !== childIndex)
+      parent.children = children
+      parent.unitPrice = sumBomUnitPrice(children)
+      lineItems[parentIndex] = parent
+      return { ...prev, lineItems }
+    })
+  }
+
+  const addAdHocChild = (parentIndex) => {
+    setFormData((prev) => {
+      const lineItems = [...prev.lineItems]
+      const parent = { ...lineItems[parentIndex] }
+      const existing = parent.children || []
+      const children = [...existing, emptyBomChild(parent.materialCode, existing)]
+      parent.children = children
+      parent.unitPrice = sumBomUnitPrice(children)
+      lineItems[parentIndex] = parent
+      return { ...prev, lineItems }
+    })
+  }
+
+  const addCatalogChildToNp = useCallback((parentIndex, fromCatalog) => {
+    setFormData((prev) => {
+      const lineItems = [...prev.lineItems]
+      const parent = lineItems[parentIndex]
+      if (!parent?.isAdHoc) return prev
+      const children = [...(parent.children || []), mapBomFromCatalogItem(fromCatalog)]
+      lineItems[parentIndex] = {
+        ...parent,
+        children,
+        unitPrice: sumBomUnitPrice(children),
+      }
+      return { ...prev, lineItems }
+    })
+    toast.success(`${fromCatalog.code || "Voce"} aggiunta alla distinta`)
+  }, [])
+
+  const addLineFromCatalog = useCallback((fromCatalog) => {
+    const bom = fromCatalog.bom || []
+
+    if (Array.isArray(bom) && bom.length > 0) {
+      const children = mapChildrenFromBom(bom)
+      setFormData((prev) => ({
+        ...prev,
+        lineItems: [
+          ...prev.lineItems,
+          {
+            materialCode: fromCatalog.code || "",
+            description: fromCatalog.description || "",
+            fullDescription: fromCatalog.fullDescription || "",
+            udm: normalizeUdm(fromCatalog.udm),
+            quantity: 1,
+            unitPrice: sumBomUnitPrice(children) || Number(fromCatalog.unitPrice) || 0,
+            category: fromCatalog.category || "",
+            isAdHoc: true,
+            children,
+          },
+        ],
+      }))
+    } else {
+      setFormData((prev) => ({
+        ...prev,
+        lineItems: [
+          ...prev.lineItems,
+          {
+            materialCode: fromCatalog.code || "",
+            description: fromCatalog.description || "",
+            fullDescription: fromCatalog.fullDescription || "",
+            udm: normalizeUdm(fromCatalog.udm),
+            quantity: 1,
+            unitPrice: fromCatalog.unitPrice || 0,
+            category: fromCatalog.category || "",
+            isAdHoc: false,
+            children: [],
+          },
+        ],
+      }))
+    }
+    setCatalogQuery("")
+    toast.success(`${fromCatalog.code || "Voce"} aggiunta al preventivo`)
+  }, [])
+
+  const handleCatalogDragStart = useCallback((event) => {
+    if (!isDesktopDnD) return
+    const material = event.active?.data?.current?.material
+    setActiveCatalogDrag(material || null)
+    if (event.activatorEvent && "clientY" in event.activatorEvent) {
+      const { clientX, clientY } = event.activatorEvent
+      requestAnimationFrame(() => {
+        const el = catalogDragOverlayRef.current
+        if (!el) return
+        el.style.left = `${clientX}px`
+        el.style.top = `${clientY}px`
+      })
+    }
+  }, [isDesktopDnD])
+
+  useEffect(() => {
+    if (!activeCatalogDrag || !isDesktopDnD) return undefined
+    const onPointerMove = (event) => {
+      const el = catalogDragOverlayRef.current
+      if (!el) return
+      el.style.left = `${event.clientX}px`
+      el.style.top = `${event.clientY}px`
+    }
+    window.addEventListener("pointermove", onPointerMove, { passive: true })
+    return () => window.removeEventListener("pointermove", onPointerMove)
+  }, [activeCatalogDrag, isDesktopDnD])
+
+  const handleCatalogDragCancel = useCallback(() => {
+    setActiveCatalogDrag(null)
+  }, [])
+
+  const handleCatalogDragEnd = useCallback((event) => {
+    const { active, over } = event
+    setActiveCatalogDrag(null)
+    if (!isDesktopDnD) return
+    const material = active?.data?.current?.material
+    if (!material || !over) return
+
+    const overId = String(over.id)
+    if (overId === "quote-line-items") {
+      addLineFromCatalog(material)
+      return
+    }
+    if (overId.startsWith("np-")) {
+      const match = /^np-(\d+)/.exec(overId)
+      const parentIndex = match ? Number.parseInt(match[1], 10) : Number.NaN
+      if (Number.isFinite(parentIndex)) {
+        addCatalogChildToNp(parentIndex, material)
+      }
+    }
+  }, [addLineFromCatalog, addCatalogChildToNp, isDesktopDnD])
+
+  const handleCatalogPickerSelect = useCallback((fromCatalog) => {
+    if (catalogPickerNpIndex == null) return
+    addCatalogChildToNp(catalogPickerNpIndex, fromCatalog)
+  }, [catalogPickerNpIndex, addCatalogChildToNp])
+
   const addAdHocLine = () => {
-    setFormData((prev) => ({
-      ...prev,
-      lineItems: [
-        ...prev.lineItems,
-        {
-          ...emptyLine(),
-          materialCode: `NP-${prev.lineItems.filter((i) => i.isAdHoc).length + 1}`,
-          isAdHoc: true,
-          description: "",
-        },
-      ],
-    }))
+    setFormData((prev) => {
+      const code = nextNpCode(
+        catalog,
+        prev.lineItems.map((item) => item.materialCode)
+      )
+      return {
+        ...prev,
+        lineItems: [
+          ...prev.lineItems,
+          {
+            ...emptyLine(),
+            materialCode: code,
+            isAdHoc: true,
+            description: "",
+            fullDescription: "",
+            children: [],
+            unitPrice: 0,
+          },
+        ],
+      }
+    })
   }
 
   const removeLine = (index) => {
+    setCatalogPickerNpIndex((prev) => {
+      if (prev == null) return prev
+      if (prev === index) return null
+      if (prev > index) return prev - 1
+      return prev
+    })
     setFormData((prev) => ({
       ...prev,
       lineItems: prev.lineItems.filter((_, i) => i !== index),
@@ -445,13 +662,69 @@ export default function Quote() {
     lineItems: formData.lineItems.filter((i) => i.description?.trim()),
   })
 
-  const ensureQuote = async () => {
+  /** Persiste i NP compilati nel prezziario del capitolato attivo. */
+  const syncAdHocMaterialsToCatalog = async (lineItems) => {
+    const townHallKey = queryParams.comune || config?.townHallId
+    if (!townHallKey) return lineItems
+
+    const adHocItems = (lineItems || []).filter(
+      (item) => item.isAdHoc
+        && String(item.description || "").trim()
+        && (item.children || []).some((c) => String(c.description || "").trim())
+    )
+    if (adHocItems.length === 0) return lineItems
+
+    const codeUpdates = {}
+
+    for (const item of adHocItems) {
+      const children = item.children || []
+      const res = await api.post(
+        `/api/maintenance-config/${encodeURIComponent(townHallKey)}/materials/np`,
+        {
+          code: item.materialCode || undefined,
+          description: String(item.description).trim(),
+          fullDescription: String(item.fullDescription || "").trim(),
+          udm: normalizeUdm(item.udm),
+          unitPrice: sumBomUnitPrice(children),
+          category: item.category || "",
+          bom: children,
+        }
+      )
+      const assigned = res.data?.materialCode
+      if (assigned && assigned !== item.materialCode) {
+        codeUpdates[item.materialCode] = assigned
+      }
+      if (res.data?.config) {
+        setConfig(res.data.config)
+      }
+    }
+
+    const nextItems = (lineItems || []).map((item) => (
+      codeUpdates[item.materialCode]
+        ? { ...item, materialCode: codeUpdates[item.materialCode] }
+        : item
+    ))
+
+    if (Object.keys(codeUpdates).length > 0) {
+      setFormData((prev) => ({ ...prev, lineItems: nextItems }))
+    }
+
+    const configRes = await getMaintenanceConfig(townHallKey)
+    if (configRes?.data?.config) {
+      setConfig(configRes.data.config)
+      setCapitolatoValidity(configRes.data.validity || null)
+    }
+
+    return nextItems
+  }
+
+  const ensureQuote = async (payload) => {
     if (quote?._id) return quote
     const createRes = await api.post("/api/quotes", {
       townHallName: queryParams.comune,
       lightPointId: queryParams.id || lightpoint?._id,
       reportId: queryParams.reportId || report?._id || null,
-      ...buildPayload(),
+      ...payload,
     })
     setQuote(createRes.data)
     return createRes.data
@@ -461,10 +734,17 @@ export default function Quote() {
     setSaving(true)
     setError("")
     try {
-      const current = await ensureQuote()
-      const patchRes = await api.patch(`/api/quotes/${current._id}`, buildPayload())
+      const syncedItems = await syncAdHocMaterialsToCatalog(formData.lineItems)
+      const payload = {
+        ...buildPayload(),
+        lineItems: syncedItems.filter((i) => i.description?.trim()),
+      }
+      const current = await ensureQuote(payload)
+      const patchRes = await api.patch(`/api/quotes/${current._id}`, payload)
       setQuote(patchRes.data)
-      setLastSavedSnapshot(serializeFormSnapshot(formData))
+      const snapshotData = { ...formData, lineItems: syncedItems }
+      setFormData(snapshotData)
+      setLastSavedSnapshot(serializeFormSnapshot(snapshotData))
       if (showToast) toast.success("Bozza salvata")
       return { ok: true, quote: patchRes.data }
     } catch (err) {
@@ -515,6 +795,41 @@ export default function Quote() {
     requestLeave(() => navigate("/dashboard"))
   }, [navigate, requestLeave])
 
+  /** Torna in Dashboard e centra/apre il PL (flyTo in semplice, zoom+click in complessa). */
+  const goToLightPointOnMap = useCallback(() => {
+    const lat = lightpoint?.lat
+    const lng = lightpoint?.lng
+    const comune = queryParams.comune
+    if (
+      !comune
+      || lat == null
+      || lat === ""
+      || lng == null
+      || lng === ""
+    ) {
+      toast.error("Coordinate del punto luce non disponibili.")
+      return
+    }
+    requestLeave(() => {
+      navigate("/dashboard", {
+        state: {
+          comune,
+          focusLat: String(lat),
+          focusLng: String(lng),
+          focusPalo: String(lightpoint?.numero_palo || ""),
+        },
+      })
+    })
+  }, [lightpoint, queryParams.comune, navigate, requestLeave])
+
+  const canGoToLightPoint = Boolean(
+    queryParams.comune
+    && lightpoint?.lat != null
+    && lightpoint?.lat !== ""
+    && lightpoint?.lng != null
+    && lightpoint?.lng !== "",
+  )
+
   const handleLeaveCancel = () => {
     setShowLeaveConfirm(false)
     cancelPendingNavigation()
@@ -558,15 +873,21 @@ export default function Quote() {
     setSubmitting(true)
     setError("")
     try {
-      const payload = buildPayload()
+      const syncedItems = await syncAdHocMaterialsToCatalog(formData.lineItems)
+      const payload = {
+        ...buildPayload(),
+        lineItems: syncedItems.filter((i) => i.description?.trim()),
+      }
       if (!payload.lineItems.length) {
         toast.error("Aggiungere almeno una voce di materiale.")
         setSubmitting(false)
         return
       }
-      const current = await ensureQuote()
+      const current = await ensureQuote(payload)
       await api.patch(`/api/quotes/${current._id}`, payload)
-      setLastSavedSnapshot(serializeFormSnapshot(formData))
+      const snapshotData = { ...formData, lineItems: syncedItems }
+      setFormData(snapshotData)
+      setLastSavedSnapshot(serializeFormSnapshot(snapshotData))
       const submitRes = await api.post(`/api/quotes/${current._id}/submit`)
       setQuote(submitRes.data)
       toast.success("Preventivo inviato in approvazione al DEC")
@@ -584,6 +905,23 @@ export default function Quote() {
       return
     }
 
+    const emptyNp = formData.lineItems
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => isEmptyNpLine(item))
+    if (emptyNp.length > 0) {
+      const labels = emptyNp
+        .slice(0, 3)
+        .map(({ item, index }) => item.materialCode?.trim() || `voce ${index + 1}`)
+        .join(", ")
+      const extra = emptyNp.length > 3 ? ` e altri ${emptyNp.length - 3}` : ""
+      toast.error(
+        emptyNp.length === 1
+          ? `Il nuovo prezzo (${labels}) non ha componenti nella distinta.`
+          : `Nuovi prezzi senza componenti: ${labels}${extra}. Aggiungi almeno un componente a ciascuno.`
+      )
+      return
+    }
+
     const missing = collectMissingDescriptionSummary(formData.lineItems)
     if (missing.total > 0) {
       setMissingFieldSummary(missing.preview)
@@ -597,14 +935,25 @@ export default function Quote() {
 
   const handleConfirmSubmitWithMissing = async () => {
     setShowSubmitConfirm(false)
+    if (formData.lineItems.some((item) => isEmptyNpLine(item))) {
+      toast.error("Impossibile inviare: un nuovo prezzo non ha componenti nella distinta.")
+      return
+    }
     await submitQuote()
   }
 
   const syncQuoteForExport = async (quoteId) => {
     if (!canEdit) return quoteId
-    const patchRes = await api.patch(`/api/quotes/${quoteId}`, buildPayload())
+    const syncedItems = await syncAdHocMaterialsToCatalog(formData.lineItems)
+    const payload = {
+      ...buildPayload(),
+      lineItems: syncedItems.filter((i) => i.description?.trim()),
+    }
+    const patchRes = await api.patch(`/api/quotes/${quoteId}`, payload)
     setQuote(patchRes.data)
-    setLastSavedSnapshot(serializeFormSnapshot(formData))
+    const snapshotData = { ...formData, lineItems: syncedItems }
+    setFormData(snapshotData)
+    setLastSavedSnapshot(serializeFormSnapshot(snapshotData))
     return patchRes.data._id
   }
 
@@ -774,7 +1123,22 @@ export default function Quote() {
             <>
               <SectionHeading>Contesto</SectionHeading>
               <div className="mb-6 p-4 rounded-xl bg-blue-900/20 border border-blue-500/20 text-sm text-white space-y-1">
-                <p><span className="font-medium text-blue-200">Punto:</span> {lightpoint?.numero_palo || "—"}</p>
+                <p className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-medium text-blue-200">Punto:</span>
+                  {canGoToLightPoint ? (
+                    <button
+                      type="button"
+                      onClick={goToLightPointOnMap}
+                      title="Centra la mappa sul punto luce"
+                      className={`inline-flex items-center gap-1 text-blue-300 hover:text-blue-100 underline underline-offset-2 ${btnSecondaryClass}`}
+                    >
+                      <span>{lightpoint?.numero_palo || "—"}</span>
+                      <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    </button>
+                  ) : (
+                    <span>{lightpoint?.numero_palo || "—"}</span>
+                  )}
+                </p>
                 <p><span className="font-medium text-blue-200">Comune:</span> {queryParams.comune || "—"}</p>
                 {report && (
                   <div className="flex items-start gap-2">
@@ -909,11 +1273,23 @@ export default function Quote() {
 
             <SectionHeading>Materiali</SectionHeading>
             <div className="space-y-5">
+            <DndContext
+              sensors={dndSensors}
+              collisionDetection={catalogDropCollisionDetection}
+              onDragStart={handleCatalogDragStart}
+              onDragEnd={handleCatalogDragEnd}
+              onDragCancel={handleCatalogDragCancel}
+            >
             {canEdit && catalog.length > 0 && (
               <div className="space-y-2">
                 <label htmlFor="quote-catalog-search" className="block text-sm font-medium text-blue-200">
                   Catalogo materiali
                 </label>
+                <p className="text-xs text-blue-200/80">
+                  {isDesktopDnD
+                    ? "Clicca per aggiungere alle voci, oppure trascina la riga sull\u2019elenco preventivo o su un Nuovo prezzo."
+                    : "Clicca una voce per aggiungerla al preventivo. Su desktop puoi anche trascinarla."}
+                </p>
                 <input
                   id="quote-catalog-search"
                   type="search"
@@ -924,31 +1300,18 @@ export default function Quote() {
                 />
                 {catalogMatches.length > 0 && (
                   <p className="text-xs text-blue-200/90">
-                    {filteredCatalog.length} di {catalogMatches.length} risultati
+                    {catalogMatches.length} {catalogMatches.length === 1 ? "voce" : "voci"}
+                    {isCatalogSearching ? " trovate" : " nel catalogo"}
+                    {" · "}sezioni per prezzario e categoria
                   </p>
                 )}
-                <div className="max-h-36 overflow-y-auto overscroll-y-contain touch-pan-y rounded-xl border border-blue-500/20 divide-y divide-blue-500/10 scrollbar-app">
-                  {filteredCatalog.map((m) => (
-                    <CatalogMaterialRow
-                      key={m.code}
-                      material={m}
-                      onAdd={addLineFromCatalog}
-                      buttonClassName={btnSecondaryClass}
-                    />
-                  ))}
-                  {filteredCatalog.length === 0 && (
-                    <p className="px-3 py-4 text-xs text-blue-200/80 text-center">Nessun materiale trovato.</p>
-                  )}
-                </div>
-                {hasMoreCatalogResults && (
-                  <button
-                    type="button"
-                    onClick={() => setCatalogLimit((prev) => prev + CATALOG_PAGE_SIZE)}
-                    className={`text-xs px-3 py-1.5 rounded-lg border border-blue-500/30 text-blue-200 hover:bg-blue-900/30 ${btnSecondaryClass}`}
-                  >
-                    Mostra altri ({catalogMatches.length - filteredCatalog.length} rimanenti)
-                  </button>
-                )}
+                <CatalogMaterialSections
+                  materials={catalogMatches}
+                  onAdd={addLineFromCatalog}
+                  draggable={isDesktopDnD}
+                  expandAll={isCatalogSearching}
+                  buttonClassName={btnSecondaryClass}
+                />
               </div>
             )}
 
@@ -973,6 +1336,17 @@ export default function Quote() {
                 </div>
               )}
 
+              {emptyNpIndices.size > 0 && canEdit && (
+                <div role="status" className="p-2.5 rounded-lg bg-amber-900/20 border border-amber-500/30 text-amber-100 text-xs flex gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <p>
+                    {emptyNpIndices.size === 1
+                      ? "1 nuovo prezzo non ha componenti nella distinta: aggiungine almeno uno prima di inviare."
+                      : `${emptyNpIndices.size} nuovi prezzi non hanno componenti nella distinta: aggiungine almeno uno a ciascuno prima di inviare.`}
+                  </p>
+                </div>
+              )}
+
               {contestedCount > 0 && canEdit && (
                 <div role="status" className="p-2.5 rounded-lg bg-red-900/20 border border-red-500/30 text-red-100 text-xs flex gap-2">
                   <AlertCircle className="h-4 w-4 shrink-0" />
@@ -983,18 +1357,42 @@ export default function Quote() {
                 </div>
               )}
 
+              <QuoteLineItemsDropZone disabled={!canEdit || !isDesktopDnD} className="space-y-3 border border-transparent">
               {formData.lineItems.length === 0 ? (
-                <div className="p-6 rounded-xl border border-blue-500/20 bg-blue-900/10 text-center text-sm text-blue-200">
-                  Nessuna voce inserita. Aggiungi materiali dal catalogo o crea un nuovo prezzo.
+                <div className="p-6 rounded-xl border border-dashed border-blue-500/30 bg-blue-900/10 text-center text-sm text-blue-200">
+                  {isDesktopDnD
+                    ? "Nessuna voce inserita. Aggiungi materiali dal catalogo (clic o drag) o crea un nuovo prezzo."
+                    : "Nessuna voce inserita. Aggiungi materiali dal catalogo o crea un nuovo prezzo."}
                 </div>
-              ) : (
-                <>
-                  <div className="md:hidden space-y-3">
+              ) : !isMdUp ? (
+                  <div className="space-y-3">
                     {formData.lineItems.map((item, index) => {
                       const isCatalogItem = !item.isAdHoc
                       const lockCatalogFields = isCatalogItem && !item.isContested
                       const lineTotal = Number(item.quantity || 0) * Number(item.unitPrice || 0)
                       const isMissingDescription = missingDescriptionIndices.has(index)
+                      const isEmptyNp = emptyNpIndices.has(index)
+
+                      if (item.isAdHoc) {
+                        return (
+                          <QuoteNpLineCard
+                            key={index}
+                            item={item}
+                            index={index}
+                            canEdit={canEdit}
+                            enableCatalogDrop={isDesktopDnD}
+                            isMissingDescription={isMissingDescription}
+                            isEmptyBom={isEmptyNp}
+                            materialCategoryOptions={materialCategoryOptions}
+                            onUpdateLine={updateLine}
+                            onRemoveLine={removeLine}
+                            onUpdateChild={updateChild}
+                            onRemoveChild={removeChild}
+                            onAddAdHocChild={addAdHocChild}
+                            onRequestCatalog={setCatalogPickerNpIndex}
+                          />
+                        )
+                      }
 
                       return (
                         <div
@@ -1002,16 +1400,13 @@ export default function Quote() {
                           className={`p-3 rounded-xl border space-y-3 ${
                             item.isContested
                               ? "bg-red-950/20 border-red-500/40"
-                              : item.isAdHoc
-                                ? "bg-amber-950/15 border-amber-500/25"
-                                : "bg-black/20 border-blue-500/20"
+                              : "bg-black/20 border-blue-500/20"
                           } ${isMissingDescription && !item.isContested ? "ring-1 ring-amber-500/40" : ""}`}
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0">
                               <p className="text-xs text-blue-300 font-medium">
                                 Voce {index + 1}
-                                {item.isAdHoc ? " · Nuovo prezzo" : ""}
                                 {item.isContested ? " · Contestata" : ""}
                               </p>
                               {lockCatalogFields || !canEdit ? (
@@ -1039,16 +1434,18 @@ export default function Quote() {
                           </div>
 
                           <div>
-                            <label className="block text-xs text-blue-300 mb-1">Descrizione</label>
+                            <label className="block text-xs text-blue-300 mb-1">Descrizione breve</label>
                             {lockCatalogFields || !canEdit ? (
                               <TruncatedTextDetails
                                 text={item.description}
-                                title={`Voce ${index + 1}`}
+                                detailsText={item.fullDescription}
+                                title={lineDetailsTitle(item, `Voce ${index + 1}`)}
                                 lines={2}
                                 className="text-sm text-white"
+                                bom={item.children || item.bom || []}
                                 fields={[
                                   { label: "Codice", value: item.materialCode || "—" },
-                                  { label: "U.M.", value: item.udm || "—" },
+                                  { label: "U.M.", value: formatUdmLabel(item.udm) },
                                   {
                                     label: "Prezzo unitario",
                                     value: `€ ${Number(item.unitPrice || 0).toFixed(2)}`,
@@ -1058,16 +1455,39 @@ export default function Quote() {
                             ) : (
                               <>
                                 <input
-                                  aria-label={`Descrizione voce ${index + 1}`}
+                                  aria-label={`Descrizione breve voce ${index + 1}`}
                                   disabled={!canEdit}
-                                  placeholder="Descrizione *"
+                                  placeholder="Descrizione breve *"
                                   value={item.description}
                                   onChange={(e) => updateLine(index, { description: e.target.value })}
                                   className={inputClassWithWarning(cellInputClass, isMissingDescription)}
                                 />
                                 {isMissingDescription && (
-                                  <p className="mt-1 text-xs text-amber-300">Descrizione obbligatoria</p>
+                                  <p className="mt-1 text-xs text-amber-300">Descrizione breve obbligatoria</p>
                                 )}
+                                <label className="block text-xs text-blue-300 mt-2 mb-1">Descrizione completa</label>
+                                <textarea
+                                  aria-label={`Descrizione completa voce ${index + 1}`}
+                                  disabled={!canEdit}
+                                  rows={2}
+                                  placeholder="Descrizione completa (opzionale)"
+                                  value={item.fullDescription || ""}
+                                  onChange={(e) => updateLine(index, { fullDescription: e.target.value })}
+                                  className={`${cellInputClass} resize-y min-h-[3rem]`}
+                                />
+                                <label className="block text-xs text-blue-300 mt-2 mb-1">Categoria</label>
+                                <GlassSelect
+                                  id={`quote-line-category-mobile-${index}`}
+                                  disabled={!canEdit}
+                                  value={item.category || ""}
+                                  onChange={(value) => updateLine(index, { category: value })}
+                                  aria-label={`Categoria voce ${index + 1}`}
+                                  placeholder="Seleziona categoria…"
+                                  openUpward={false}
+                                  maxVisible={6}
+                                  className="bg-black/30 border-blue-500/20 rounded-lg px-2 py-1.5 text-sm min-h-9"
+                                  options={materialCategoryOptions}
+                                />
                               </>
                             )}
                             {item.isContested && item.contestNote && (
@@ -1081,14 +1501,13 @@ export default function Quote() {
                             <div>
                               <label className="block text-xs text-blue-300 mb-1">U.M.</label>
                               {lockCatalogFields || !canEdit ? (
-                                <p className="text-sm text-white">{item.udm || "—"}</p>
+                                <p className="text-sm text-white">{formatUdmLabel(item.udm)}</p>
                               ) : (
-                                <input
+                                <UdmSelect
                                   aria-label={`Unità di misura voce ${index + 1}`}
                                   disabled={!canEdit}
                                   value={item.udm}
-                                  onChange={(e) => updateLine(index, { udm: e.target.value })}
-                                  className={cellInputClass}
+                                  onChange={(next) => updateLine(index, { udm: next })}
                                 />
                               )}
                             </div>
@@ -1132,13 +1551,14 @@ export default function Quote() {
                       )
                     })}
                   </div>
-
-                  <div className={`hidden md:block ${TABLE_SCROLL_X} rounded-xl border border-blue-500/20 bg-black/20`}>
-                    <table className="w-full min-w-[640px] text-sm text-left">
+              ) : (
+                  <div className={`${TABLE_SCROLL_X} rounded-xl border border-blue-500/20 bg-black/20`}>
+                    <table className="w-full min-w-[760px] text-sm text-left">
                       <thead className="text-blue-200 border-b border-blue-500/20 bg-blue-950/50">
                         <tr>
                           <th className="px-3 py-2.5 font-medium whitespace-nowrap">Codice</th>
                           <th className="px-3 py-2.5 font-medium min-w-[160px]">Descrizione</th>
+                          <th className="px-3 py-2.5 font-medium min-w-[140px]">Categoria</th>
                           <th className="px-3 py-2.5 font-medium whitespace-nowrap">U.M.</th>
                           <th className="px-3 py-2.5 font-medium whitespace-nowrap text-right">Qtà</th>
                           <th className="px-3 py-2.5 font-medium whitespace-nowrap text-right">Prezzo unit.</th>
@@ -1152,17 +1572,37 @@ export default function Quote() {
                           const lockCatalogFields = isCatalogItem && !item.isContested
                           const lineTotal = Number(item.quantity || 0) * Number(item.unitPrice || 0)
                           const isMissingDescription = missingDescriptionIndices.has(index)
+                          const isEmptyNp = emptyNpIndices.has(index)
                           const cellReadOnlyClass = "text-white"
+
+                          if (item.isAdHoc) {
+                            return (
+                              <QuoteNpTableRows
+                                key={index}
+                                item={item}
+                                index={index}
+                                canEdit={canEdit}
+                                enableCatalogDrop={isDesktopDnD}
+                                isMissingDescription={isMissingDescription}
+                                isEmptyBom={isEmptyNp}
+                                materialCategoryOptions={materialCategoryOptions}
+                                onUpdateLine={updateLine}
+                                onRemoveLine={removeLine}
+                                onUpdateChild={updateChild}
+                                onRemoveChild={removeChild}
+                                onAddAdHocChild={addAdHocChild}
+                                onRequestCatalog={setCatalogPickerNpIndex}
+                              />
+                            )
+                          }
 
                           return (
                             <tr
                               key={index}
-                              className={`border-b border-blue-500/10 last:border-b-0 ${
+                              className={`border-b border-blue-500/10 ${
                                 item.isContested
                                   ? "bg-red-950/20"
-                                  : item.isAdHoc
-                                    ? "bg-amber-950/15"
-                                    : "hover:bg-blue-900/10"
+                                  : "hover:bg-blue-900/10"
                               } ${isMissingDescription && !item.isContested ? "ring-1 ring-inset ring-amber-500/30" : ""}`}
                             >
                               <td className="px-3 py-2 align-middle">
@@ -1183,12 +1623,14 @@ export default function Quote() {
                                   <div>
                                     <TruncatedTextDetails
                                       text={item.description}
-                                      title={`Voce ${index + 1}`}
+                                      detailsText={item.fullDescription}
+                                      title={lineDetailsTitle(item, `Voce ${index + 1}`)}
                                       lines={2}
                                       className={cellReadOnlyClass}
+                                      bom={item.children || []}
                                       fields={[
                                         { label: "Codice", value: item.materialCode || "—" },
-                                        { label: "U.M.", value: item.udm || "—" },
+                                        { label: "U.M.", value: formatUdmLabel(item.udm) },
                                         {
                                           label: "Prezzo unitario",
                                           value: `€ ${Number(item.unitPrice || 0).toFixed(2)}`,
@@ -1202,12 +1644,12 @@ export default function Quote() {
                                     )}
                                   </div>
                                 ) : (
-                                  <div>
+                                  <div className="space-y-1.5">
                                     <input
-                                      aria-label={`Descrizione voce ${index + 1}`}
+                                      aria-label={`Descrizione breve voce ${index + 1}`}
                                       aria-invalid={isMissingDescription}
                                       disabled={!canEdit}
-                                      placeholder="Descrizione *"
+                                      placeholder="Descrizione breve *"
                                       value={item.description}
                                       onChange={(e) => updateLine(index, { description: e.target.value })}
                                       className={inputClassWithWarning(cellInputClass, isMissingDescription)}
@@ -1215,19 +1657,47 @@ export default function Quote() {
                                     {isMissingDescription && (
                                       <p className="mt-0.5 text-[10px] text-amber-300">Obbligatoria</p>
                                     )}
+                                    <textarea
+                                      aria-label={`Descrizione completa voce ${index + 1}`}
+                                      disabled={!canEdit}
+                                      rows={2}
+                                      placeholder="Descrizione completa"
+                                      value={item.fullDescription || ""}
+                                      onChange={(e) => updateLine(index, { fullDescription: e.target.value })}
+                                      className={`${cellInputClass} resize-y min-h-[2.75rem] text-xs`}
+                                    />
                                   </div>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 align-middle min-w-[170px]">
+                                {lockCatalogFields || !canEdit ? (
+                                  <span className={`${cellReadOnlyClass} text-xs`}>
+                                    {item.category || "—"}
+                                  </span>
+                                ) : (
+                                  <GlassSelect
+                                    id={`quote-line-category-${index}`}
+                                    disabled={!canEdit}
+                                    value={item.category || ""}
+                                    onChange={(value) => updateLine(index, { category: value })}
+                                    aria-label={`Categoria voce ${index + 1}`}
+                                    placeholder="Categoria…"
+                                    openUpward={false}
+                                    maxVisible={6}
+                                    className="bg-black/30 border-blue-500/20 rounded-lg px-2 py-1.5 text-xs min-h-9"
+                                    options={materialCategoryOptions}
+                                  />
                                 )}
                               </td>
                               <td className="px-3 py-2 align-middle whitespace-nowrap">
                                 {lockCatalogFields || !canEdit ? (
-                                  <span className={cellReadOnlyClass}>{item.udm || "—"}</span>
+                                  <span className={cellReadOnlyClass}>{formatUdmLabel(item.udm)}</span>
                                 ) : (
-                                  <input
+                                  <UdmSelect
                                     aria-label={`Unità di misura voce ${index + 1}`}
                                     disabled={!canEdit}
                                     value={item.udm}
-                                    onChange={(e) => updateLine(index, { udm: e.target.value })}
-                                    className={`${cellInputClass} w-16`}
+                                    onChange={(next) => updateLine(index, { udm: next })}
                                   />
                                 )}
                               </td>
@@ -1280,9 +1750,24 @@ export default function Quote() {
                       </tbody>
                     </table>
                   </div>
-                </>
               )}
+              </QuoteLineItemsDropZone>
             </div>
+
+            {typeof document !== "undefined"
+              && isDesktopDnD
+              && activeCatalogDrag
+              && createPortal(
+                <div
+                  ref={catalogDragOverlayRef}
+                  className="pointer-events-none fixed z-[12000]"
+                  style={{ transform: "translate(-12px, -50%)" }}
+                >
+                  <CatalogDragSkeleton material={activeCatalogDrag} />
+                </div>,
+                document.body
+              )}
+            </DndContext>
             </div>
 
             <SectionHeading>Riepilogo economico</SectionHeading>
@@ -1303,7 +1788,7 @@ export default function Quote() {
                   className={fieldInputClass}
                 />
                 <p className="mt-1 text-xs text-blue-200/90">
-                  Minimo da capitolato: {minDiscountPercent}%
+                  Minimo da capitolato: {minDiscountPercent}% — applicato al lordo meno oneri
                 </p>
               </div>
               <div>
@@ -1418,6 +1903,18 @@ export default function Quote() {
           </div>
         </div>
       </div>
+      <CatalogPickerModal
+        isOpen={catalogPickerNpIndex != null}
+        onClose={() => setCatalogPickerNpIndex(null)}
+        catalog={catalog}
+        onSelect={handleCatalogPickerSelect}
+        title="Aggiungi da catalogo"
+        description={
+          catalogPickerNpIndex != null
+            ? `Seleziona una voce da aggiungere a ${formData.lineItems[catalogPickerNpIndex]?.materialCode || `voce ${catalogPickerNpIndex + 1}`}.`
+            : undefined
+        }
+      />
       <ConfirmDialog
         isOpen={showLeaveConfirm}
         title="Salvare la bozza?"

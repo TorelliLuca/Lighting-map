@@ -8,10 +8,14 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Eye,
-  Home,
 } from "lucide-react"
 import { LightbulbLoader } from "../components/lightbulb-loader"
 import { BackNavigationButton } from "../components/BackNavigationButton"
+import {
+  GoToLightPointButton,
+  LightPointMapLink,
+} from "../components/GoToLightPointControl"
+import InfoTooltip from "../components/ui/InfoTooltip"
 import { QuoteStatusBadge } from "../components/ui/QuoteStatusBadge"
 import { RiskClassBadge } from "../components/ui/RiskClassBadge"
 import { canApproveQuoteByRole, formatReportFaultLabel } from "../utils/utils"
@@ -23,22 +27,47 @@ const TYPE_FILTERS = [
 ]
 
 const STATUS_FILTERS_QUOTE = [
-  { value: "PENDING_APPROVAL,APPROVED", label: "Tutti" },
   { value: "PENDING_APPROVAL", label: "In approvazione" },
   { value: "APPROVED", label: "Approvati" },
+  { value: "PENDING_APPROVAL,APPROVED", label: "Tutti" },
 ]
 
 const STATUS_FILTERS_CONSUNTIVO = [
-  { value: "PENDING_APPROVAL,APPROVED,REJECTED,NEEDS_REVISION", label: "Tutti" },
   { value: "PENDING_APPROVAL", label: "In revisione" },
   { value: "APPROVED", label: "Approvati" },
   { value: "REJECTED,NEEDS_REVISION", label: "Da revisionare" },
+  { value: "PENDING_APPROVAL,APPROVED,REJECTED,NEEDS_REVISION", label: "Tutti" },
 ]
+
+const ALL_STATUS_BY_TYPE = {
+  QUOTE: "PENDING_APPROVAL,APPROVED",
+  CONSUNTIVO: "PENDING_APPROVAL,APPROVED,REJECTED,NEEDS_REVISION",
+}
+
+const DEFAULT_STATUS = "PENDING_APPROVAL"
 
 const normalizeDocType = (raw) => {
   const value = String(raw || "").toUpperCase()
   if (value === "CONSUNTIVO" || value === "CONSUNTIVI") return "CONSUNTIVO"
   return "QUOTE"
+}
+
+const statusFiltersForType = (type) =>
+  type === "CONSUNTIVO" ? STATUS_FILTERS_CONSUNTIVO : STATUS_FILTERS_QUOTE
+
+const normalizeStatusFilter = (raw, type) => {
+  const filters = statusFiltersForType(type)
+  const value = String(raw || "").trim()
+  if (filters.some((f) => f.value === value)) return value
+  return DEFAULT_STATUS
+}
+
+const matchesStatusFilter = (docStatus, filterValue) => {
+  const allowed = String(filterValue)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+  return allowed.includes(docStatus)
 }
 
 const reportLabel = (doc) => {
@@ -67,7 +96,7 @@ const ApprovalActionButton = ({ pending, onClick, className = "" }) => (
   <button
     type="button"
     onClick={onClick}
-    className={`inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg border min-h-11 text-sm ${
+    className={`inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-lg border min-h-11 text-sm cursor-pointer transition-colors duration-150 ${
       pending
         ? "bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-100 border-emerald-500/30"
         : "bg-blue-600/20 hover:bg-blue-600/40 text-blue-100 border-blue-500/30"
@@ -82,14 +111,26 @@ const ApprovalActionButton = ({ pending, onClick, className = "" }) => (
   </button>
 )
 
-const ApprovalMobileCard = ({ doc, isConsuntivo, onOpen }) => {
+const ApprovalMobileCard = ({ doc, isConsuntivo, comune, navigate, onOpen }) => {
   const pending = doc.status === "PENDING_APPROVAL"
   return (
-    <article className="bg-black/40 p-4 rounded-xl border border-blue-500/20 space-y-3">
+    <article
+      className={`p-4 rounded-xl border space-y-3 ${
+        pending
+          ? "bg-emerald-950/30 border-emerald-500/30"
+          : "bg-black/40 border-blue-500/20"
+      }`}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-white font-semibold">
-            PL {doc.lightPointId?.numero_palo || "—"}
+            <LightPointMapLink
+              lightPoint={doc.lightPointId}
+              comune={comune}
+              navigate={navigate}
+              prefix="PL "
+              className="font-semibold text-white hover:text-blue-100"
+            />
           </p>
           {isConsuntivo ? (
             <p className="text-sm text-blue-200/90 mt-0.5">
@@ -98,14 +139,10 @@ const ApprovalMobileCard = ({ doc, isConsuntivo, onOpen }) => {
           ) : null}
           <p className="text-sm text-blue-100 mt-1 break-words">{reportLabel(doc)}</p>
         </div>
-        {!isConsuntivo ? (
-          <RiskClassBadge riskClass={doc.priorityClass} className="shrink-0" />
-        ) : (
-          <RiskClassBadge
-            riskClass={doc.priorityClass || doc.parentQuoteId?.priorityClass}
-            className="shrink-0"
-          />
-        )}
+        <RiskClassBadge
+          riskClass={doc.priorityClass || doc.parentQuoteId?.priorityClass}
+          className="shrink-0"
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -123,11 +160,18 @@ const ApprovalMobileCard = ({ doc, isConsuntivo, onOpen }) => {
         ) : null}
       </div>
 
-      <div className="flex items-center justify-between gap-3 pt-1 border-t border-blue-500/15">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-1 border-t border-blue-500/15">
         <p className="text-white font-medium whitespace-nowrap">
           € {Number(doc.total || 0).toFixed(2)}
         </p>
-        <ApprovalActionButton pending={pending} onClick={() => onOpen(doc)} />
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <GoToLightPointButton
+            lightPoint={doc.lightPointId}
+            comune={comune}
+            navigate={navigate}
+          />
+          <ApprovalActionButton pending={pending} onClick={() => onOpen(doc)} />
+        </div>
       </div>
     </article>
   )
@@ -139,20 +183,16 @@ export default function QuotesApproval() {
   const [searchParams, setSearchParams] = useSearchParams()
   const comune = searchParams.get("comune") || ""
   const typeFilter = normalizeDocType(searchParams.get("tipo") || searchParams.get("type"))
+  const statusFilter = normalizeStatusFilter(
+    searchParams.get("stato"),
+    typeFilter
+  )
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
-  const [items, setItems] = useState([])
-  const [statusFilter, setStatusFilter] = useState(
-    typeFilter === "CONSUNTIVO"
-      ? "PENDING_APPROVAL,APPROVED,REJECTED,NEEDS_REVISION"
-      : "PENDING_APPROVAL,APPROVED"
-  )
+  const [allItems, setAllItems] = useState([])
 
-  const statusFilters = typeFilter === "CONSUNTIVO"
-    ? STATUS_FILTERS_CONSUNTIVO
-    : STATUS_FILTERS_QUOTE
-
+  const statusFilters = statusFiltersForType(typeFilter)
   const isConsuntivo = typeFilter === "CONSUNTIVO"
 
   const goToDashboard = useCallback(() => {
@@ -165,22 +205,33 @@ export default function QuotesApproval() {
 
   const infoText = useMemo(() => {
     if (isConsuntivo) {
-      return "Consuntivi in attesa di revisione RUP, già approvati o rifiutati. In caso di rifiuto puoi indicare le voci non chiare; il manutentore corregge e reinoltra."
+      return "Consuntivi in attesa di revisione RUP, già approvati o rifiutati. In caso di rifiuto puoi contestare voci specifiche e/o lasciare un motivo generale; il manutentore corregge e reinoltra."
     }
     return "Preventivi in attesa di decisione DEC/RUP e già approvati. All'approvazione verrà creata una segnalazione straordinaria sul punto luce con scadenza calcolata dai giorni materiale + opera."
   }, [isConsuntivo])
 
+  const updateParams = useCallback(
+    ({ tipo, stato } = {}) => {
+      const next = new URLSearchParams(searchParams)
+      if (comune) next.set("comune", comune)
+      if (tipo != null) {
+        next.set("tipo", tipo === "CONSUNTIVO" ? "consuntivi" : "preventivi")
+      }
+      if (stato != null) {
+        next.set("stato", stato)
+      }
+      setSearchParams(next, { replace: true })
+    },
+    [searchParams, setSearchParams, comune]
+  )
+
   const setTypeFilter = (nextType) => {
     const normalized = normalizeDocType(nextType)
-    const next = new URLSearchParams(searchParams)
-    next.set("tipo", normalized === "CONSUNTIVO" ? "consuntivi" : "preventivi")
-    if (comune) next.set("comune", comune)
-    setSearchParams(next, { replace: true })
-    setStatusFilter(
-      normalized === "CONSUNTIVO"
-        ? "PENDING_APPROVAL,APPROVED,REJECTED,NEEDS_REVISION"
-        : "PENDING_APPROVAL,APPROVED"
-    )
+    updateParams({ tipo: normalized, stato: DEFAULT_STATUS })
+  }
+
+  const setStatusFilter = (nextStatus) => {
+    updateParams({ stato: normalizeStatusFilter(nextStatus, typeFilter) })
   }
 
   const loadItems = useCallback(async () => {
@@ -192,10 +243,10 @@ export default function QuotesApproval() {
         params: {
           townHallName: comune,
           type: typeFilter,
-          status: statusFilter,
+          status: ALL_STATUS_BY_TYPE[typeFilter],
         },
       })
-      setItems(res.data || [])
+      setAllItems(res.data || [])
     } catch (err) {
       console.error(err)
       setError(
@@ -207,7 +258,7 @@ export default function QuotesApproval() {
     } finally {
       setLoading(false)
     }
-  }, [comune, typeFilter, statusFilter, isConsuntivo])
+  }, [comune, typeFilter, isConsuntivo])
 
   useEffect(() => {
     if (!userData) {
@@ -226,6 +277,34 @@ export default function QuotesApproval() {
     loadItems()
   }, [userData, comune, navigate, loadItems])
 
+  // Normalizza URL se manca/è invalido lo stato
+  useEffect(() => {
+    const raw = searchParams.get("stato")
+    const normalized = normalizeStatusFilter(raw, typeFilter)
+    if (raw === normalized) return
+    const next = new URLSearchParams(searchParams)
+    if (comune) next.set("comune", comune)
+    next.set("stato", normalized)
+    setSearchParams(next, { replace: true })
+  }, [searchParams, typeFilter, comune, setSearchParams])
+
+  const statusCounts = useMemo(() => {
+    const counts = {}
+    for (const filter of statusFilters) {
+      counts[filter.value] = allItems.filter((doc) =>
+        matchesStatusFilter(doc.status, filter.value)
+      ).length
+    }
+    return counts
+  }, [allItems, statusFilters])
+
+  const items = useMemo(
+    () => allItems.filter((doc) => matchesStatusFilter(doc.status, statusFilter)),
+    [allItems, statusFilter]
+  )
+
+  const pendingCount = statusCounts[DEFAULT_STATUS] || 0
+
   const openDoc = (doc) => {
     const navState = comune ? { comune } : undefined
     if (doc.type === "CONSUNTIVO" || isConsuntivo) {
@@ -241,64 +320,106 @@ export default function QuotesApproval() {
 
   return (
     <div className={`${PAGE_SCROLL_SHELL} bg-gradient-to-br from-black via-blue-950 to-black p-4 sm:p-6`}>
-      <div className="max-w-5xl mx-auto">
-        <div className="flex items-center justify-between gap-3 mb-6" data-tour="page-approval-title">
-          <div className="flex items-center gap-3 min-w-0">
-            <BackNavigationButton onClick={goToDashboard} />
-            <div className="min-w-0">
-              <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+      <div className="max-w-6xl mx-auto">
+        <div className="flex items-center gap-3 mb-6" data-tour="page-approval-title">
+          <BackNavigationButton onClick={goToDashboard} />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold text-white flex items-center gap-2 min-w-0">
                 <ClipboardCheck className="h-6 w-6 text-emerald-400 shrink-0" />
-                Approvazione IMS
+                <span className="truncate">Approvazione IMS</span>
               </h1>
-              <p className="text-sm text-blue-300/80 truncate">{comune || "Nessun comune"}</p>
+              <InfoTooltip text={infoText} />
             </div>
+            <p className="text-sm text-blue-300/80 truncate">{comune || "Nessun comune"}</p>
           </div>
-          <button
-            type="button"
-            onClick={goToDashboard}
-            className="p-2 rounded-full bg-blue-500/10 hover:bg-blue-500/20"
-          >
-            <Home className="h-5 w-5 text-blue-400" />
-          </button>
         </div>
 
-        <div className="mb-4 p-3 rounded-xl bg-emerald-900/20 border border-emerald-500/30 text-sm text-emerald-100">
-          {infoText}
+        <div
+          className="mb-4 p-1 rounded-xl bg-black/40 border border-blue-500/20 inline-flex w-full sm:w-auto"
+          role="tablist"
+          aria-label="Tipo documento"
+          data-tour="page-approval-type"
+        >
+          {TYPE_FILTERS.map((filter) => {
+            const active = typeFilter === filter.value
+            return (
+              <button
+                key={filter.value}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setTypeFilter(filter.value)}
+                className={`flex-1 sm:flex-none min-h-11 px-5 rounded-lg text-sm font-semibold cursor-pointer transition-colors duration-150 ${
+                  active
+                    ? "bg-blue-700/80 text-blue-50 shadow-sm"
+                    : "text-blue-300 hover:bg-blue-900/40 hover:text-blue-100"
+                }`}
+              >
+                {filter.label}
+              </button>
+            )
+          })}
         </div>
 
-        <div className="mb-3 flex flex-wrap gap-2" data-tour="page-approval-type">
-          {TYPE_FILTERS.map((filter) => (
-            <button
-              key={filter.value}
-              type="button"
-              onClick={() => setTypeFilter(filter.value)}
-              className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
-                typeFilter === filter.value
-                  ? "bg-blue-600/40 border-blue-400/50 text-blue-50"
-                  : "bg-black/30 border-blue-500/20 text-blue-200 hover:bg-blue-900/30"
-              }`}
-            >
-              {filter.label}
-            </button>
-          ))}
+        <div
+          className={`mb-5 grid gap-2 ${
+            isConsuntivo
+              ? "grid-cols-2 lg:grid-cols-4"
+              : "grid-cols-3"
+          }`}
+          data-tour="page-approval-status"
+          role="group"
+          aria-label="Filtro stato"
+        >
+          {statusFilters.map((filter) => {
+            const active = statusFilter === filter.value
+            const count = statusCounts[filter.value] ?? 0
+            const isPendingBucket = filter.value === DEFAULT_STATUS
+            return (
+              <button
+                key={filter.value}
+                type="button"
+                onClick={() => setStatusFilter(filter.value)}
+                aria-pressed={active}
+                className={`text-left rounded-xl border px-3 py-3 min-h-11 cursor-pointer transition-colors duration-150 ${
+                  active
+                    ? isPendingBucket
+                      ? "bg-emerald-600/25 border-emerald-400/50 text-emerald-50"
+                      : "bg-blue-600/30 border-blue-400/50 text-blue-50"
+                    : "bg-black/30 border-blue-500/20 text-blue-200 hover:bg-blue-900/30"
+                }`}
+              >
+                <span className="block text-xs sm:text-sm text-blue-300/90 truncate">
+                  {filter.label}
+                </span>
+                <span className="mt-0.5 flex items-baseline gap-1.5">
+                  <span className="text-xl sm:text-2xl font-semibold tabular-nums text-white">
+                    {loading ? "—" : count}
+                  </span>
+                  {isPendingBucket && !loading && count > 0 ? (
+                    <span className="text-[11px] uppercase tracking-wide text-emerald-300/90">
+                      in coda
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+            )
+          })}
         </div>
 
-        <div className="mb-4 flex flex-wrap gap-2" data-tour="page-approval-status">
-          {statusFilters.map((filter) => (
-            <button
-              key={filter.value}
-              type="button"
-              onClick={() => setStatusFilter(filter.value)}
-              className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
-                statusFilter === filter.value
-                  ? "bg-emerald-600/40 border-emerald-400/50 text-emerald-50"
-                  : "bg-black/30 border-blue-500/20 text-blue-200 hover:bg-blue-900/30"
-              }`}
-            >
-              {filter.label}
-            </button>
-          ))}
-        </div>
+        {!loading && !error && allItems.length > 0 ? (
+          <div className="mb-3 flex items-center justify-between gap-2 text-sm text-blue-300/80">
+            <p>
+              {items.length === 1
+                ? "1 documento"
+                : `${items.length} documenti`}
+              {statusFilter === DEFAULT_STATUS && pendingCount > 0
+                ? " da esaminare"
+                : ""}
+            </p>
+          </div>
+        ) : null}
 
         {loading ? (
           <div className="flex justify-center py-16">
@@ -311,9 +432,13 @@ export default function QuotesApproval() {
           </div>
         ) : items.length === 0 ? (
           <div className="p-8 rounded-xl bg-black/40 border border-blue-500/20 text-center text-blue-200/80">
-            {isConsuntivo
-              ? "Nessun consuntivo trovato per questo filtro."
-              : "Nessun preventivo trovato per questo filtro."}
+            {statusFilter === DEFAULT_STATUS
+              ? isConsuntivo
+                ? "Nessun consuntivo in attesa di revisione."
+                : "Nessun preventivo in attesa di approvazione."
+              : isConsuntivo
+                ? "Nessun consuntivo trovato per questo filtro."
+                : "Nessun preventivo trovato per questo filtro."}
           </div>
         ) : (
           <>
@@ -323,6 +448,8 @@ export default function QuotesApproval() {
                   key={doc._id}
                   doc={doc}
                   isConsuntivo={isConsuntivo}
+                  comune={comune}
+                  navigate={navigate}
                   onOpen={openDoc}
                 />
               ))}
@@ -330,7 +457,7 @@ export default function QuotesApproval() {
 
             <div className={`hidden md:block ${TABLE_SCROLL_X} rounded-xl border border-blue-500/20 bg-black/40`}>
               <table className="w-full text-sm text-left">
-                <thead className="text-blue-300 border-b border-blue-500/20 bg-blue-950/40">
+                <thead className="text-blue-300 border-b border-blue-500/20 bg-blue-950/80 sticky top-0 z-10 backdrop-blur-sm">
                   <tr>
                     <th className="px-4 py-3 font-medium">Punto luce</th>
                     {isConsuntivo ? (
@@ -350,9 +477,21 @@ export default function QuotesApproval() {
                   {items.map((doc) => {
                     const pending = doc.status === "PENDING_APPROVAL"
                     return (
-                      <tr key={doc._id} className="border-b border-blue-500/10 hover:bg-blue-900/20">
+                      <tr
+                        key={doc._id}
+                        className={`border-b border-blue-500/10 transition-colors duration-150 ${
+                          pending
+                            ? "bg-emerald-950/20 hover:bg-emerald-900/30"
+                            : "hover:bg-blue-900/20"
+                        }`}
+                      >
                         <td className="px-4 py-3 text-white font-medium">
-                          {doc.lightPointId?.numero_palo || "—"}
+                          <LightPointMapLink
+                            lightPoint={doc.lightPointId}
+                            comune={comune}
+                            navigate={navigate}
+                            className="font-medium"
+                          />
                         </td>
                         {isConsuntivo ? (
                           <td className="px-4 py-3 text-blue-100">{parentLabel(doc)}</td>
@@ -379,17 +518,25 @@ export default function QuotesApproval() {
                         <td className="px-4 py-3">
                           <QuoteStatusBadge status={doc.status} />
                           {doc.protocolNumber ? (
-                            <span className="block text-xs text-emerald-300/80 mt-0.5">
+                            <span className="block text-xs text-emerald-300/80 mt-0.5 font-mono">
                               {doc.protocolNumber}
                             </span>
                           ) : null}
                         </td>
                         <td className="px-4 py-3 text-right whitespace-nowrap">
-                          <ApprovalActionButton
-                            pending={pending}
-                            onClick={() => openDoc(doc)}
-                            className="min-h-0 py-1.5"
-                          />
+                          <div className="inline-flex flex-wrap items-center justify-end gap-2">
+                            <GoToLightPointButton
+                              lightPoint={doc.lightPointId}
+                              comune={comune}
+                              navigate={navigate}
+                              className="min-h-0 py-1.5"
+                            />
+                            <ApprovalActionButton
+                              pending={pending}
+                              onClick={() => openDoc(doc)}
+                              className="min-h-0 py-1.5"
+                            />
+                          </div>
                         </td>
                       </tr>
                     )

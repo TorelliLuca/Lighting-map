@@ -251,11 +251,12 @@ describe("computeQuoteTotalsClient", () => {
       10
     )
 
+    // Sconto su (lordo − oneri); netto = lordo − sconto
     expect(result).toEqual({
       subtotal: 250,
       safetyAmount: 5,
-      discountAmount: 25.5,
-      total: 229.5,
+      discountAmount: 24.5,
+      total: 225.5,
     })
   })
 

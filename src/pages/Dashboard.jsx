@@ -7,7 +7,7 @@ import Header from "../components/Header"
 import MapControls from "../components/MapControls"
 import InfoPanel from "../components/InfoPanel"
 import MapButton from "../components/MapButton"
-import {  LocateFixed, Plus } from "lucide-react"
+import { LocateFixed, RefreshCw } from "lucide-react"
 import ResultsBottomSheet from "../components/ResultsBottomSheet"
 import { MapLoadOverlay } from "../components/MapLoader"
 import EditLightPointModal from "../components/EditLightPointModal"
@@ -57,6 +57,23 @@ const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API
 const BATCH_PAGE_SIZE = 500
 const BATCH_THRESHOLD = 500
 const SURVEYOR_EDIT_ROLES = new Set(["SUPER_ADMIN", "SURVEYOR"])
+
+async function copyLatLngToClipboard(lat, lng) {
+  const text = `${Number(lat)}\t${Number(lng)}`.replaceAll(".", ",")
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const ta = document.createElement("textarea")
+  ta.value = text
+  ta.setAttribute("readonly", "")
+  ta.style.position = "fixed"
+  ta.style.left = "-9999px"
+  document.body.appendChild(ta)
+  ta.select()
+  document.execCommand("copy")
+  document.body.removeChild(ta)
+}
 
 const STORAGE_KEY_PREFIX = "lighting-map-"
 const STORAGE_KEYS = {
@@ -204,6 +221,7 @@ function Dashboard() {
   // Stato per la modalità di visualizzazione ("semplice" o "complessa")
   // Init da localStorage per evitare flash "complessa" → Google Maps che invalida il load semplice
   const [visualizationMode, setVisualizationMode] = useState(readStoredVisualizationMode)
+  const [mapDataRefreshKey, setMapDataRefreshKey] = useState(0)
   const [isComplexAllowed, setIsComplexAllowed] = useState(true)
 
   // Nuovo stato per markers semplici (modalità MapLibre)
@@ -396,7 +414,7 @@ function Dashboard() {
         simpleLoadAbortRef.current += 1
       }
     }
-  }, [visualizationMode, selectedCity])
+  }, [visualizationMode, selectedCity, mapDataRefreshKey])
 
   useEffect(()=>{
     const activeMarkersFormat = simpleMarkers.map(m => {
@@ -1131,6 +1149,29 @@ function Dashboard() {
       setMap(null) // azzera lo stato mappa quando il componente viene smontato
     }
   }, [visualizationMode])
+
+  // Tasto destro (modalità complessa): SUPER_ADMIN / SURVEYOR → copia lat, lng
+  useEffect(() => {
+    if (visualizationMode !== "complessa" || !map) return undefined
+    if (!SURVEYOR_EDIT_ROLES.has(userData?.user_type)) return undefined
+    if (!window.google?.maps?.event) return undefined
+
+    const listener = map.addListener("rightclick", async (e) => {
+      const lat = e.latLng?.lat?.()
+      const lng = e.latLng?.lng?.()
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return
+      try {
+        await copyLatLngToClipboard(lat, lng)
+        toast.success("Coordinate copiate")
+      } catch (_) {
+        /* ignore */
+      }
+    })
+
+    return () => {
+      window.google.maps.event.removeListener(listener)
+    }
+  }, [map, visualizationMode, userData?.user_type])
 
   // Effect to load map data when map is ready and city is selected (solo modalità complessa)
   useEffect(() => {
@@ -2542,6 +2583,18 @@ function Dashboard() {
     }
   }
 
+  const handleRefreshMap = () => {
+    if (!selectedCity || !isMapDataComplete) return
+
+    if (visualizationMode === "complessa") {
+      if (!map) return
+      cleanupAndLoadMapData()
+      return
+    }
+
+    setMapDataRefreshKey((key) => key + 1)
+  }
+
   window.navigateToLocation = (lat, lng) => {
     const url = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`
     window.open(url)
@@ -3642,6 +3695,8 @@ function Dashboard() {
               onSetParentClick={handleSetParentFromInfo}
               onClearParentClick={handleClearParentFromInfo}
               getTopologyPower={getTopologyPower}
+              onRefreshMap={handleRefreshMap}
+              isRefreshing={Boolean(selectedCity) && !isMapDataComplete}
             />
           </ErrorBoundary>
         ) : (
@@ -3731,8 +3786,15 @@ function Dashboard() {
         {!streetViewVisible && visualizationMode ==="complessa" && (
           <>
             {/* Pulsanti principali spostati nel menu impostazioni */}
-            <div className="absolute top-1/4 right-4 z-10 flex flex-col gap-2">
+            <div className="absolute top-36 right-2 z-10 flex flex-col gap-2 sm:top-40 sm:right-4">
               <MapButton icon={LocateFixed} onClick={goToUserLocation} title="Vai alla mia posizione" />
+              <MapButton
+                icon={RefreshCw}
+                onClick={handleRefreshMap}
+                title="Aggiorna mappa"
+                disabled={!selectedCity || !isMapDataComplete}
+                iconClassName={Boolean(selectedCity) && !isMapDataComplete ? "animate-spin" : ""}
+              />
             </div>
             
           </>

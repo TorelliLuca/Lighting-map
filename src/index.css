@@ -1,6 +1,36 @@
 @import "tailwindcss";
 
 /*
+ * Window Controls Overlay (PWA desktop installata):
+ * riserva lo spazio titlebar e abilita drag solo sulle zone designate.
+ */
+@media (display-mode: window-controls-overlay) {
+  .app-titlebar {
+    padding-top: max(0.5rem, env(titlebar-area-y, 0px));
+    padding-left: max(0.5rem, env(titlebar-area-x, 0px));
+    /* Spazio a destra per i pulsanti nativi (min/max/close) */
+    padding-right: max(
+      0.5rem,
+      calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px))
+    );
+  }
+
+  .app-titlebar-drag {
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+
+  .app-titlebar-no-drag,
+  .app-titlebar-no-drag button,
+  .app-titlebar-no-drag a,
+  .app-titlebar-no-drag input,
+  .app-titlebar-no-drag [role="button"] {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+}
+
+/*
  * Scrollbar blue-glass per container overflow (catalogo, tabelle, select, …).
  * Solo ::-webkit-scrollbar — niente scrollbar-width su Chromium.
  * La scrollbar di PAGINA (html) è in src/scrollbar.css (importato da main.jsx).
