@@ -10,10 +10,11 @@ export const INFO_WINDOW_ACTIONS = [
   {
     id: "sopralluogo",
     label: "Sopralluogo",
-    title: "Effettua sopralluogo sulla segnalazione ordinaria",
+    title: "Effettua sopralluogo (su segnalazione o guasto rilevato sul campo)",
     priority: "primary",
     roles: ["MAINTAINER", "SUPER_ADMIN"],
-    requiresInspectableReport: true,
+    /** Visibile anche senza segnalazione: sopralluogo diretto del manutentore. */
+    allowDirectDiscovery: true,
     order: 0,
   },
   {
@@ -39,7 +40,8 @@ export const INFO_WINDOW_ACTIONS = [
     label: "Segnala",
     title: "Segnala questo punto",
     priority: "primary",
-    roles: ["DEFAULT_USER", "MAINTAINER", "ADMINISTRATOR", "SUPER_ADMIN"],
+    // Il MAINTAINER non segnala: apre un sopralluogo diretto sul guasto trovato.
+    roles: ["DEFAULT_USER", "ADMINISTRATOR", "SUPER_ADMIN"],
     order: 2,
   },
   {
@@ -117,6 +119,14 @@ export const getVisibleActions = (actions = INFO_WINDOW_ACTIONS, userRole, marke
       if (action.requiresInspectableReport) {
         return canStartInspection(userRole, marker?.segnalazioni_in_corso)
       }
+      if (action.allowDirectDiscovery) {
+        if (!["MAINTAINER", "SUPER_ADMIN"].includes(userRole)) return false
+        if (canStartInspection(userRole, marker?.segnalazioni_in_corso)) return true
+        const hasOpenOrdinary = (marker?.segnalazioni_in_corso || []).some(
+          (s) => !s?.is_solved && s?.maintenance_category !== "EXTRAORDINARY",
+        )
+        return !hasOpenOrdinary
+      }
       if (action.requiresPendingQuote) {
         return canCompileQuote(userRole, marker?.segnalazioni_in_corso)
       }
@@ -160,14 +170,9 @@ export const getPrimaryAction = (visibleActions = []) => {
 export const getSecondaryActions = (visibleActions = [], primaryAction) => {
   if (!primaryAction) return []
   if (primaryAction.id === "sopralluogo") {
-    // Prima del sopralluogo non si fanno operazioni: evidenzia Segnala se presente
-    if (visibleActions.find((a) => a.id === "preventivo")){
-      const sopralluogo = visibleActions.find((a) => a.id === "preventivo")
-      return sopralluogo ? [sopralluogo] : []
-    }else{
-      const segnala = visibleActions.find((a) => a.id === "segnala")
-      return segnala ? [segnala] : []
-    }
+    // Prima del sopralluogo non si fanno operazioni: evidenzia Preventivo se presente
+    const preventivo = visibleActions.find((a) => a.id === "preventivo")
+    return preventivo ? [preventivo] : []
   }
   if (primaryAction.id === "preventivo") {
     if (visibleActions.find((a) => a.id === "sopralluogo")){
@@ -179,6 +184,8 @@ export const getSecondaryActions = (visibleActions = [], primaryAction) => {
     }
   }
   if (primaryAction.id === "operazione") {
+    const preventivo = visibleActions.find((a) => a.id === "preventivo")
+    if (preventivo) return [preventivo]
     const segnala = visibleActions.find((a) => a.id === "segnala")
     return segnala ? [segnala] : []
   }

@@ -1,0 +1,16 @@
+---
+description: Security notes for Lighting-map frontend (tokens, XSS, client RBAC)
+alwaysApply: false
+---
+
+# Security audit — frontend
+
+Quando l'utente chiede audit/security:
+
+1. JWT in localStorage/sessionStorage = rischio XSS; non trattare i check ruolo client come enforcement
+2. Non fidarsi di `userData` nello storage: rivalidare profilo dal server su hydrate
+3. Mai `innerHTML` / `dangerouslySetInnerHTML` su HTML da API senza sanitize (DOMPurify)
+4. Deep-link / `redirectTo`: allowlist path relativi, rifiutare `//`
+5. Non loggare payload operativi in console in produzione
+
+Backend enforcement è la fonte di verità; i finding UI-only vanno etichettati come tali.

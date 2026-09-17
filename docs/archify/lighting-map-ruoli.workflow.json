@@ -1,0 +1,245 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Lighting-map — flusso utente per ruolo",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "percorso-ims",
+        "label": "Ciclo IMS straordinario",
+        "focus": [
+          "sopralluogo",
+          "bozza-prev",
+          "invia-prev",
+          "approva-prev",
+          "chiudi-cons",
+          "invia-cons",
+          "approva-cons",
+          "chiuso"
+        ],
+        "note": "Dal sopralluogo al ciclo chiuso: preventivo DEC, intervento, consuntivo RUP."
+      },
+      {
+        "id": "ingresso-manutentore",
+        "label": "Ingresso manutentore",
+        "focus": ["sopralluogo", "segnala-admin"],
+        "note": "Guasto trovato sul campo → sopralluogo diretto. Segnalazione admin → conferma classificazione."
+      },
+      {
+        "id": "gate-titolare",
+        "label": "Gate Titolare",
+        "focus": ["bozza-prev", "invia-prev", "chiudi-cons", "invia-cons"],
+        "note": "Solo il Titolare può inviare preventivo e consuntivo in approvazione."
+      },
+      {
+        "id": "gate-admin",
+        "label": "Gate DEC e RUP",
+        "focus": ["invia-prev", "approva-prev", "invia-cons", "approva-cons"],
+        "note": "DEC sul preventivo, RUP sul consuntivo; Respingi torna alla bozza."
+      }
+    ]
+  },
+  "lanes": [
+    { "id": "manutentore", "label": "Manutentore" },
+    { "id": "titolare", "label": "Titolare Manutentore" },
+    { "id": "admin", "label": "Amministratore (DEC / RUP)" }
+  ],
+  "phases": [
+    { "id": "rilevazione", "label": "Rilevazione", "fromCol": 0, "toCol": 1 },
+    { "id": "preventivo", "label": "Preventivo IMS", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "consuntivo", "label": "Esecuzione e consuntivo", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "groups": [],
+  "mainPath": [
+    "sopralluogo",
+    "bozza-prev",
+    "invia-prev",
+    "approva-prev",
+    "chiudi-cons",
+    "invia-cons",
+    "approva-cons",
+    "chiuso"
+  ],
+  "nodes": [
+    {
+      "id": "segnala-admin",
+      "lane": "admin",
+      "col": 0,
+      "type": "frontend",
+      "label": "Segnalazione",
+      "sublabel": "Classifica provvisoria",
+      "tag": "solo Admin",
+      "width": 124
+    },
+    {
+      "id": "sopralluogo",
+      "lane": "manutentore",
+      "col": 1,
+      "type": "frontend",
+      "label": "Sopralluogo",
+      "sublabel": "Diretto o su segnalazione",
+      "width": 136
+    },
+    {
+      "id": "bozza-prev",
+      "lane": "manutentore",
+      "col": 2,
+      "type": "backend",
+      "label": "Bozza Preventivo",
+      "sublabel": "Preventivi IMS",
+      "width": 124
+    },
+    {
+      "id": "invia-prev",
+      "lane": "titolare",
+      "col": 2,
+      "type": "security",
+      "label": "Invia preventivo",
+      "sublabel": "In approvazione",
+      "tag": "solo Titolare",
+      "width": 124
+    },
+    {
+      "id": "approva-prev",
+      "lane": "admin",
+      "col": 3,
+      "type": "security",
+      "label": "Approvazione DEC",
+      "sublabel": "Approva o respingi",
+      "tag": "Preventivo",
+      "width": 132
+    },
+    {
+      "id": "chiudi-cons",
+      "lane": "manutentore",
+      "col": 4,
+      "type": "backend",
+      "label": "Chiudi e consuntiva",
+      "sublabel": "Risolvi + bozza IMS",
+      "tag": "serve Approvato",
+      "width": 136
+    },
+    {
+      "id": "invia-cons",
+      "lane": "titolare",
+      "col": 5,
+      "type": "security",
+      "label": "Invia consuntivo",
+      "sublabel": "In approvazione",
+      "tag": "solo Titolare",
+      "width": 132
+    },
+    {
+      "id": "approva-cons",
+      "lane": "admin",
+      "col": 5,
+      "type": "security",
+      "label": "Approvazione RUP",
+      "sublabel": "Approva e finalizza",
+      "tag": "Consuntivo",
+      "width": 132
+    },
+    {
+      "id": "chiuso",
+      "lane": "manutentore",
+      "col": 5,
+      "type": "cloud",
+      "label": "Ciclo IMS chiuso",
+      "sublabel": "Protocollo IMS-C",
+      "width": 132
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-segnala-sopralluogo",
+      "from": "segnala-admin",
+      "to": "sopralluogo",
+      "label": "conferma classificazione",
+      "variant": "dashed"
+    },
+    {
+      "id": "e-sopralluogo-prev",
+      "from": "sopralluogo",
+      "to": "bozza-prev",
+      "label": "serve preventivo",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-bozza-invia-prev",
+      "from": "bozza-prev",
+      "to": "invia-prev",
+      "label": "pronta",
+      "variant": "security"
+    },
+    {
+      "id": "e-invia-approva-prev",
+      "from": "invia-prev",
+      "to": "approva-prev",
+      "label": "al DEC",
+      "variant": "security"
+    },
+    {
+      "id": "e-approva-chiudi",
+      "from": "approva-prev",
+      "to": "chiudi-cons",
+      "label": "Approva",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-approva-revisione",
+      "from": "approva-prev",
+      "to": "bozza-prev",
+      "label": "Respingi",
+      "variant": "dashed",
+      "role": "error"
+    },
+    {
+      "id": "e-chiudi-invia-cons",
+      "from": "chiudi-cons",
+      "to": "invia-cons",
+      "label": "bozza pronta",
+      "variant": "security"
+    },
+    {
+      "id": "e-invia-approva-cons",
+      "from": "invia-cons",
+      "to": "approva-cons",
+      "label": "al RUP",
+      "variant": "security"
+    },
+    {
+      "id": "e-approva-chiuso",
+      "from": "approva-cons",
+      "to": "chiuso",
+      "label": "finalizza",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e-approva-cons-revisione",
+      "from": "approva-cons",
+      "to": "chiudi-cons",
+      "label": "Respingi",
+      "variant": "dashed",
+      "role": "error"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Manutentore e Titolare",
+      "items": [
+        "Manutentore: se trova il guasto apre sopralluogo diretto (classificazione definitiva, senza segnalazione iniziale)",
+        "Titolare: unico che può «Invia in approvazione» preventivo e consuntivo"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Admin, DEC e RUP",
+      "items": [
+        "Admin: segnalazione con classificazione provvisoria → il manutentore la conferma in sopralluogo",
+        "DEC: Approva/Respingi preventivo · RUP: Approva e finalizza/Respingi consuntivo"
+      ]
+    }
+  ]
+}

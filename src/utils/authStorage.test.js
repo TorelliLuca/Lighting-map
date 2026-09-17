@@ -65,6 +65,15 @@ describe("authStorage", () => {
     expect(localStorage.getItem("rememberMe")).toBeNull()
   })
 
+  it("never persists password fields in userData", () => {
+    persistUserData({ id: "1", email: "a@b.c", password: "secret" }, true)
+
+    expect(JSON.parse(localStorage.getItem("userData"))).toEqual({
+      id: "1",
+      email: "a@b.c",
+    })
+  })
+
   it("decodes base64url jwt payloads", () => {
     const token = createToken({ exp: 9999999999, rememberMe: true })
     expect(decodeJwtPayload(token)).toEqual({ exp: 9999999999, rememberMe: true })
@@ -72,7 +81,7 @@ describe("authStorage", () => {
 
   it("detects auth statuses that should trigger refresh", () => {
     expect(shouldAttemptTokenRefresh(401)).toBe(true)
-    expect(shouldAttemptTokenRefresh(403)).toBe(true)
+    expect(shouldAttemptTokenRefresh(403)).toBe(false)
     expect(shouldAttemptTokenRefresh(500)).toBe(false)
   })
 })

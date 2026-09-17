@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from "react"
-import { X, ChevronDown, CheckCircle2, AlertTriangle, MapPin, Navigation, Pencil, Trash, FileSpreadsheet, Cable, Unplug } from "lucide-react"
-import { clearBlanket, transformDateToIT, translateString, listIgnoratedFieldsPL, listIgnoratedFieldsQE, orderInfoWindowEntries, normalizeLightPointForDisplay } from "../utils/utils"
+import { X, ChevronDown, CheckCircle2, AlertTriangle, MapPin, Navigation, Pencil, Trash, FileSpreadsheet, Cable, Unplug, ClipboardCheck } from "lucide-react"
+import { clearBlanket, transformDateToIT, translateString, listIgnoratedFieldsPL, listIgnoratedFieldsQE, orderInfoWindowEntries, normalizeLightPointForDisplay, getInspectableOrdinaryReport } from "../utils/utils"
 import {
   INFO_WINDOW_ACTIONS,
   getVisibleActions,
@@ -91,6 +91,13 @@ export const DifferenteGroupSideWindow = ({
 
   const runAction = (actionId) => {
     if (!selectedMember) return
+    if (actionId === "sopralluogo") {
+      const activeReport = getInspectableOrdinaryReport(selectedMember.segnalazioni_in_corso)
+      if (typeof window.startInspection === "function") {
+        window.startInspection(city, selectedMember._id, activeReport?._id)
+      }
+      return
+    }
     if (actionId === "operazione") {
       const operable =
         (selectedMember.segnalazioni_in_corso || []).find((s) =>
@@ -166,6 +173,7 @@ export const DifferenteGroupSideWindow = ({
   }
 
   const actionIcon = (actionId) => {
+    if (actionId === "sopralluogo") return <ClipboardCheck className="h-4 w-4" />
     if (actionId === "operazione") return <CheckCircle2 className="h-4 w-4" />
     if (actionId === "preventivo") return <FileSpreadsheet className="h-4 w-4" />
     if (actionId === "segnala") return <AlertTriangle className="h-4 w-4" />

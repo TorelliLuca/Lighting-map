@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useContext, useMemo } from "react"
 import { useNavigate, useParams, useLocation } from "react-router-dom"
+import { motion, useReducedMotion } from "framer-motion"
 import { UserContext, api } from "../context/UserContext"
 import {
   AlertCircle,
@@ -12,23 +13,33 @@ import {
   Loader2,
   XCircle,
 } from "lucide-react"
-import { LightbulbLoader } from "../components/lightbulb-loader"
 import { BackNavigationButton } from "../components/BackNavigationButton"
-import { canApproveQuoteByRole, QUOTE_STATUS_LABELS, computeQuoteTotalsClient } from "../utils/utils"
+import { TruncatedTextDetails } from "../components/ui/TruncatedTextDetails"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
+import { ChartSection } from "@/components/infoPanel/DistributionChart"
+import {
+  ExtraordinaryBudgetBar,
+  REVIEW_BUDGET_INFO_TEXT,
+} from "@/components/ui/ExtraordinaryBudgetBar"
+import { QuoteStatusBadge } from "../components/ui/QuoteStatusBadge"
+import { RiskClassBadge } from "../components/ui/RiskClassBadge"
+import { cn } from "@/lib/utils"
+import { canApproveQuoteByRole, computeQuoteTotalsClient } from "../utils/utils"
+import { fetchExtraordinaryBudgetUsage } from "../utils/extraordinaryBudget"
 import toast from "react-hot-toast"
 import { PAGE_SCROLL_SHELL } from "../utils/pageScrollShell"
-import { TruncatedTextDetails } from "../components/ui/TruncatedTextDetails"
 import { isEmptyNpLine, lineDetailsTitle } from "../utils/npBom"
 import { formatUdmLabel } from "../utils/udm"
-
-const btnSecondaryClass =
-  "cursor-pointer transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 disabled:cursor-not-allowed"
-
-const btnPrimaryClass =
-  "cursor-pointer transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 disabled:cursor-not-allowed"
+import {
+  denyUnauthorizedComuneAccess,
+  isTownHallAccessDeniedError,
+} from "../utils/townHallAccess"
 
 const fieldInputClass =
-  "w-full rounded-xl border border-blue-500/30 bg-blue-900/20 text-white px-4 py-3 disabled:opacity-60 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 focus-visible:border-blue-400/50"
+  "w-full rounded-xl border border-border/70 bg-background/50 text-foreground px-4 py-3 disabled:opacity-60 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring/50 placeholder:text-muted-foreground"
 
 const townHallNameOf = (doc) => {
   const th = doc?.townHallId
@@ -52,11 +63,42 @@ const mergeQuoteKeepingTownHall = (prev, next) => {
   return next
 }
 
+function QuoteReviewSkeleton() {
+  return (
+    <div
+      className={`${PAGE_SCROLL_SHELL} flex items-start justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4 py-6 sm:py-8`}
+      aria-busy="true"
+      aria-label="Caricamento revisione preventivo"
+    >
+      <div className="w-full max-w-3xl space-y-4">
+        <ChartSection className="space-y-4 p-6 sm:p-8">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-2">
+              <Skeleton className="h-7 w-56" />
+              <Skeleton className="h-4 w-40" />
+            </div>
+            <div className="flex gap-2">
+              <Skeleton className="h-11 w-11 rounded-full" />
+              <Skeleton className="h-11 w-11 rounded-full" />
+            </div>
+          </div>
+          <Skeleton className="h-28 w-full rounded-xl" />
+          <Skeleton className="h-24 w-full rounded-xl" />
+          <Skeleton className="h-24 w-full rounded-xl" />
+          <Skeleton className="h-20 w-full rounded-xl" />
+          <Skeleton className="h-12 w-full rounded-xl" />
+        </ChartSection>
+      </div>
+    </div>
+  )
+}
+
 export default function QuoteReview() {
   const { userData } = useContext(UserContext)
   const navigate = useNavigate()
   const location = useLocation()
   const { id } = useParams()
+  const reduceMotion = useReducedMotion()
   const comuneFromNav = location.state?.comune || ""
 
   const [loading, setLoading] = useState(true)
@@ -69,6 +111,8 @@ export default function QuoteReview() {
   const [contestNotes, setContestNotes] = useState({})
   const [done, setDone] = useState(null)
   const [downloadingFormat, setDownloadingFormat] = useState(null)
+  const [budgetLimit, setBudgetLimit] = useState(null)
+  const [approvedSpent, setApprovedSpent] = useState(0)
 
   useEffect(() => {
     if (!userData) {
@@ -92,8 +136,28 @@ export default function QuoteReview() {
           return
         }
         setQuote(doc)
+
+        const comune = townHallNameOf(doc) || comuneFromNav
+        if (comune) {
+          try {
+            const usage = await fetchExtraordinaryBudgetUsage(api, comune)
+            setBudgetLimit(usage.limit)
+            setApprovedSpent(usage.approvedSpent)
+          } catch (budgetErr) {
+            console.error(budgetErr)
+            setBudgetLimit(null)
+            setApprovedSpent(0)
+          }
+        } else {
+          setBudgetLimit(null)
+          setApprovedSpent(0)
+        }
       } catch (err) {
         console.error(err)
+        if (isTownHallAccessDeniedError(err)) {
+          denyUnauthorizedComuneAccess(navigate)
+          return
+        }
         setError(err.response?.data?.error || "Impossibile caricare il preventivo.")
       } finally {
         setLoading(false)
@@ -101,15 +165,16 @@ export default function QuoteReview() {
     }
 
     if (id) load()
-  }, [userData, navigate, id])
+  }, [userData, navigate, id, comuneFromNav])
 
   const totals = useMemo(
-    () => computeQuoteTotalsClient(
-      quote?.lineItems || [],
-      quote?.safetyChargeRate ?? 0.02,
-      quote?.discountPercent ?? 0
-    ),
-    [quote]
+    () =>
+      computeQuoteTotalsClient(
+        quote?.lineItems || [],
+        quote?.safetyChargeRate ?? 0.02,
+        quote?.discountPercent ?? 0,
+      ),
+    [quote],
   )
 
   const canDecide = quote?.status === "PENDING_APPROVAL"
@@ -137,14 +202,16 @@ export default function QuoteReview() {
       const disposition = String(res.headers?.["content-disposition"] || "")
       const headerName = disposition.match(/filename="([^"]+)"/i)?.[1]
       const blob = new Blob([res.data], {
-        type: format === "pdf"
-          ? "application/pdf"
-          : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type:
+          format === "pdf"
+            ? "application/pdf"
+            : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
-      a.download = headerName || `${quote?.protocolNumber || `IMS-${String(id).slice(-6)}`}.${format}`
+      a.download =
+        headerName || `${quote?.protocolNumber || `IMS-${String(id).slice(-6)}`}.${format}`
       document.body.appendChild(a)
       a.click()
       a.remove()
@@ -160,9 +227,10 @@ export default function QuoteReview() {
   const handleApprove = async () => {
     const emptyNp = (quote?.lineItems || []).filter((item) => isEmptyNpLine(item))
     if (emptyNp.length > 0) {
-      const msg = emptyNp.length === 1
-        ? "Impossibile approvare: un nuovo prezzo non ha componenti nella distinta."
-        : `Impossibile approvare: ${emptyNp.length} nuovi prezzi non hanno componenti nella distinta.`
+      const msg =
+        emptyNp.length === 1
+          ? "Impossibile approvare: un nuovo prezzo non ha componenti nella distinta."
+          : `Impossibile approvare: ${emptyNp.length} nuovi prezzi non hanno componenti nella distinta.`
       setError(msg)
       toast.error(msg)
       return
@@ -244,59 +312,83 @@ export default function QuoteReview() {
   }
 
   if (loading) {
-    return (
-      <div className={`${PAGE_SCROLL_SHELL} flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4`}>
-        <LightbulbLoader />
-      </div>
-    )
+    return <QuoteReviewSkeleton />
   }
 
   if (done) {
     return (
-      <div className={`${PAGE_SCROLL_SHELL} flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4`}>
-        <div className="w-full max-w-md p-8 rounded-2xl backdrop-blur-xl bg-black/40 border border-blue-500/20 text-center">
-          {done.type === "approved" ? (
-            <CheckCircle className="h-12 w-12 text-emerald-400 mx-auto mb-4" />
-          ) : (
-            <XCircle className="h-12 w-12 text-amber-400 mx-auto mb-4" />
-          )}
-          <h2 className="text-2xl font-bold text-white">
-            {done.type === "approved" ? "Preventivo approvato" : "Preventivo da revisionare"}
-          </h2>
-          {done.protocol && (
-            <p className="mt-2 text-blue-200/80">
-              Protocollo {done.protocol}
-              {done.dueDate && (
-                <> — scadenza {new Date(done.dueDate).toLocaleDateString("it-IT")}</>
+      <div
+        className={`${PAGE_SCROLL_SHELL} flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4`}
+      >
+        <motion.div
+          initial={reduceMotion ? false : { opacity: 0, scale: 0.96, y: 8 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-md"
+        >
+          <ChartSection className="space-y-5 text-center">
+            <div
+              className={cn(
+                "mx-auto flex h-16 w-16 items-center justify-center rounded-full border",
+                done.type === "approved"
+                  ? "border-emerald-500/30 bg-emerald-500/15"
+                  : "border-amber-500/30 bg-amber-500/15",
               )}
-            </p>
-          )}
-          {done.type === "rejected" && (
-            <p className="mt-2 text-amber-100/90 text-sm">
-              {done.contestedCount > 0
-                ? `${done.contestedCount} ${done.contestedCount === 1 ? "voce contestata" : "voci contestate"}. `
-                : ""}
-              Il titolare manutentore potrà correggere e reinviare.
-            </p>
-          )}
-          <button
-            type="button"
-            onClick={goToApprovalList}
-            className={`mt-6 w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-medium ${btnPrimaryClass}`}
-          >
-            Torna all&apos;elenco approvazioni
-          </button>
-        </div>
+            >
+              {done.type === "approved" ? (
+                <CheckCircle className="h-8 w-8 text-emerald-400" aria-hidden="true" />
+              ) : (
+                <XCircle className="h-8 w-8 text-amber-400" aria-hidden="true" />
+              )}
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-foreground">
+                {done.type === "approved" ? "Preventivo approvato" : "Preventivo da revisionare"}
+              </h2>
+              {done.protocol ? (
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Protocollo {done.protocol}
+                  {done.dueDate ? (
+                    <> — scadenza {new Date(done.dueDate).toLocaleDateString("it-IT")}</>
+                  ) : null}
+                </p>
+              ) : null}
+              {done.type === "rejected" ? (
+                <p className="mt-2 text-sm leading-relaxed text-amber-100/90">
+                  {done.contestedCount > 0
+                    ? `${done.contestedCount} ${done.contestedCount === 1 ? "voce contestata" : "voci contestate"}. `
+                    : ""}
+                  Il titolare manutentore potrà correggere e reinviare.
+                </p>
+              ) : null}
+            </div>
+            <Button
+              type="button"
+              className="min-h-11 w-full bg-primary text-primary-foreground"
+              onClick={goToApprovalList}
+            >
+              Torna all&apos;elenco approvazioni
+            </Button>
+          </ChartSection>
+        </motion.div>
       </div>
     )
   }
 
   if (!quote) {
     return (
-      <div className={`${PAGE_SCROLL_SHELL} flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4`}>
-        <div className="max-w-md p-6 rounded-2xl bg-black/40 border border-red-500/30 text-red-200">
-          {error || "Preventivo non trovato"}
-        </div>
+      <div
+        className={`${PAGE_SCROLL_SHELL} flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4`}
+      >
+        <ChartSection className="max-w-md space-y-4 text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-red-500/30 bg-red-950/20">
+            <AlertCircle className="h-7 w-7 text-red-400" aria-hidden="true" />
+          </div>
+          <p className="text-sm text-red-200">{error || "Preventivo non trovato"}</p>
+          <Button type="button" variant="outline" className="min-h-11 w-full" onClick={goToApprovalList}>
+            Torna all&apos;elenco approvazioni
+          </Button>
+        </ChartSection>
       </div>
     )
   }
@@ -305,68 +397,99 @@ export default function QuoteReview() {
   const townHall = quote.townHallId
 
   return (
-    <div className={`${PAGE_SCROLL_SHELL} flex items-start justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4 py-6 sm:py-8`}>
-      <div className="w-full max-w-3xl relative overflow-hidden rounded-2xl shadow-[0_0_40px_rgba(0,149,255,0.15)]">
-        <div className="relative z-10 p-6 sm:p-8 backdrop-blur-xl bg-black/40 border border-blue-500/20">
-          <div className="flex items-start justify-between gap-4 mb-6">
-            <div className="flex items-start gap-2 min-w-0">
-              <FileSpreadsheet className="h-6 w-6 text-blue-400 shrink-0 mt-1" />
+    <div
+      className={`${PAGE_SCROLL_SHELL} flex items-start justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4 py-6 sm:py-8`}
+    >
+      <motion.div
+        initial={reduceMotion ? false : { opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+        className="w-full max-w-3xl space-y-4"
+      >
+        <ChartSection className="space-y-5 p-6 sm:p-8">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex min-w-0 items-start gap-2">
+              <FileSpreadsheet className="mt-1 h-6 w-6 shrink-0 text-blue-400" aria-hidden="true" />
               <div className="min-w-0">
-                <h2 className="text-2xl font-bold text-white">Revisione preventivo</h2>
-                <p className="text-xs text-blue-300/80 mt-1">
-                  {QUOTE_STATUS_LABELS[quote.status] || quote.status}
-                </p>
+                <h1 className="text-2xl font-bold text-foreground">Revisione preventivo</h1>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <QuoteStatusBadge status={quote.status} />
+                  {quote.protocolNumber ? (
+                    <Badge variant="outline" className="font-mono text-[11px] text-blue-200">
+                      {quote.protocolNumber}
+                    </Badge>
+                  ) : null}
+                  {quote.priorityClass ? (
+                    <RiskClassBadge riskClass={quote.priorityClass} />
+                  ) : null}
+                </div>
               </div>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex shrink-0 items-center gap-2">
               <BackNavigationButton />
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
+                className="min-h-11 min-w-11 rounded-full bg-primary/10 hover:bg-primary/20"
                 onClick={() => navigate("/dashboard")}
                 aria-label="Torna alla dashboard"
-                className={`p-2 rounded-full bg-blue-500/10 hover:bg-blue-500/20 ${btnSecondaryClass}`}
+                title="Torna alla dashboard"
               >
-                <Home className="h-5 w-5 text-blue-400" />
-              </button>
+                <Home className="h-5 w-5 text-blue-400" aria-hidden="true" />
+              </Button>
             </div>
           </div>
 
-          <div className="mb-6 p-4 rounded-xl bg-blue-900/20 border border-blue-500/20 text-sm text-blue-100 space-y-1">
-            <p><span className="font-medium text-blue-200">Comune:</span> {townHall?.name || "—"}</p>
-            <p><span className="font-medium text-blue-200">Punto:</span> {lightPoint?.numero_palo || "—"}</p>
-            <p><span className="font-medium text-blue-200">Priorità:</span> {quote.priorityClass}</p>
+          <section
+            aria-label="Contesto preventivo"
+            className="space-y-1 rounded-xl border border-border/50 bg-secondary/30 p-4 text-sm text-foreground"
+          >
             <p>
-              <span className="font-medium text-blue-200">Tempistica:</span>{" "}
-              Materiali {quote.materialLeadDays} gg — Opera {quote.workLeadDays} gg
+              <span className="font-medium text-muted-foreground">Comune:</span>{" "}
+              {townHall?.name || "—"}
             </p>
             <p>
-              <span className="font-medium text-blue-200">Creato da:</span>{" "}
+              <span className="font-medium text-muted-foreground">Punto:</span>{" "}
+              <span className="font-mono">{lightPoint?.numero_palo || "—"}</span>
+            </p>
+            <p>
+              <span className="font-medium text-muted-foreground">Tempistica:</span> Materiali{" "}
+              {quote.materialLeadDays} gg — Opera {quote.workLeadDays} gg
+            </p>
+            <p>
+              <span className="font-medium text-muted-foreground">Creato da:</span>{" "}
               {quote.createdBy
                 ? `${quote.createdBy.name || ""} ${quote.createdBy.surname || ""}`.trim()
                 : "—"}
             </p>
-          </div>
+          </section>
 
-          {quote.faultDescription && (
-            <div className="mb-4 p-3 rounded-xl border border-blue-500/20 bg-blue-950/30 text-sm text-blue-100">
-              <p className="font-medium text-blue-200 mb-1">Descrizione guasto</p>
+          {quote.faultDescription ? (
+            <div className="rounded-xl border border-border/50 bg-secondary/20 p-3 text-sm text-foreground">
+              <p className="mb-1 font-medium text-muted-foreground">Descrizione guasto</p>
               <p>{quote.faultDescription}</p>
             </div>
-          )}
+          ) : null}
 
-          {error && (
-            <div role="alert" className="mb-4 p-3 rounded-lg bg-red-900/20 border border-red-500/30 text-red-200 flex gap-2">
-              <AlertCircle className="h-5 w-5 shrink-0" />
+          {error ? (
+            <div
+              role="alert"
+              className="flex gap-2 rounded-xl border border-red-500/30 bg-red-950/20 p-3 text-sm text-red-200"
+            >
+              <AlertCircle className="h-5 w-5 shrink-0" aria-hidden="true" />
               <p>{error}</p>
             </div>
-          )}
+          ) : null}
 
-          <div className="mb-4 space-y-2">
+          <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-sm text-blue-200 font-medium">Voci preventivo</p>
-              {canDecide && showReject && (
-                <p className="text-xs text-amber-200/90">Seleziona le voci da contestare (opzionale)</p>
-              )}
+              <p className="text-sm font-medium text-foreground">Voci preventivo</p>
+              {canDecide && showReject ? (
+                <p className="text-xs text-amber-200/90">
+                  Seleziona le voci da contestare (opzionale)
+                </p>
+              ) : null}
             </div>
             {(quote.lineItems || []).map((item, idx) => {
               const selected = selectedIndexes.has(idx)
@@ -374,14 +497,15 @@ export default function QuoteReview() {
               return (
                 <div
                   key={idx}
-                  className={`p-3 rounded-xl border text-sm space-y-2 ${
+                  className={cn(
+                    "space-y-2 rounded-xl border p-3 text-sm",
                     selected
-                      ? "bg-amber-950/30 border-amber-500/40"
-                      : "bg-blue-900/10 border-blue-500/15"
-                  }`}
+                      ? "border-amber-500/40 bg-amber-950/30"
+                      : "border-border/50 bg-secondary/20",
+                  )}
                 >
                   <div className="flex items-start gap-3">
-                    {canDecide && showReject && (
+                    {canDecide && showReject ? (
                       <input
                         type="checkbox"
                         checked={selected}
@@ -389,14 +513,19 @@ export default function QuoteReview() {
                         className="mt-1 h-4 w-4 rounded border-amber-400/50 bg-black/40 text-amber-500 focus:ring-amber-400/40"
                         aria-label={`Contesta voce ${idx + 1}`}
                       />
-                    )}
+                    ) : null}
                     <div className="min-w-0 flex-1">
-                      <p className="text-blue-100 flex flex-wrap items-center gap-1.5">
-                        <span className="text-blue-400 font-mono text-xs">{item.materialCode || "—"}</span>
+                      <p className="flex flex-wrap items-center gap-1.5 text-foreground">
+                        <span className="font-mono text-xs text-blue-300">
+                          {item.materialCode || "—"}
+                        </span>
                         {item.isAdHoc ? (
-                          <span className="text-[10px] text-amber-300/90 border border-amber-500/30 rounded px-1">
+                          <Badge
+                            variant="outline"
+                            className="border-amber-500/30 px-1 py-0 text-[10px] text-amber-300/90"
+                          >
                             NP
-                          </span>
+                          </Badge>
                         ) : null}
                       </p>
                       <div className="mt-1">
@@ -408,7 +537,7 @@ export default function QuoteReview() {
                             `Voce ${idx + 1}${item.isAdHoc ? " · Nuovo prezzo" : ""}`,
                           )}
                           lines={2}
-                          className="text-sm text-blue-100"
+                          className="text-sm text-foreground"
                           bom={item.children || []}
                           fields={[
                             { label: "Codice", value: item.materialCode || "—" },
@@ -421,77 +550,110 @@ export default function QuoteReview() {
                           ]}
                         />
                       </div>
-                      <p className="text-xs text-blue-300/80 mt-1">
-                        {formatUdmLabel(item.udm)} × {Number(item.quantity || 0)} × € {Number(item.unitPrice || 0).toFixed(2)}
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {formatUdmLabel(item.udm)} × {Number(item.quantity || 0)} × €{" "}
+                        {Number(item.unitPrice || 0).toFixed(2)}
                         {" = "}
-                        <span className="text-white font-medium">€ {lineTotal.toFixed(2)}</span>
+                        <span className="font-medium text-foreground">€ {lineTotal.toFixed(2)}</span>
                       </p>
                     </div>
                   </div>
-                  {canDecide && showReject && selected && (
+                  {canDecide && showReject && selected ? (
                     <textarea
                       rows={2}
                       placeholder={`Motivo contestazione voce ${idx + 1} *`}
                       value={contestNotes[idx] || ""}
-                      onChange={(e) => setContestNotes((prev) => ({ ...prev, [idx]: e.target.value }))}
-                      className={`${fieldInputClass} text-sm py-2`}
+                      onChange={(e) =>
+                        setContestNotes((prev) => ({ ...prev, [idx]: e.target.value }))
+                      }
+                      className={`${fieldInputClass} py-2 text-sm`}
                     />
-                  )}
+                  ) : null}
                 </div>
               )
             })}
           </div>
 
-          <div className="mb-6 p-4 rounded-xl bg-blue-950/40 border border-blue-500/20 text-sm text-white space-y-1">
-            <p className="flex justify-between"><span className="text-blue-200">Totale lordo</span><span>€ {totals.subtotal.toFixed(2)}</span></p>
-            <p className="flex justify-between"><span className="text-blue-200">Oneri / sconto</span><span>€ {(totals.safetyAmount - totals.discountAmount).toFixed(2)}</span></p>
-            <p className="flex justify-between font-semibold pt-2 border-t border-blue-500/20">
-              <span>Totale preventivo</span><span>€ {totals.total.toFixed(2)}</span>
+          <div className="space-y-1 rounded-xl border border-border/50 bg-secondary/30 p-4 text-sm text-foreground">
+            <p className="flex justify-between">
+              <span className="text-muted-foreground">Totale lordo</span>
+              <span>€ {totals.subtotal.toFixed(2)}</span>
+            </p>
+            <p className="flex justify-between">
+              <span className="text-muted-foreground">Oneri / sconto</span>
+              <span>€ {(totals.safetyAmount - totals.discountAmount).toFixed(2)}</span>
+            </p>
+            <p className="flex justify-between border-t border-border/40 pt-2 font-semibold">
+              <span>Totale preventivo</span>
+              <span>€ {totals.total.toFixed(2)}</span>
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-2 mb-4">
-            <button
+          {budgetLimit != null ? (
+            <ExtraordinaryBudgetBar
+              spent={approvedSpent}
+              extraSpent={totals.total}
+              limit={budgetLimit}
+              infoText={REVIEW_BUDGET_INFO_TEXT}
+              className="max-w-none lg:w-full"
+            />
+          ) : null}
+
+          <Separator className="bg-border/50" />
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button
               type="button"
+              variant="outline"
               disabled={!!downloadingFormat}
               onClick={() => downloadFile("xlsx")}
-              className={`flex-1 py-3 rounded-xl border border-blue-500/30 text-blue-100 hover:bg-blue-900/30 disabled:opacity-50 flex items-center justify-center gap-2 ${btnSecondaryClass}`}
+              className="min-h-12 flex-1"
             >
-              {downloadingFormat === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {downloadingFormat === "xlsx" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
               Scarica XLSX
-            </button>
-            {/* Scarica PDF nascosto: non ancora supportato in questo deploy */}
+            </Button>
           </div>
 
-          {canDecide && (
+          {canDecide ? (
             <div className="space-y-3">
               {!showReject ? (
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <button
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button
                     type="button"
                     disabled={acting}
                     onClick={handleApprove}
-                    className={`flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium disabled:opacity-50 flex items-center justify-center gap-2 ${btnPrimaryClass}`}
+                    className="min-h-12 flex-1 bg-emerald-600 text-white hover:bg-emerald-500"
                   >
                     {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                     Approva
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
+                    variant="outline"
                     disabled={acting}
                     onClick={() => {
                       setShowReject(true)
                       setError("")
                     }}
-                    className={`flex-1 py-3 rounded-xl border border-amber-500/40 text-amber-100 hover:bg-amber-900/20 disabled:opacity-50 ${btnSecondaryClass}`}
+                    className="min-h-12 flex-1 border-amber-500/40 text-amber-100 hover:bg-amber-900/20"
                   >
                     Respingi per revisione
-                  </button>
+                  </Button>
                 </div>
               ) : (
-                <div className="space-y-3 p-4 rounded-xl border border-amber-500/30 bg-amber-950/20">
-                  <label htmlFor="quote-reject-reason" className="block text-sm font-medium text-amber-100">
-                    Motivo generale {selectedIndexes.size === 0 ? "*" : "(opzionale se hai contestato delle voci)"}
+                <div className="space-y-3 rounded-xl border border-amber-500/30 bg-amber-950/20 p-4">
+                  <label
+                    htmlFor="quote-reject-reason"
+                    className="block text-sm font-medium text-amber-100"
+                  >
+                    Motivo generale{" "}
+                    {selectedIndexes.size === 0
+                      ? "*"
+                      : "(opzionale se hai contestato delle voci)"}
                   </label>
                   <textarea
                     id="quote-reject-reason"
@@ -501,18 +663,19 @@ export default function QuoteReview() {
                     placeholder="Es. tempistiche non coerenti, descrizione guasto incompleta…"
                     className={fieldInputClass}
                   />
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <button
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Button
                       type="button"
                       disabled={acting}
                       onClick={handleReject}
-                      className={`flex-1 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-medium disabled:opacity-50 flex items-center justify-center gap-2 ${btnPrimaryClass}`}
+                      className="min-h-12 flex-1 bg-amber-600 text-white hover:bg-amber-500"
                     >
                       {acting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                       Conferma respingimento
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
+                      variant="outline"
                       disabled={acting}
                       onClick={() => {
                         setShowReject(false)
@@ -521,27 +684,27 @@ export default function QuoteReview() {
                         setRejectReason("")
                         setError("")
                       }}
-                      className={`flex-1 py-3 rounded-xl border border-blue-500/30 text-blue-100 hover:bg-blue-900/30 disabled:opacity-50 ${btnSecondaryClass}`}
+                      className="min-h-12 flex-1"
                     >
                       Annulla
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
             </div>
-          )}
+          ) : null}
 
-          {!canDecide && (
-            <button
+          {!canDecide ? (
+            <Button
               type="button"
+              className="min-h-12 w-full bg-primary text-primary-foreground"
               onClick={goToApprovalList}
-              className={`w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-medium ${btnPrimaryClass}`}
             >
               Torna all&apos;elenco approvazioni
-            </button>
-          )}
-        </div>
-      </div>
+            </Button>
+          ) : null}
+        </ChartSection>
+      </motion.div>
     </div>
   )
 }

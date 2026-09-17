@@ -149,9 +149,13 @@ async function loadMapImageFromDataUrl(mapImageDataUrl) {
   throw new Error("Cattura mappa non valida")
 }
 
-async function applyWatermarkToCanvas(baseCanvas, logo) {
+async function applyWatermarkToCanvas(baseCanvas, logo, { scaleLabel, sectionLabel } = {}) {
   const width = baseCanvas.width
   const height = baseCanvas.height
+
+  if (isCanvasMostlyBlank(baseCanvas)) {
+    throw new Error("Cattura mappa non riuscita. Attendi il caricamento completo e riprova.")
+  }
 
   const output = document.createElement("canvas")
   output.width = width
@@ -170,8 +174,32 @@ async function applyWatermarkToCanvas(baseCanvas, logo) {
   }
 
   const minDim = Math.min(width, height)
-  const logoSize = Math.round(Math.max(40, Math.min(112, minDim * 0.09)))
   const margin = Math.round(minDim * 0.025)
+
+  if (sectionLabel) {
+    const fontSize = Math.round(Math.max(14, Math.min(28, minDim * 0.028)))
+    ctx.save()
+    ctx.font = `600 ${fontSize}px system-ui, -apple-system, Segoe UI, sans-serif`
+    ctx.textBaseline = "top"
+    ctx.textAlign = "left"
+    ctx.fillStyle = "#000000"
+    ctx.fillText(String(sectionLabel), margin, margin)
+    ctx.restore()
+  }
+
+  if (scaleLabel) {
+    const fontSize = Math.round(Math.max(11, Math.min(18, minDim * 0.016)))
+    const text = String(scaleLabel)
+    ctx.save()
+    ctx.font = `500 ${fontSize}px system-ui, -apple-system, Segoe UI, sans-serif`
+    ctx.textBaseline = "bottom"
+    ctx.textAlign = "left"
+    ctx.fillStyle = "#000000"
+    ctx.fillText(text, margin, height - margin)
+    ctx.restore()
+  }
+
+  const logoSize = Math.round(Math.max(40, Math.min(112, minDim * 0.09)))
   const logoX = width - logoSize - margin
   const logoY = height - logoSize - margin
 
@@ -183,7 +211,7 @@ async function applyWatermarkToCanvas(baseCanvas, logo) {
   return output
 }
 
-async function applyWatermark(mapImageDataUrl, logo, canvasWidth, canvasHeight) {
+async function applyWatermark(mapImageDataUrl, logo, canvasWidth, canvasHeight, options) {
   const mapImage = await loadMapImageFromDataUrl(mapImageDataUrl)
   const sourceWidth = mapImage.width ?? mapImage.naturalWidth
   const sourceHeight = mapImage.height ?? mapImage.naturalHeight
@@ -213,46 +241,79 @@ async function applyWatermark(mapImageDataUrl, logo, canvasWidth, canvasHeight) 
   baseCtx.drawImage(mapImage, 0, 0, width, height)
   mapImage.close?.()
 
-  return applyWatermarkToCanvas(baseCanvas, logo)
+  return applyWatermarkToCanvas(baseCanvas, logo, options)
 }
 
-async function buildWatermarkedCanvas({ mapCanvas, mapCapture, logo }) {
+async function buildWatermarkedCanvas({ mapCanvas, mapCapture, logo, scaleLabel, sectionLabel }) {
+  try {
+    const mapImageDataUrl = await pickBestMapCapture(mapCapture)
+    const canvas = await applyWatermark(mapImageDataUrl, logo, mapCanvas.width, mapCanvas.height, {
+      scaleLabel,
+      sectionLabel,
+    })
+    if (!isCanvasMostlyBlank(canvas)) return canvas
+  } catch {
+    // fallback
+  }
+
   const pixelCanvas = readMapCanvasPixels(mapCanvas)
   if (pixelCanvas) {
-    return applyWatermarkToCanvas(pixelCanvas, logo)
+    return applyWatermarkToCanvas(pixelCanvas, logo, { scaleLabel, sectionLabel })
   }
 
   const mapImageDataUrl = await pickBestMapCapture(mapCapture)
-  return applyWatermark(mapImageDataUrl, logo, mapCanvas.width, mapCanvas.height)
+  return applyWatermark(mapImageDataUrl, logo, mapCanvas.width, mapCanvas.height, {
+    scaleLabel,
+    sectionLabel,
+  })
 }
 
 /** Cattura la mappa su canvas senza watermark (per ritaglio precedente al logo). */
 async function captureMapCanvasWithoutWatermark({ mapCanvas, mapCapture }) {
+  // Copia 2D già pronta dallo snapshot (canvas con solo context 2d)
+  if (mapCanvas?.width > 0 && mapCanvas?.height > 0) {
+    let ctx2d = null
+    try {
+      ctx2d = mapCanvas.getContext("2d")
+    } catch {
+      ctx2d = null
+    }
+    if (ctx2d && !isCanvasMostlyBlank(mapCanvas)) {
+      return mapCanvas
+    }
+  }
+
+  try {
+    const mapImageDataUrl = await pickBestMapCapture(mapCapture)
+    const mapImage = await loadMapImageFromDataUrl(mapImageDataUrl)
+    const sourceWidth = mapImage.width ?? mapImage.naturalWidth
+    const sourceHeight = mapImage.height ?? mapImage.naturalHeight
+    if (!sourceWidth || !sourceHeight) {
+      mapImage.close?.()
+      throw new Error("Cattura mappa non valida")
+    }
+
+    const width = (mapCanvas && mapCanvas.width) || sourceWidth
+    const height = (mapCanvas && mapCanvas.height) || sourceHeight
+    const baseCanvas = document.createElement("canvas")
+    baseCanvas.width = width
+    baseCanvas.height = height
+    const baseCtx = baseCanvas.getContext("2d")
+    if (!baseCtx) {
+      mapImage.close?.()
+      throw new Error("Canvas non supportato")
+    }
+    baseCtx.drawImage(mapImage, 0, 0, width, height)
+    mapImage.close?.()
+    if (!isCanvasMostlyBlank(baseCanvas)) return baseCanvas
+  } catch {
+    // fallback sotto
+  }
+
   const pixelCanvas = readMapCanvasPixels(mapCanvas)
-  if (pixelCanvas) return pixelCanvas
+  if (pixelCanvas && !isCanvasMostlyBlank(pixelCanvas)) return pixelCanvas
 
-  const mapImageDataUrl = await pickBestMapCapture(mapCapture)
-  const mapImage = await loadMapImageFromDataUrl(mapImageDataUrl)
-  const sourceWidth = mapImage.width ?? mapImage.naturalWidth
-  const sourceHeight = mapImage.height ?? mapImage.naturalHeight
-  if (!sourceWidth || !sourceHeight) {
-    mapImage.close?.()
-    throw new Error("Cattura mappa non valida")
-  }
-
-  const width = mapCanvas.width || sourceWidth
-  const height = mapCanvas.height || sourceHeight
-  const baseCanvas = document.createElement("canvas")
-  baseCanvas.width = width
-  baseCanvas.height = height
-  const baseCtx = baseCanvas.getContext("2d")
-  if (!baseCtx) {
-    mapImage.close?.()
-    throw new Error("Canvas non supportato")
-  }
-  baseCtx.drawImage(mapImage, 0, 0, width, height)
-  mapImage.close?.()
-  return baseCanvas
+  throw new Error("Cattura mappa non riuscita. Attendi il caricamento completo e riprova.")
 }
 
 function waitForMapRenderFrame(map, signal) {
@@ -262,18 +323,29 @@ function waitForMapRenderFrame(map, signal) {
       return
     }
 
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", onAbort)
+      map.off("render", onRender)
+      requestAnimationFrame(() => resolve())
+    }
+
     const onAbort = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
       map.off("render", onRender)
       reject(new DOMException("Export annullato", "AbortError"))
     }
 
-    const onRender = () => {
-      signal?.removeEventListener("abort", onAbort)
-      requestAnimationFrame(() => resolve())
-    }
+    const onRender = () => finish()
 
     signal?.addEventListener("abort", onAbort, { once: true })
     map.once("render", onRender)
+    const timer = setTimeout(finish, 3000)
     map.triggerRepaint()
   })
 }
@@ -293,17 +365,44 @@ async function isDataUrlMostlyTransparent(dataUrl) {
 
   sampleCtx.drawImage(image, 0, 0, sampleSize, sampleSize)
   const pixels = sampleCtx.getImageData(0, 0, sampleSize, sampleSize).data
-  let visiblePixels = 0
-  for (let i = 3; i < pixels.length; i += 4) {
-    if (pixels[i] > 12) visiblePixels += 1
+  return isPixelDataMostlyBlank(pixels, { minLit: 8 })
+}
+
+function isPixelDataMostlyBlank(data, { minLit = 16 } = {}) {
+  let lit = 0
+  for (let i = 0; i < data.length; i += 4) {
+    const alpha = data[i + 3]
+    if (alpha < 12) continue
+    const luminance = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
+    if (luminance > 10) lit += 1
   }
-  return visiblePixels < 8
+  return lit < minLit
+}
+
+function isCanvasMostlyBlank(canvas) {
+  if (!canvas?.width || !canvas?.height) return true
+  const ctx = canvas.getContext("2d")
+  if (!ctx) return true
+  const sampleW = Math.min(64, canvas.width)
+  const sampleH = Math.min(64, canvas.height)
+  try {
+    const { data } = ctx.getImageData(
+      Math.floor((canvas.width - sampleW) / 2),
+      Math.floor((canvas.height - sampleH) / 2),
+      sampleW,
+      sampleH,
+    )
+    return isPixelDataMostlyBlank(data)
+  } catch {
+    return true
+  }
 }
 
 function readMapCanvasPixels(mapCanvas) {
+  // Riusa il context WebGL già creato da MapLibre (non crearne uno nuovo).
   const gl =
-    mapCanvas.getContext("webgl2", { preserveDrawingBuffer: true }) ||
-    mapCanvas.getContext("webgl", { preserveDrawingBuffer: true })
+    mapCanvas.getContext("webgl2") ||
+    mapCanvas.getContext("webgl")
   if (!gl) return null
 
   const width = mapCanvas.width
@@ -313,11 +412,7 @@ function readMapCanvasPixels(mapCanvas) {
   const pixels = new Uint8Array(width * height * 4)
   gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
 
-  let visiblePixels = 0
-  for (let i = 3; i < pixels.length; i += 4) {
-    if (pixels[i] > 12) visiblePixels += 1
-  }
-  if (visiblePixels < 32) return null
+  if (isPixelDataMostlyBlank(pixels, { minLit: 64 })) return null
 
   const output = document.createElement("canvas")
   output.width = width
@@ -332,16 +427,124 @@ function readMapCanvasPixels(mapCanvas) {
     imageData.data.set(pixels.subarray(srcRow, srcRow + width * 4), dstRow)
   }
   ctx.putImageData(imageData, 0, 0)
+  if (isCanvasMostlyBlank(output)) return null
   return output
 }
 
+function isCaptureDataUrlLikelyBlank(dataUrl) {
+  // PNG vuoti/neri tipici ~50KB; una mappa reale è di solito >200KB
+  return !dataUrl || dataUrl.length < 100000
+}
+
 function snapshotMapCanvas(map) {
+  map.triggerRepaint?.()
   const mapCanvas = map.getCanvas()
   return {
     mapCanvas,
     pngDataUrl: mapCanvas.toDataURL("image/png"),
     jpegDataUrl: mapCanvas.toDataURL("image/jpeg", 0.95),
   }
+}
+
+/**
+ * Snapshot affidabile: cattura SINCRONA dentro l'evento `render`.
+ * Se si aspetta rAF dopo render, il buffer WebGL è spesso già vuoto (png ~50KB).
+ */
+async function snapshotMapCanvasReliable(map, signal) {
+  if (signal?.aborted) throw new DOMException("Export annullato", "AbortError")
+
+  return new Promise((resolve, reject) => {
+    let settled = false
+
+    const onAbort = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      map.off("render", onRender)
+      reject(new DOMException("Export annullato", "AbortError"))
+    }
+
+    const onRender = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", onAbort)
+      try {
+        const glCanvas = map.getCanvas()
+        const gl = glCanvas.getContext("webgl2") || glCanvas.getContext("webgl")
+        const contextLost = Boolean(gl?.isContextLost?.())
+
+        // Preferisci toDataURL nel frame di render (preserveDrawingBuffer)
+        let pngDataUrl = glCanvas.toDataURL("image/png")
+        let jpegDataUrl = glCanvas.toDataURL("image/jpeg", 0.95)
+        let via = "toDataURL-sync-render"
+        let mapCanvas = glCanvas
+
+        if (isCaptureDataUrlLikelyBlank(pngDataUrl)) {
+          const copy = document.createElement("canvas")
+          copy.width = glCanvas.width || 1
+          copy.height = glCanvas.height || 1
+          const ctx = copy.getContext("2d")
+          if (ctx) {
+            ctx.drawImage(glCanvas, 0, 0)
+            pngDataUrl = copy.toDataURL("image/png")
+            jpegDataUrl = copy.toDataURL("image/jpeg", 0.95)
+            mapCanvas = copy
+            via = "drawImage-sync-render"
+          }
+        } else {
+          // Copia 2D subito per non dipendere dal buffer GL dopo
+          const copy = document.createElement("canvas")
+          copy.width = glCanvas.width || 1
+          copy.height = glCanvas.height || 1
+          const ctx = copy.getContext("2d")
+          if (ctx) {
+            ctx.drawImage(glCanvas, 0, 0)
+            if (!isCanvasMostlyBlank(copy)) {
+              mapCanvas = copy
+              pngDataUrl = copy.toDataURL("image/png")
+              jpegDataUrl = copy.toDataURL("image/jpeg", 0.95)
+              via = "toDataURL+copy-sync-render"
+            }
+          }
+        }
+
+        if (isCaptureDataUrlLikelyBlank(pngDataUrl)) {
+          const fromGl = readMapCanvasPixels(glCanvas)
+          if (fromGl && !isCanvasMostlyBlank(fromGl)) {
+            pngDataUrl = fromGl.toDataURL("image/png")
+            jpegDataUrl = fromGl.toDataURL("image/jpeg", 0.95)
+            mapCanvas = fromGl
+            via = "readPixels-sync-render"
+          }
+        }
+
+        resolve({ mapCanvas, pngDataUrl, jpegDataUrl, via, contextLost })
+      } catch (error) {
+        reject(error)
+      }
+    }
+
+    signal?.addEventListener("abort", onAbort, { once: true })
+    map.once("render", onRender)
+    const timer = setTimeout(() => {
+      map.off("render", onRender)
+      if (!settled) {
+        settled = true
+        signal?.removeEventListener("abort", onAbort)
+        reject(new Error("Timeout attesa render mappa"))
+      }
+    }, 4000)
+    map.triggerRepaint()
+  })
+}
+
+/** Ricostruisce il framebuffer WebGL (necessario dopo toDataURL ripetuti). */
+async function rebuildMapFramebuffer(map, signal) {
+  if (!map || typeof map.resize !== "function") return
+  if (signal?.aborted) throw new DOMException("Export annullato", "AbortError")
+  map.resize()
+  await waitForMapReadyExport(map, signal, 12000)
 }
 
 async function pickBestMapCapture({ pngDataUrl, jpegDataUrl }) {
@@ -482,7 +685,7 @@ async function canvasToPngBytes(canvas, metadata) {
   return enrichedBytes
 }
 
-function downloadBlob(blob, filename) {
+export function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob)
   const link = document.createElement("a")
   link.href = url
@@ -530,8 +733,23 @@ function cropCanvasToRect(sourceCanvas, cropRect, containerWidth, containerHeigh
  * Esporta la mappa MapLibre come PNG.
  * Se width/height sono forniti senza cropRect, ridimensiona temporaneamente il container.
  * Con cropRect (pixel CSS sul container) esporta solo l'area selezionata.
+ * Con returnBlob: true restituisce un Blob PNG senza avviare il download.
+ * beforeCapture: callback opzionale prima dello snapshot (es. overlay temporanei).
  */
-export async function exportMapToPng(map, { width, height, scaleDenominator, filename, signal, cityName, cropRect }) {
+export async function exportMapToPng(map, {
+  width,
+  height,
+  scaleDenominator,
+  filename,
+  signal,
+  cityName,
+  cropRect,
+  scaleLabel,
+  sectionLabel,
+  returnBlob = false,
+  beforeCapture,
+  restoreView = true,
+} = {}) {
   if (!map || typeof map.getCanvas !== "function") {
     throw new Error("Mappa non disponibile per l'export")
   }
@@ -552,6 +770,14 @@ export async function exportMapToPng(map, { width, height, scaleDenominator, fil
   if (scaleDenominator && scaleDenominator !== "auto") {
     targetZoom = getZoomForScaleDenominator(lat, Number(scaleDenominator))
   }
+
+  const resolvedScaleLabel =
+    scaleLabel ||
+    formatScaleLabel(
+      scaleDenominator && scaleDenominator !== "auto"
+        ? Number(scaleDenominator)
+        : getScaleDenominator(lat, targetZoom),
+    )
 
   const hasCrop = Boolean(
     cropRect &&
@@ -583,30 +809,73 @@ export async function exportMapToPng(map, { width, height, scaleDenominator, fil
       map.jumpTo({ center, zoom: targetZoom, bearing, pitch })
     }
 
-    await waitForMapIdle(map, signal)
-    await waitForMapRenderFrame(map, signal)
+    await waitForMapReadyExport(map, signal)
+
+    if (typeof beforeCapture === "function") {
+      await beforeCapture(map)
+      await waitForMapReadyExport(map, signal)
+    }
 
     if (signal?.aborted) throw new DOMException("Export annullato", "AbortError")
 
-    const mapCapture = snapshotMapCanvas(map)
-    const mapCanvas = mapCapture.mapCanvas
     const logo = await getWatermarkLogo()
-    if (signal?.aborted) throw new DOMException("Export annullato", "AbortError")
+    let exportCanvas = null
+    let lastError = null
 
-    let exportCanvas
-    if (hasCrop) {
-      const rawCanvas = await captureMapCanvasWithoutWatermark({ mapCanvas, mapCapture })
-      const cropped = cropCanvasToRect(
-        rawCanvas,
-        cropRect,
-        container.clientWidth,
-        container.clientHeight,
-        isViewportExport ? null : exportWidth,
-        isViewportExport ? null : exportHeight,
-      )
-      exportCanvas = await applyWatermarkToCanvas(cropped, logo)
-    } else {
-      exportCanvas = await buildWatermarkedCanvas({ mapCanvas, mapCapture, logo })
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      if (signal?.aborted) throw new DOMException("Export annullato", "AbortError")
+
+      // Ricostruisci framebuffer, poi snapshot SINCRONO sul render
+      await rebuildMapFramebuffer(map, signal)
+      if (attempt > 0) {
+        await nudgeMapForRedraw(map, signal)
+      }
+
+      try {
+        const mapCapture = await snapshotMapCanvasReliable(map, signal)
+        const mapCanvas = mapCapture.mapCanvas
+
+        if (isCaptureDataUrlLikelyBlank(mapCapture.pngDataUrl) && isCaptureDataUrlLikelyBlank(mapCapture.jpegDataUrl)) {
+          lastError = new Error("Frame mappa vuoto")
+          continue
+        }
+
+        if (hasCrop) {
+          const rawCanvas = await captureMapCanvasWithoutWatermark({ mapCanvas, mapCapture })
+          if (isCanvasMostlyBlank(rawCanvas)) {
+            lastError = new Error("Frame mappa vuoto")
+            continue
+          }
+          const cropped = cropCanvasToRect(
+            rawCanvas,
+            cropRect,
+            container.clientWidth,
+            container.clientHeight,
+            isViewportExport ? null : exportWidth,
+            isViewportExport ? null : exportHeight,
+          )
+          exportCanvas = await applyWatermarkToCanvas(cropped, logo, {
+            scaleLabel: resolvedScaleLabel,
+            sectionLabel,
+          })
+        } else {
+          exportCanvas = await buildWatermarkedCanvas({
+            mapCanvas,
+            mapCapture,
+            logo,
+            scaleLabel: resolvedScaleLabel,
+            sectionLabel,
+          })
+        }
+        break
+      } catch (error) {
+        lastError = error
+        exportCanvas = null
+      }
+    }
+
+    if (!exportCanvas) {
+      throw lastError || new Error("Cattura mappa non riuscita. Attendi il caricamento completo e riprova.")
     }
 
     const metadata = buildExportMetadata({ cityName })
@@ -617,43 +886,112 @@ export async function exportMapToPng(map, { width, height, scaleDenominator, fil
       console.warn("Metadati PNG non applicati, export senza metadati:", metadataError)
       pngBytes = await canvasToPngBytes(exportCanvas, null)
     }
-    downloadBlob(new Blob([pngBytes], { type: "image/png" }), filename || "mappa-export.png")
+    const blob = new Blob([pngBytes], { type: "image/png" })
+    if (returnBlob) return blob
+    downloadBlob(blob, filename || "mappa-export.png")
+    return blob
   } finally {
     if (shouldResizeContainer) {
       container.style.width = originalStyle.width
       container.style.height = originalStyle.height
       map.resize()
     }
-    if (targetZoom !== originalZoom) {
+    if (restoreView && targetZoom !== originalZoom) {
       map.jumpTo({ center, zoom: originalZoom, bearing, pitch })
       await waitForMapIdle(map)
     }
   }
 }
 
-function waitForMapIdle(map, signal) {
+/** Espone wait idle per sequenze multi-export. */
+export function waitForMapIdleExport(map, signal, timeoutMs = 12000) {
+  return waitForMapIdle(map, signal, timeoutMs)
+}
+
+/** Attende idle + tile caricati (evita PNG neri tra un jump e l'altro). */
+export async function waitForMapReadyExport(map, signal, timeoutMs = 20000) {
+  await waitForMapIdle(map, signal, timeoutMs)
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    if (signal?.aborted) throw new DOMException("Export annullato", "AbortError")
+    const tilesOk = typeof map.areTilesLoaded !== "function" || map.areTilesLoaded()
+    const moving = typeof map.isMoving === "function" && map.isMoving()
+    if (tilesOk && !moving) {
+      await waitForMapRenderFrame(map, signal)
+      await waitForMapRenderFrame(map, signal)
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 120))
+  }
+  await waitForMapRenderFrame(map, signal)
+}
+
+/**
+ * Con tile già in cache, idle/tilesLoaded non bastano: il framebuffer può restare vuoto.
+ * Un micro-zoom forza un ridisegno completo prima dello snapshot.
+ */
+async function nudgeMapForRedraw(map, signal) {
+  if (!map || typeof map.getZoom !== "function") return
+  if (signal?.aborted) throw new DOMException("Export annullato", "AbortError")
+
+  const center = map.getCenter()
+  const zoom = map.getZoom()
+  const bearing = map.getBearing()
+  const pitch = map.getPitch()
+  const nudgedZoom = Math.min(22, zoom + 0.02)
+
+  map.jumpTo({ center, zoom: nudgedZoom, bearing, pitch })
+  await waitForMapIdle(map, signal, 8000)
+  if (signal?.aborted) throw new DOMException("Export annullato", "AbortError")
+
+  map.jumpTo({ center, zoom, bearing, pitch })
+  await waitForMapReadyExport(map, signal, 12000)
+}
+
+/**
+ * Attende il prossimo idle MapLibre.
+ * Se la mappa è già idle, `once('idle')` non scatta mai: forziamo un
+ * `triggerRepaint` e teniamo un timeout di sicurezza.
+ */
+function waitForMapIdle(map, signal, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new DOMException("Export annullato", "AbortError"))
       return
     }
 
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", onAbort)
+      map.off("idle", onIdle)
+      resolve()
+    }
+
     const onAbort = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
       map.off("idle", onIdle)
       reject(new DOMException("Export annullato", "AbortError"))
     }
 
-    const onIdle = () => {
-      signal?.removeEventListener("abort", onAbort)
-      resolve()
-    }
+    const onIdle = () => finish()
 
     signal?.addEventListener("abort", onAbort, { once: true })
+    map.once("idle", onIdle)
 
-    if (map.loaded() && !map.isMoving()) {
-      map.once("idle", onIdle)
-    } else {
-      map.once("idle", onIdle)
+    const timer = setTimeout(() => {
+      console.warn("waitForMapIdle: timeout, proseguo comunque")
+      finish()
+    }, timeoutMs)
+
+    try {
+      map.triggerRepaint?.()
+    } catch {
+      // ignore
     }
   })
 }

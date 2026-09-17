@@ -38,18 +38,29 @@ export const UDM_OPTIONS = UDM_VALUES.map((value) => ({
 /** Alias accettati in import / dati legacy → valore canonico. */
 const UDM_ALIASES = Object.freeze({
   cad: "cad",
+  "cad.": "cad",
   cadauno: "cad",
+  "c.adauno": "cad",
+  pz: "cad",
+  "pz.": "cad",
+  pezzo: "cad",
+  pezzi: "cad",
   "n.": "n",
   nr: "n",
+  "n°": "n",
   n: "n",
   m: "m",
   ml: "ml",
   "m.l.": "ml",
+  "m/l": "ml",
   kg: "kg",
   h: "h",
   ora: "h",
   ore: "h",
   corpo: "corpo",
+  "corpo.": "corpo",
+  acorpo: "corpo",
+  "a.corpo": "corpo",
   "%": "%",
   perc: "%",
   // Superficie → mq
@@ -91,7 +102,10 @@ export function normalizeUdm(raw, { fallback = "cad" } = {}) {
   return fallback
 }
 
+/** Vuoto = ammissibile (diventa cad). Rifiuta solo unità non riconosciute. */
 export function isValidUdm(raw) {
+  const key = normalizeKey(raw)
+  if (!key) return true
   return normalizeUdm(raw, { fallback: null }) != null
 }
 

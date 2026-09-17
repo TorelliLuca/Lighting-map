@@ -14,6 +14,8 @@ import Consuntivo from "./pages/Consuntivo";
 import ConsuntivoReview from "./pages/ConsuntivoReview";
 import ConsuntiviList from "./pages/ConsuntiviList";
 import ExtraordinaryDashboard from "./pages/ExtraordinaryDashboard";
+import PlantStatus from "./pages/PlantStatus";
+import Todo from "./pages/Todo";
 import QuotesDrafts from "./pages/QuotesDrafts";
 import QuotesApproval from "./pages/QuotesApproval";
 import { UserProvider } from "./context/UserContext";
@@ -21,6 +23,7 @@ import { PwaProvider } from "./context/PwaContext";
 import { PushNotificationsProvider } from "./context/PushNotificationsContext";
 import { ProductTourProvider } from "./hooks/useProductTour.jsx";
 import ProtectedRoute from "./components/ProtectedRoute";
+import RequireComuneAccess from "./components/RequireComuneAccess";
 import ConfirmEmail from "./pages/ConfirmEmail";
 import ResetPassword from "./pages/ResetPassword";
 import MyOrganization from "./pages/MyOrganization";
@@ -28,6 +31,8 @@ import OrganizationManagement from "./pages/OrganizationManagement";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
 import Manual from "./pages/Manual";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
+import CookiePolicy from "./pages/CookiePolicy";
 import { PwaBootstrap } from "./components/PwaBootstrap";
 import PageTourHost from "./components/PageTourHost";
 import TourReplayBridge from "./components/TourReplayBridge";
@@ -49,10 +54,14 @@ const routeTitles = {
     "/quotes": "Bozze preventivi | LightingMap",
     "/consuntivi": "Consuntivi IMS | LightingMap",
     "/extraordinary": "Straordinarie | LightingMap",
+    "/plant-status": "Stato impianto | LightingMap",
+    "/todo": "TODO | LightingMap",
     "/my-organization": "La mia Organizzazione | LightingMap",
     "/organization-management": "Gestione Organizzazioni | LightingMap",
     "/profile": "Profilo | LightingMap",
     "/manual": "Manuale | LightingMap",
+    "/privacy": "Privacy | LightingMap",
+    "/cookie": "Cookie | LightingMap",
 };
 
 // Hook per gestire dinamicamente il titolo della pagina
@@ -142,6 +151,8 @@ const AppContent = () => {
                     <Route path="/confirm-email" element={<ConfirmEmail />} />
                     <Route path="/reset-password" element={<ResetPassword />} />
                     <Route path="/manual" element={<Manual />} />
+                    <Route path="/privacy" element={<PrivacyPolicy />} />
+                    <Route path="/cookie" element={<CookiePolicy />} />
                     
                     {/* Rotte protette */}
                     <Route element={<ProtectedRoute />}>
@@ -149,19 +160,25 @@ const AppContent = () => {
                         <Route path="/profile" element={<Profile />} />
                         <Route path="/my-organization" element={<MyOrganization />} />
                         <Route path="/organization-management" element={<OrganizationManagement />} />
-                        <Route path="/report" element={<Report />} />
-                        <Route path="/operation" element={<Operation />} />
-                        <Route path="/inspection" element={<Inspection />} />
                         <Route path="/quote/:id/review" element={<QuoteReview />} />
                         <Route path="/quote/:id/consuntivo" element={<Consuntivo />} />
                         <Route path="/consuntivo/:id/review" element={<ConsuntivoReview />} />
                         <Route path="/consuntivo/:id" element={<Consuntivo />} />
                         <Route path="/quote/:id" element={<Quote />} />
-                        <Route path="/quote" element={<Quote />} />
-                        <Route path="/quotes/approval" element={<QuotesApproval />} />
-                        <Route path="/quotes" element={<QuotesDrafts />} />
-                        <Route path="/consuntivi" element={<ConsuntiviList />} />
-                        <Route path="/extraordinary" element={<ExtraordinaryDashboard />} />
+
+                        {/* Pagine scoped a ?comune= — accesso solo se comune in lista utente */}
+                        <Route element={<RequireComuneAccess />}>
+                            <Route path="/report" element={<Report />} />
+                            <Route path="/operation" element={<Operation />} />
+                            <Route path="/inspection" element={<Inspection />} />
+                            <Route path="/quote" element={<Quote />} />
+                            <Route path="/quotes/approval" element={<QuotesApproval />} />
+                            <Route path="/quotes" element={<QuotesDrafts />} />
+                            <Route path="/consuntivi" element={<ConsuntiviList />} />
+                            <Route path="/extraordinary" element={<ExtraordinaryDashboard />} />
+                            <Route path="/plant-status" element={<PlantStatus />} />
+                            <Route path="/todo" element={<Todo />} />
+                        </Route>
                     </Route>
 
                     {/* Catch-all per rotte non trovate */}

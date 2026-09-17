@@ -40,11 +40,19 @@ describe("isValidUdm / validateUdmMessage", () => {
   it("accepts known units", () => {
     expect(isValidUdm("mq")).toBe(true)
     expect(isValidUdm("m²")).toBe(true)
+    expect(isValidUdm("")).toBe(true)
     expect(validateUdmMessage("cad")).toBe(null)
   })
 
   it("rejects unknown units", () => {
     expect(isValidUdm("xyz")).toBe(false)
     expect(validateUdmMessage("xyz")).toMatch(/mq/i)
+  })
+
+  it("accepts legacy aliases", () => {
+    expect(isValidUdm("cad.")).toBe(true)
+    expect(isValidUdm("a corpo")).toBe(true)
+    expect(normalizeUdm("a corpo")).toBe("corpo")
+    expect(normalizeUdm("m²")).toBe("mq")
   })
 })

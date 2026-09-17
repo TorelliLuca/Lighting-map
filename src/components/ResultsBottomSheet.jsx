@@ -188,23 +188,27 @@ function ResultsBottomSheet({
                   if (visualizationMode === "semplice") {
                     // MapLibre
                     if (mapLibreRef && mapLibreRef.current && mapLibreRef.current.flyTo && marker.data.lat && marker.data.lng) {
-                      mapLibreRef.current.flyTo({
-                        center: [parseFloat(marker.data.lng), parseFloat(marker.data.lat)],
-                        zoom: 30
-                      })
+                      const latNum = Number.parseFloat(String(marker.data.lat).trim().replace(",", "."))
+                      const lngNum = Number.parseFloat(String(marker.data.lng).trim().replace(",", "."))
+                      if (!Number.isNaN(latNum) && !Number.isNaN(lngNum)) {
+                        mapLibreRef.current.flyTo({
+                          center: [lngNum, latNum],
+                          zoom: 30
+                        })
+                      }
                     }
                   } else if (map) {
-                    // Google Maps
-                    map.setCenter(
-                      new window.google.maps.LatLng(
-                        Number.parseFloat(marker.data.lat),
-                        Number.parseFloat(marker.data.lng),
-                      ),
-                    )
+                    // Google Maps — coordinate DB spesso con virgola italiana
+                    const latNum = Number.parseFloat(String(marker.data.lat ?? "").trim().replace(",", "."))
+                    const lngNum = Number.parseFloat(String(marker.data.lng ?? "").trim().replace(",", "."))
+                    if (!Number.isNaN(latNum) && !Number.isNaN(lngNum)) {
+                      map.setCenter(new window.google.maps.LatLng(latNum, lngNum))
+                    }
                     if (marker.ref) {
                       if (!infoWindowRef.current) {
                         infoWindowRef.current = new window.google.maps.InfoWindow()
                       }
+                      window.google.maps.event.trigger(marker.ref, "click")
                       window.google.maps.event.trigger(marker.ref, "gmp-click")
                     }
                   }

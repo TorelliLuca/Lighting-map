@@ -8,7 +8,7 @@ import {
   AlertTriangle,
   DownloadCloud,
   ChevronDown,
-  Hexagon,
+  Activity,
 } from "lucide-react"
 import toast from "react-hot-toast"
 import { useNavigate } from "react-router-dom"
@@ -393,13 +393,13 @@ function SettingsMenu({
           type="button"
           onClick={() => {
             const qs = selectedCity ? `?comune=${encodeURIComponent(selectedCity)}` : ""
-            navigate(`/extraordinary${qs}`)
+            navigate(`/plant-status${qs}`)
             closeMenu()
           }}
           className={actionBtnClass}
         >
-          <Hexagon className="h-4 w-4" />
-          Dashboard straordinarie
+          <Activity className="h-4 w-4" />
+          Stato impianto
         </button>
         <button type="button" onClick={onDownloadReport} className={actionBtnClass}>
           <Download className="h-4 w-4" />

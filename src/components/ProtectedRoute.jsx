@@ -14,6 +14,11 @@ export default function ProtectedRoute() { // Non riceve più children come prop
     const [error, setError] = useState(null);
 
     useEffect(() => {
+        // Attendi l'idratazione dello storage in UserProvider prima di decidere
+        if (loading) {
+            return;
+        }
+
         const checkAuthStatus = async () => {
             setIsCheckingAuth(true);
             try {
@@ -36,9 +41,9 @@ export default function ProtectedRoute() { // Non riceve più children come prop
         };
 
         checkAuthStatus();
-    }, [token, userData, fetchUserProfile, navigate]);
+    }, [token, userData, fetchUserProfile, navigate, loading]);
 
-    if (isCheckingAuth || (loading && token)) {
+    if (loading || isCheckingAuth) {
         return (
             <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-b from-gray-900 to-black text-white p-4 text-center">
                 <motion.div

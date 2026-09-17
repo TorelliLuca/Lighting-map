@@ -8,7 +8,45 @@ export const DEFAULT_FAULT_LABELS = {
   PLANT_OFF: "Strada al buio / intera cabina spenta",
   MULTIPLE_OFF: "Tre o più punti luce spenti nello stesso tratto",
   SINGLE_OFF: "Punto luce singolo spento",
+  PANEL_DAMAGE: "Quadro elettrico danneggiato",
+  PANEL_DOOR_UNSAFE: "Sportello aperto / quadro non sicuro",
+  PANEL_PROTECTION_TRIP: "Protezioni intervenute / interruttore scattato",
+  PANEL_SUPPLY_FAULT: "Anomalia alimentazione quadro",
   NON_URGENT: "Anomalia non urgente",
+};
+
+/** Applicabilità di default per marker (PL/QE) se il capitolato non la espone. */
+export const KNOWN_FAULT_APPLICABLE_TO = {
+  IMMEDIATE_DANGER: ["PL", "QE"],
+  PLANT_OFF: ["PL", "QE"],
+  MULTIPLE_OFF: ["PL"],
+  SINGLE_OFF: ["PL"],
+  NON_URGENT: ["PL", "QE"],
+  PANEL_DAMAGE: ["QE"],
+  PANEL_DOOR_UNSAFE: ["QE"],
+  PANEL_PROTECTION_TRIP: ["QE"],
+  PANEL_SUPPLY_FAULT: ["QE"],
+};
+
+/** Tipi legacy segnalazione (utenti non-admin). */
+export const LEGACY_REPORT_TYPES = {
+  LIGHT_POINT_OFF: "Punto luce spento",
+  PLANT_OFF: "Impianto spento",
+  DAMAGED_COMPLEX: "Complesso danneggiato",
+  DAMAGED_SUPPORT: "Morsettiera rotta",
+  BROKEN_TERMINAL_BLOCK: "Sostegno danneggiato",
+  BROKEN_PANEL: "Quadro danneggiato",
+  OTHER: "Altro",
+};
+
+export const LEGACY_REPORT_APPLICABLE_TO = {
+  LIGHT_POINT_OFF: ["PL"],
+  PLANT_OFF: ["PL", "QE"],
+  DAMAGED_COMPLEX: ["PL"],
+  DAMAGED_SUPPORT: ["PL"],
+  BROKEN_TERMINAL_BLOCK: ["PL"],
+  BROKEN_PANEL: ["QE"],
+  OTHER: ["PL", "QE"],
 };
 
 /** Dizionario legacy report/operazioni + capitolato. */
@@ -25,6 +63,10 @@ export const translation_report_type = {
   IMMEDIATE_DANGER: "Pericolo immediato per la pubblica incolumità",
   MULTIPLE_OFF: "Tre o più punti luce spenti nello stesso tratto",
   SINGLE_OFF: "Punto luce singolo spento",
+  PANEL_DAMAGE: "Quadro elettrico danneggiato",
+  PANEL_DOOR_UNSAFE: "Sportello aperto / quadro non sicuro",
+  PANEL_PROTECTION_TRIP: "Protezioni intervenute / interruttore scattato",
+  PANEL_SUPPLY_FAULT: "Anomalia alimentazione quadro",
   NON_URGENT: "Anomalia non urgente",
 };
 
@@ -53,6 +95,54 @@ export const formatReportFaultLabel = (reportOrCode, faultLabels = []) => {
   if (DEFAULT_FAULT_LABELS[code]) return DEFAULT_FAULT_LABELS[code];
   if (translation_report_type[code]) return translation_report_type[code];
   return String(code).replace(/_/g, " ");
+};
+
+const normalizeMarker = (marker) => {
+  const m = String(marker || "").toUpperCase();
+  return m === "QE" || m === "PL" ? m : null;
+};
+
+export const resolveFaultApplicableTo = (faultLabel) => {
+  const raw = faultLabel?.applicableTo;
+  if (Array.isArray(raw) && raw.length > 0) {
+    const normalized = [...new Set(
+      raw.map((item) => String(item || "").toUpperCase()).filter((item) => item === "PL" || item === "QE"),
+    )];
+    if (normalized.length > 0) return normalized;
+  }
+  return KNOWN_FAULT_APPLICABLE_TO[faultLabel?.code] || ["PL", "QE"];
+};
+
+export const isFaultLabelApplicableToMarker = (faultLabel, marker) => {
+  const m = normalizeMarker(marker);
+  if (!m) return true;
+  return resolveFaultApplicableTo(faultLabel).includes(m);
+};
+
+/**
+ * Filtra le voci capitolato per marker PL/QE.
+ * @param {Array} faultLabels
+ * @param {string} marker
+ * @param {{ includeCodes?: string[] }} [options] - codici da tenere anche se non applicabili (es. valore già salvato)
+ */
+export const filterFaultLabelsForMarker = (faultLabels, marker, { includeCodes = [] } = {}) => {
+  const list = Array.isArray(faultLabels) ? faultLabels : [];
+  const include = new Set((includeCodes || []).filter(Boolean));
+  const filtered = list.filter(
+    (item) => include.has(item.code) || isFaultLabelApplicableToMarker(item, marker),
+  );
+  return filtered.length > 0 ? filtered : list;
+};
+
+export const filterLegacyReportTypesForMarker = (marker) => {
+  const m = normalizeMarker(marker);
+  const entries = Object.entries(LEGACY_REPORT_TYPES);
+  if (!m) return entries;
+  const filtered = entries.filter(([code]) => {
+    const applicable = LEGACY_REPORT_APPLICABLE_TO[code] || ["PL", "QE"];
+    return applicable.includes(m);
+  });
+  return filtered.length > 0 ? filtered : entries;
 };
 
 export const transformDateToIT = (dateToConvert) => {

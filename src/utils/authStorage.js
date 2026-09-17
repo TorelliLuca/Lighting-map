@@ -53,7 +53,12 @@ export const persistUserData = (userData, rememberMe = getRememberMePreference()
   setRememberMePreference(rememberMe)
   const storage = rememberMe ? localStorage : sessionStorage
   const otherStorage = rememberMe ? sessionStorage : localStorage
-  const serialized = JSON.stringify(userData)
+  const safeUserData =
+    userData && typeof userData === "object" ? { ...userData } : userData
+  if (safeUserData && typeof safeUserData === "object") {
+    delete safeUserData.password
+  }
+  const serialized = JSON.stringify(safeUserData)
 
   storage.setItem("userData", serialized)
   otherStorage.removeItem("userData")
@@ -86,4 +91,4 @@ export const isTokenExpiringSoon = (token, thresholdMs = 300000) => {
   return expirationTime - Date.now() < thresholdMs
 }
 
-export const shouldAttemptTokenRefresh = (status) => status === 401 || status === 403
+export const shouldAttemptTokenRefresh = (status) => status === 401

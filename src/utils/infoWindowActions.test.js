@@ -35,8 +35,14 @@ describe("getVisibleActions", () => {
       (a) => a.id
     )
     expect(ids).toContain("sopralluogo")
-    expect(ids).toContain("segnala")
+    expect(ids).not.toContain("segnala")
     expect(ids).not.toContain("operazione")
+  })
+
+  it("shows direct sopralluogo for maintainer without open report", () => {
+    const ids = getVisibleActions(undefined, "MAINTAINER", { marker: "PL" }).map((a) => a.id)
+    expect(ids).toContain("sopralluogo")
+    expect(ids).not.toContain("segnala")
   })
 
   it("hides operazione for administrator even with operable report", () => {
@@ -74,23 +80,23 @@ describe("getVisibleActions", () => {
 })
 
 describe("getPrimaryAction / getSecondaryActions / getOverflowActions", () => {
-  it("prefers sopralluogo as primary and signals secondary", () => {
+  it("prefers sopralluogo as primary without segnala secondary", () => {
     const visible = getVisibleActions(undefined, "MAINTAINER", inspectableMarker)
     const primary = getPrimaryAction(visible)
     expect(primary?.id).toBe("sopralluogo")
 
     const secondary = getSecondaryActions(visible, primary)
-    expect(secondary.map((a) => a.id)).toEqual(["segnala"])
+    expect(secondary.map((a) => a.id)).toEqual([])
 
     const overflow = getOverflowActions(visible, primary, secondary)
     expect(overflow.map((a) => a.id)).not.toContain("sopralluogo")
-    expect(overflow.map((a) => a.id)).not.toContain("segnala")
   })
 
   it("uses operazione as primary when available", () => {
     const visible = getVisibleActions(undefined, "MAINTAINER", operableMarker)
     const primary = getPrimaryAction(visible)
     expect(primary?.id).toBe("operazione")
-    expect(getSecondaryActions(visible, primary).map((a) => a.id)).toEqual(["segnala"])
+    // Manutentore: niente Segnala; resta il sopralluogo diretto in overflow/secondario se previsto
+    expect(getSecondaryActions(visible, primary).map((a) => a.id)).toEqual([])
   })
 })

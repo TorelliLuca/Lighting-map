@@ -2,34 +2,42 @@
 
 import { useState, useEffect, useContext, useMemo } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
+import { motion, useReducedMotion } from "framer-motion"
 import { UserContext, api } from "../context/UserContext"
 import {
   AlertCircle,
   AlertTriangle,
   CheckCircle,
+  ClipboardList,
+  FileSpreadsheet,
   Hash,
   Home,
   Info,
+  Loader2,
   MapPin,
-  PenToolIcon as Tool,
   User,
+  Wrench,
 } from "lucide-react"
-import { LightbulbLoader } from "../components/lightbulb-loader"
 import { BackNavigationButton } from "../components/BackNavigationButton"
 import { GlassSelect } from "../components/ui/GlassSelect"
+import { Button } from "@/components/ui/button"
+import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
+import { ChartSection } from "@/components/infoPanel/DistributionChart"
+import { cn } from "@/lib/utils"
 import { sendPushNotification } from "../utils/pushNotifications"
 import { formatReportFaultLabel, canResolveExtraordinaryReport } from "../utils/utils"
 import { PAGE_SCROLL_SHELL } from "../utils/pageScrollShell"
 import { buildLightPointDashboardPushUrl } from "../utils/notificationDeepLinks"
-
+import { guardComuneAccess } from "../utils/townHallAccess"
 
 /** Stati post-sopralluogo su cui si chiude l'intervento ordinario. */
 const CLOSABLE_ORDINARY = new Set(["SUSPENDED", "SCHEDULED"])
 
 const fieldClass =
-  "block w-full px-4 py-3 rounded-xl border border-blue-500/30 bg-blue-900/20 text-white placeholder-blue-300/50 backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-colors duration-200"
-const labelClass = "block text-sm font-medium text-blue-100 mb-1.5"
-const hintClass = "mt-1.5 text-xs text-blue-300/75 leading-relaxed"
+  "block w-full px-4 py-3 rounded-xl border border-border/70 bg-background/50 text-foreground placeholder:text-muted-foreground backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring/50 transition-colors duration-200"
+const labelClass = "block text-sm font-medium text-foreground mb-1.5"
+const hintClass = "mt-1.5 text-xs text-muted-foreground leading-relaxed"
 
 const reportLabel = (report) => {
   if (!report) return ""
@@ -57,10 +65,41 @@ const DEMO_ACTIVE_REPORT = {
   suspension: { reason: "Esempio sospensione (tutorial)" },
 }
 
+function OperationPageSkeleton() {
+  return (
+    <div
+      className={`${PAGE_SCROLL_SHELL} flex items-start justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4 py-6 sm:py-8`}
+      aria-busy="true"
+      aria-label="Caricamento intervento"
+    >
+      <div className="w-full max-w-lg space-y-4">
+        <ChartSection className="space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-2">
+              <Skeleton className="h-7 w-52" />
+              <Skeleton className="h-4 w-64" />
+            </div>
+            <div className="flex gap-2">
+              <Skeleton className="h-11 w-11 rounded-full" />
+              <Skeleton className="h-11 w-11 rounded-full" />
+            </div>
+          </div>
+          <Skeleton className="h-28 w-full rounded-xl" />
+          <Skeleton className="h-20 w-full rounded-xl" />
+          <Skeleton className="h-24 w-full rounded-xl" />
+          <Skeleton className="h-24 w-full rounded-xl" />
+          <Skeleton className="h-12 w-full rounded-xl" />
+        </ChartSection>
+      </div>
+    </div>
+  )
+}
+
 export default function Operation() {
   const { userData, getActiveReports } = useContext(UserContext)
   const navigate = useNavigate()
   const location = useLocation()
+  const reduceMotion = useReducedMotion()
   const isTourDemo =
     new URLSearchParams(location.search).get("tourDemo") === "1" ||
     Boolean(location.state?.lmTour?.force || location.state?.tourDemo)
@@ -83,10 +122,11 @@ export default function Operation() {
   const isExtraordinary = selectedReport?.maintenance_category === "EXTRAORDINARY"
 
   const reportOptions = useMemo(
-    () => activeReports.map((item) => ({
-      value: String(item._id),
-      label: reportLabel(item),
-    })),
+    () =>
+      activeReports.map((item) => ({
+        value: String(item._id),
+        label: reportLabel(item),
+      })),
     [activeReports],
   )
 
@@ -95,7 +135,6 @@ export default function Operation() {
       navigate("/")
       return
     }
-    // Solo manutentori (e super admin): gli amministratori e sottoruoli non chiudono interventi
     if (!["MAINTAINER", "SUPER_ADMIN"].includes(userData.user_type)) {
       navigate("/dashboard")
       return
@@ -110,7 +149,6 @@ export default function Operation() {
       reportId: params.get("reportId"),
     }
 
-    // Replay tutorial dal profilo
     if (isTourDemo && !paramsObj.comune) {
       setQueryParams(DEMO_OPERATION)
       setActiveReports([DEMO_ACTIVE_REPORT])
@@ -121,6 +159,10 @@ export default function Operation() {
     }
 
     setQueryParams(paramsObj)
+
+    if (paramsObj.comune && !guardComuneAccess({ userData, comune: paramsObj.comune, navigate })) {
+      return
+    }
 
     const load = async () => {
       try {
@@ -141,8 +183,8 @@ export default function Operation() {
 
         setActiveReports(reports)
 
-        const preferred = paramsObj.reportId
-          && reports.find((r) => String(r._id) === String(paramsObj.reportId))
+        const preferred =
+          paramsObj.reportId && reports.find((r) => String(r._id) === String(paramsObj.reportId))
 
         if (preferred) {
           setReportId(preferred._id)
@@ -157,7 +199,9 @@ export default function Operation() {
             (r) => r.maintenance_category === "EXTRAORDINARY" && !canResolveExtraordinaryReport(r),
           )
           if (pendingExtra) {
-            setError("Il preventivo IMS deve essere approvato dal DEC prima di chiudere la straordinaria.")
+            setError(
+              "Il preventivo IMS deve essere approvato dal DEC prima di chiudere la straordinaria.",
+            )
           } else {
             setError("Nessuna segnalazione da chiudere su questo punto.")
           }
@@ -178,7 +222,9 @@ export default function Operation() {
     setError("")
 
     if (isTourDemo) {
-      setError("Modalità tutorial: la chiusura reale è disabilitata. Apri un punto luce dalla mappa per operare.")
+      setError(
+        "Modalità tutorial: la chiusura reale è disabilitata. Apri un punto luce dalla mappa per operare.",
+      )
       return
     }
 
@@ -187,9 +233,8 @@ export default function Operation() {
       return
     }
 
-    const maintenanceType = selectedReport.maintenance_category === "EXTRAORDINARY"
-      ? "EXTRAORDINARY"
-      : "ORDINARY"
+    const maintenanceType =
+      selectedReport.maintenance_category === "EXTRAORDINARY" ? "EXTRAORDINARY" : "ORDINARY"
 
     setSubmitting(true)
     try {
@@ -205,9 +250,8 @@ export default function Operation() {
         maintenance_type: maintenanceType,
       })
 
-      const rawLinked = opRes?.data?.report?.linked_quote_id
-        || selectedReport.linked_quote_id
-        || null
+      const rawLinked =
+        opRes?.data?.report?.linked_quote_id || selectedReport.linked_quote_id || null
       const linkedQuoteId = rawLinked?._id || rawLinked || null
 
       setSuccessMeta({
@@ -265,63 +309,65 @@ export default function Operation() {
   }
 
   if (loading) {
-    return (
-      <div className={`${PAGE_SCROLL_SHELL} flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4`}>
-        <div className="w-full max-w-md flex flex-col items-center justify-center">
-          <LightbulbLoader />
-          <p className="mt-4 text-blue-200">Caricamento intervento...</p>
-        </div>
-      </div>
-    )
+    return <OperationPageSkeleton />
   }
 
   if (isSuccess) {
+    const hasConsuntivoCta = successMeta?.isExtraordinary && successMeta?.linkedQuoteId
     return (
-      <div className={`${PAGE_SCROLL_SHELL} flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4`}>
-        <div className="w-full max-w-md relative overflow-hidden rounded-2xl shadow-[0_0_40px_rgba(0,149,255,0.15)]">
-          <div className="relative z-10 p-8 backdrop-blur-xl bg-black/40 border border-blue-500/20">
-            <div className="text-center">
-              <div className="mx-auto flex items-center justify-center h-20 w-20 rounded-full bg-blue-500/20 backdrop-blur-sm mb-6 border border-blue-400/30">
-                <CheckCircle className="h-10 w-10 text-blue-400" aria-hidden="true" />
-              </div>
-              <h2 className="text-2xl font-bold text-white">Intervento chiuso</h2>
-              <p className="mt-2 text-blue-200/80 text-sm leading-relaxed">
+      <div
+        className={`${PAGE_SCROLL_SHELL} flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4`}
+      >
+        <motion.div
+          initial={reduceMotion ? false : { opacity: 0, scale: 0.96, y: 8 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-md"
+        >
+          <ChartSection className="space-y-5 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/15">
+              <CheckCircle className="h-8 w-8 text-emerald-400" aria-hidden="true" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-foreground">Intervento chiuso</h2>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                 {successMeta?.isExtraordinary
                   ? "Intervento straordinario completato. Compila il consuntivo IMS per chiudere il ciclo documentale."
                   : "Guasto eliminato: la segnalazione è stata completata e l'impianto risulta ripristinato."}
               </p>
-              {successMeta?.isExtraordinary && successMeta?.linkedQuoteId ? (
-                <button
-                  type="button"
-                  onClick={() => navigate(`/quote/${successMeta.linkedQuoteId}/consuntivo`)}
-                  className="mt-6 w-full cursor-pointer py-3 px-4 rounded-xl font-medium text-white bg-amber-600 hover:bg-amber-500 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-amber-400/50"
-                >
-                  Compila consuntivo
-                </button>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => navigate("/dashboard")}
-                className={`mt-3 w-full cursor-pointer py-3 px-4 rounded-xl font-medium text-white transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 ${
-                  successMeta?.isExtraordinary && successMeta?.linkedQuoteId
-                    ? "bg-blue-600/40 hover:bg-blue-600/60 border border-blue-500/30"
-                    : "bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.5)]"
-                }`}
-              >
-                Torna alla dashboard
-              </button>
             </div>
-          </div>
-          <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl" aria-hidden="true" />
-          <div className="absolute -bottom-32 -left-32 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl" aria-hidden="true" />
-        </div>
+            {hasConsuntivoCta ? (
+              <Button
+                type="button"
+                className="min-h-11 w-full bg-amber-600 text-white hover:bg-amber-500"
+                onClick={() => navigate(`/quote/${successMeta.linkedQuoteId}/consuntivo`)}
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                Compila consuntivo
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant={hasConsuntivoCta ? "outline" : "default"}
+              className={cn(
+                "min-h-11 w-full",
+                !hasConsuntivoCta && "bg-primary text-primary-foreground",
+              )}
+              onClick={() => navigate("/dashboard")}
+            >
+              <Home className="h-4 w-4" />
+              Torna alla dashboard
+            </Button>
+          </ChartSection>
+        </motion.div>
       </div>
     )
   }
 
   const singleReport = activeReports.length === 1
   const report = selectedReport || activeReports[0]
-  const operatorName = [userData?.name, userData?.surname].filter(Boolean).join(" ") || userData?.email || "—"
+  const operatorName =
+    [userData?.name, userData?.surname].filter(Boolean).join(" ") || userData?.email || "—"
   const suspensionReason = singleReport
     ? report?.workflow_status === "SUSPENDED" && report?.suspension?.reason
       ? report.suspension
@@ -331,39 +377,48 @@ export default function Operation() {
       : null
 
   return (
-    <div className={`${PAGE_SCROLL_SHELL} flex items-start justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4 py-6 sm:py-8`}>
-      <div className="w-full max-w-lg relative rounded-2xl shadow-[0_0_40px_rgba(0,149,255,0.15)]">
-        <div className="relative z-10 p-6 sm:p-8 backdrop-blur-xl bg-black/40 border border-blue-500/20 rounded-2xl">
-          <div className="flex items-start justify-between gap-3 mb-5" data-tour="page-operation-title">
+    <div
+      className={`${PAGE_SCROLL_SHELL} flex items-start justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4 py-6 sm:py-8`}
+    >
+      <motion.div
+        initial={reduceMotion ? false : { opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+        className="w-full max-w-lg space-y-4"
+      >
+        <ChartSection className="space-y-5">
+          <div className="flex items-start justify-between gap-3" data-tour="page-operation-title">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <Tool className="h-6 w-6 text-blue-400 shrink-0" aria-hidden="true" />
-                <h1 className="text-2xl font-bold text-white truncate">Chiudi intervento</h1>
+                <Wrench className="h-6 w-6 shrink-0 text-blue-400" aria-hidden="true" />
+                <h1 className="truncate text-2xl font-bold text-foreground">Chiudi intervento</h1>
               </div>
-              <p className="mt-1 text-sm text-blue-300/80">
+              <p className="mt-1 text-sm text-muted-foreground">
                 {isTourDemo
                   ? "Esempio guidato — nessun punto reale selezionato"
                   : "Conferma il ripristino dell'impianto sul punto selezionato"}
               </p>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex shrink-0 items-center gap-2">
               <BackNavigationButton />
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
+                className="min-h-11 min-w-11 rounded-full bg-primary/10 hover:bg-primary/20"
                 onClick={() => navigate("/dashboard")}
                 aria-label="Torna alla mappa"
                 title="Torna alla mappa"
-                className="cursor-pointer inline-flex items-center justify-center min-h-11 min-w-11 p-2 rounded-full bg-blue-500/10 hover:bg-blue-500/20 transition-colors duration-200"
               >
                 <Home className="h-5 w-5 text-blue-400" aria-hidden="true" />
-              </button>
+              </Button>
             </div>
           </div>
 
           {isTourDemo ? (
             <div
               role="status"
-              className="mb-4 p-3 rounded-lg bg-blue-900/30 border border-blue-500/30 text-sm text-blue-100"
+              className="rounded-xl border border-blue-500/30 bg-blue-950/30 p-3 text-sm text-blue-100"
             >
               Modalità tutorial: stai vedendo un esempio. La chiusura reale è disabilitata.
             </div>
@@ -372,9 +427,9 @@ export default function Operation() {
           {error && !activeReports.length ? (
             <div
               role="alert"
-              className="flex items-start gap-2 p-3 rounded-lg bg-red-900/20 border border-red-500/30 text-red-200 text-sm"
+              className="flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-950/20 p-3 text-sm text-red-200"
             >
-              <AlertCircle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" aria-hidden="true" />
+              <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" aria-hidden="true" />
               <p>{error}</p>
             </div>
           ) : (
@@ -382,188 +437,191 @@ export default function Operation() {
               <section
                 aria-label="Dettagli punto"
                 data-tour="page-operation-point"
-                className="mb-5 p-4 rounded-xl bg-blue-900/20 border border-blue-500/20 space-y-3"
+                className="space-y-3 rounded-xl border border-border/50 bg-secondary/30 p-4"
               >
                 <div className="flex items-start gap-2.5 min-w-0">
-                  <Hash className="w-4 h-4 mt-0.5 text-blue-400 shrink-0" aria-hidden="true" />
-                  <p className="text-sm text-blue-100 min-w-0 break-words">
-                    <span className="font-medium text-blue-50">Punto:</span>{" "}
-                    <span className="text-blue-200 font-mono">{queryParams.numeroPalo}</span>
+                  <Hash className="mt-0.5 h-4 w-4 shrink-0 text-blue-400" aria-hidden="true" />
+                  <p className="min-w-0 break-words text-sm text-foreground">
+                    <span className="font-medium">Punto:</span>{" "}
+                    <span className="font-mono text-muted-foreground">{queryParams.numeroPalo}</span>
                     {queryParams.comune ? (
-                      <span className="text-blue-300/80"> · {queryParams.comune}</span>
+                      <span className="text-muted-foreground"> · {queryParams.comune}</span>
                     ) : null}
                   </p>
                 </div>
                 <div className="flex items-start gap-2.5 min-w-0">
-                  <MapPin className="w-4 h-4 mt-0.5 text-blue-400 shrink-0" aria-hidden="true" />
-                  <p className="text-sm text-blue-100 min-w-0 break-words">
-                    <span className="font-medium text-blue-50">Manutenzione:</span>{" "}
-                    <span className="text-blue-200">
+                  <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-blue-400" aria-hidden="true" />
+                  <p className="min-w-0 break-words text-sm text-foreground">
+                    <span className="font-medium">Manutenzione:</span>{" "}
+                    <span className="text-muted-foreground">
                       {isExtraordinary ? "Straordinaria" : "Ordinaria"}
                     </span>
                     {isExtraordinary && selectedReport?.due_date ? (
-                      <span className="text-blue-300/80">
-                        {" "}· scadenza {new Date(selectedReport.due_date).toLocaleDateString("it-IT")}
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · scadenza {new Date(selectedReport.due_date).toLocaleDateString("it-IT")}
                       </span>
                     ) : null}
                   </p>
                 </div>
                 <div className="flex items-start gap-2.5 min-w-0">
-                  <User className="w-4 h-4 mt-0.5 text-blue-400 shrink-0" aria-hidden="true" />
-                  <p className="text-sm text-blue-100 min-w-0 break-words">
-                    <span className="font-medium text-blue-50">Operatore:</span>{" "}
-                    <span className="text-blue-200">{operatorName}</span>
+                  <User className="mt-0.5 h-4 w-4 shrink-0 text-blue-400" aria-hidden="true" />
+                  <p className="min-w-0 break-words text-sm text-foreground">
+                    <span className="font-medium">Operatore:</span>{" "}
+                    <span className="text-muted-foreground">{operatorName}</span>
                   </p>
                 </div>
               </section>
 
+              <Separator className="bg-border/50" />
+
               <form onSubmit={handleSubmit} className="space-y-5" data-tour="page-operation-form">
-              <div
-                className="p-3.5 rounded-xl bg-blue-900/25 border border-blue-500/30 text-sm text-blue-100"
-                role="note"
-              >
-                <div className="flex gap-2.5">
-                  <Info className="h-4 w-4 mt-0.5 text-blue-300 shrink-0" aria-hidden="true" />
-                  <div className="space-y-1 leading-relaxed">
-                    <p className="font-medium text-blue-50">Esito registrato</p>
-                    <p className="text-blue-100/90">
-                      Verrà chiusa la segnalazione con esito{" "}
-                      <span className="font-medium text-white">
-                        Guasto eliminato e impianto ripristinato
-                      </span>
-                      . Verifica di aver selezionato la segnalazione corretta prima di confermare.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {singleReport && report ? (
-                <div className="rounded-xl border border-blue-500/20 bg-blue-950/20 p-4 space-y-2">
-                  <p className={labelClass}>Segnalazione</p>
-                  <p className="text-base font-semibold text-white leading-snug">
-                    {formatReportFaultLabel(report)}
-                  </p>
-                  {suspensionReason && (
-                    <p className="text-sm text-blue-100/90">
-                      <span className="text-blue-300/80">Motivo sospensione:</span>{" "}
-                      {suspensionReason.reason}
-                      {suspensionReason.days ? ` (${suspensionReason.days} giorni)` : ""}
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <div>
-                  <label htmlFor="reportId" className={labelClass}>
-                    Segnalazione da chiudere
-                  </label>
-                  <GlassSelect
-                    id="reportId"
-                    value={reportId ? String(reportId) : ""}
-                    onChange={(value) => setReportId(value)}
-                    options={reportOptions}
-                    aria-label="Segnalazione da chiudere"
-                    placeholder="Seleziona segnalazione…"
-                    className="bg-blue-900/20 border-blue-500/30"
-                    maxVisible={6}
-                  />
-                  <p className={hintClass}>
-                    Sul punto risultano più segnalazioni chiudibili: scegli quella appena risolta.
-                  </p>
-                  {suspensionReason && (
-                    <p className="mt-2 text-sm text-blue-100/90">
-                      <span className="text-blue-300/80">Motivo sospensione:</span>{" "}
-                      {suspensionReason.reason}
-                      {suspensionReason.days ? ` (${suspensionReason.days} giorni)` : ""}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {isExtraordinary && (
                 <div
-                  className="p-3.5 rounded-xl bg-amber-900/20 border border-amber-500/30 text-sm text-amber-100"
-                  role="status"
+                  className="rounded-xl border border-blue-500/30 bg-blue-950/25 p-3.5 text-sm text-blue-100"
+                  role="note"
                 >
                   <div className="flex gap-2.5">
-                    <AlertTriangle className="h-4 w-4 mt-0.5 text-amber-300 shrink-0" aria-hidden="true" />
+                    <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-300" aria-hidden="true" />
                     <div className="space-y-1 leading-relaxed">
-                      <p className="font-medium text-amber-50">Consuntivo IMS richiesto</p>
-                      <p className="text-amber-100/90">
-                        Stai chiudendo una segnalazione straordinaria. Dopo l&apos;invio
-                        dovrai compilare il consuntivo IMS per completare il ciclo documentale.
+                      <p className="font-medium text-blue-50">Esito registrato</p>
+                      <p className="text-blue-100/90">
+                        Verrà chiusa la segnalazione con esito{" "}
+                        <span className="font-medium text-foreground">
+                          Guasto eliminato e impianto ripristinato
+                        </span>
+                        . Verifica di aver selezionato la segnalazione corretta prima di confermare.
                       </p>
                     </div>
                   </div>
                 </div>
-              )}
 
-              <div>
-                <label htmlFor="notes" className={labelClass}>
-                  Note{" "}
-                  <span className="font-normal text-blue-300/70">(opzionale)</span>
-                </label>
-                <textarea
-                  id="notes"
-                  rows={4}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Dettagli sull'intervento di chiusura…"
-                  className={fieldClass}
-                />
-                <p className={hintClass}>
-                  Annotazioni utili per il report e le notifiche agli interessati.
-                </p>
-              </div>
-
-              {error && (
-                <div
-                  role="alert"
-                  className="flex items-start gap-2 p-3 rounded-lg bg-red-900/20 border border-red-500/30 text-red-200 text-sm"
-                >
-                  <AlertCircle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" aria-hidden="true" />
-                  <p>{error}</p>
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={submitting || !reportId}
-                className="w-full cursor-pointer py-3.5 px-4 rounded-xl font-medium text-white
-                bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400
-                focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:ring-offset-2 focus:ring-offset-black
-                shadow-[0_0_15px_rgba(59,130,246,0.5)] transition-all duration-200
-                disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
-              >
-                {submitting ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <LightbulbLoader />
-                    Chiusura in corso…
-                  </span>
+                {singleReport && report ? (
+                  <div className="space-y-2 rounded-xl border border-border/50 bg-secondary/20 p-4">
+                    <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+                      <ClipboardList className="h-3.5 w-3.5 text-blue-300" aria-hidden="true" />
+                      Segnalazione
+                    </div>
+                    <p className="text-base font-semibold leading-snug text-foreground">
+                      {formatReportFaultLabel(report)}
+                    </p>
+                    {suspensionReason ? (
+                      <p className="text-sm text-muted-foreground">
+                        Motivo sospensione: {suspensionReason.reason}
+                        {suspensionReason.days ? ` (${suspensionReason.days} giorni)` : ""}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : (
-                  <span className="flex items-center justify-center gap-2">
-                    <Tool className="h-5 w-5" aria-hidden="true" />
-                    Chiudi segnalazione
-                  </span>
+                  <div>
+                    <label htmlFor="reportId" className={labelClass}>
+                      Segnalazione da chiudere
+                    </label>
+                    <GlassSelect
+                      id="reportId"
+                      value={reportId ? String(reportId) : ""}
+                      onChange={(value) => setReportId(value)}
+                      options={reportOptions}
+                      aria-label="Segnalazione da chiudere"
+                      placeholder="Seleziona segnalazione…"
+                      className="border-border/60 bg-background/50"
+                      maxVisible={6}
+                    />
+                    <p className={hintClass}>
+                      Sul punto risultano più segnalazioni chiudibili: scegli quella appena risolta.
+                    </p>
+                    {suspensionReason ? (
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        Motivo sospensione: {suspensionReason.reason}
+                        {suspensionReason.days ? ` (${suspensionReason.days} giorni)` : ""}
+                      </p>
+                    ) : null}
+                  </div>
                 )}
-              </button>
 
-              <div className="text-center">
-                <button
-                  type="button"
-                  onClick={() => navigate("/dashboard")}
-                  className="cursor-pointer text-sm text-blue-400 hover:text-blue-300 transition-colors duration-200"
+                {isExtraordinary ? (
+                  <div
+                    className="rounded-xl border border-amber-500/30 bg-amber-950/20 p-3.5 text-sm text-amber-100"
+                    role="status"
+                  >
+                    <div className="flex gap-2.5">
+                      <AlertTriangle
+                        className="mt-0.5 h-4 w-4 shrink-0 text-amber-300"
+                        aria-hidden="true"
+                      />
+                      <div className="space-y-1 leading-relaxed">
+                        <p className="font-medium text-amber-50">Consuntivo IMS richiesto</p>
+                        <p className="text-amber-100/90">
+                          Stai chiudendo una segnalazione straordinaria. Dopo l&apos;invio dovrai
+                          compilare il consuntivo IMS per completare il ciclo documentale.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div>
+                  <label htmlFor="notes" className={labelClass}>
+                    Note <span className="font-normal text-muted-foreground">(opzionale)</span>
+                  </label>
+                  <textarea
+                    id="notes"
+                    rows={4}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Dettagli sull'intervento di chiusura…"
+                    className={fieldClass}
+                  />
+                  <p className={hintClass}>
+                    Annotazioni utili per il report e le notifiche agli interessati.
+                  </p>
+                </div>
+
+                {error ? (
+                  <div
+                    role="alert"
+                    className="flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-950/20 p-3 text-sm text-red-200"
+                  >
+                    <AlertCircle
+                      className="mt-0.5 h-5 w-5 shrink-0 text-red-400"
+                      aria-hidden="true"
+                    />
+                    <p>{error}</p>
+                  </div>
+                ) : null}
+
+                <Button
+                  type="submit"
+                  disabled={submitting || !reportId}
+                  className="min-h-12 w-full bg-primary text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Annulla
-                </button>
-              </div>
-            </form>
+                  {submitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Chiusura in corso…
+                    </>
+                  ) : (
+                    <>
+                      <Wrench className="h-4 w-4" />
+                      Chiudi segnalazione
+                    </>
+                  )}
+                </Button>
+
+                <div className="text-center">
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto p-0 text-sm text-blue-400 hover:text-blue-300"
+                    onClick={() => navigate("/dashboard")}
+                  >
+                    Annulla
+                  </Button>
+                </div>
+              </form>
             </>
           )}
-        </div>
-
-        <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" aria-hidden="true" />
-        <div className="absolute -bottom-32 -left-32 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" aria-hidden="true" />
-      </div>
+        </ChartSection>
+      </motion.div>
     </div>
   )
 }

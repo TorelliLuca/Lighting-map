@@ -16,6 +16,11 @@ export default defineConfig(({ mode }) => {
 
   return {
     base,
+    resolve: {
+      alias: {
+        "@": path.resolve(dirname, "./src"),
+      },
+    },
     plugins: [react(), tailwindcss(), VitePWA({
       strategies: 'injectManifest',
       srcDir: 'src',

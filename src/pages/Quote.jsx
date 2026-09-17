@@ -23,23 +23,33 @@ import {
   Plus,
   Trash2,
 } from "lucide-react"
-import { LightbulbLoader } from "../components/lightbulb-loader"
+import { motion, useReducedMotion } from "framer-motion"
 import { BackNavigationButton } from "../components/BackNavigationButton"
 import ConfirmDialog from "../components/ui/ConfirmDialog"
 import InfoTooltip from "../components/ui/InfoTooltip"
 import { NumberInput } from "../components/ui/NumberInput"
 import { GlassSelect } from "../components/ui/GlassSelect"
 import { TruncatedTextDetails, DetailsInfoDialog } from "../components/ui/TruncatedTextDetails"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
+import { ChartSection } from "@/components/infoPanel/DistributionChart"
+import {
+  ExtraordinaryBudgetBar,
+  REVIEW_BUDGET_INFO_TEXT,
+} from "@/components/ui/ExtraordinaryBudgetBar"
+import { QuoteStatusBadge } from "../components/ui/QuoteStatusBadge"
 import {
   canApproveQuoteByRole,
   canManageQuotesByRole,
   canSubmitQuoteByRole,
   computeQuoteTotalsClient,
   sumBomUnitPrice,
-  QUOTE_STATUS_LABELS,
   QUOTE_EDITABLE_STATUSES,
   formatReportFaultLabel,
 } from "../utils/utils"
+import { fetchExtraordinaryBudgetUsage } from "../utils/extraordinaryBudget"
 import toast from "react-hot-toast"
 import { PAGE_SCROLL_SHELL, TABLE_SCROLL_X } from "../utils/pageScrollShell"
 import { CapitolatoValidityChip } from "../components/ui/CapitolatoValidityChip"
@@ -60,6 +70,12 @@ import {
   serializeLineItemSnapshot,
 } from "../utils/npBom"
 import { formatUdmLabel, normalizeUdm } from "../utils/udm"
+import {
+  denyUnauthorizedComuneAccess,
+  guardComuneAccess,
+  canUserAccessComune,
+  isTownHallAccessDeniedError,
+} from "../utils/townHallAccess"
 
 const emptyLine = () => ({
   materialCode: "",
@@ -87,25 +103,14 @@ const clampDiscountPercent = (value, minDiscountPercent = 0) => {
   return Math.min(100, Math.max(minDiscountPercent, normalizedValue))
 }
 
-const QUOTE_STATUS_TAG_STYLES = {
-  DRAFT: "bg-slate-500/30 text-slate-100 border-slate-400/50",
-  PENDING_APPROVAL: "bg-amber-500/30 text-amber-100 border-amber-400/50",
-  APPROVED: "bg-emerald-500/30 text-emerald-100 border-emerald-400/50",
-  REJECTED: "bg-red-500/30 text-red-100 border-red-400/50",
-  NEEDS_REVISION: "bg-amber-500/30 text-amber-100 border-amber-400/50",
-}
-
 const fieldInputClass =
-  "w-full rounded-xl border border-blue-500/30 bg-blue-900/20 text-white px-4 py-3 disabled:opacity-60 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 focus-visible:border-blue-400/50"
+  "w-full rounded-xl border border-border/70 bg-background/50 text-foreground px-4 py-3 disabled:opacity-60 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring/50 placeholder:text-muted-foreground"
 
 const cellInputClass =
-  "w-full min-w-0 rounded-lg border border-blue-500/20 bg-black/30 text-white px-2 py-1.5 text-sm disabled:opacity-60 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 focus-visible:border-blue-400/50"
+  "w-full min-w-0 rounded-lg border border-border/60 bg-background/40 text-foreground px-2 py-1.5 text-sm disabled:opacity-60 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring/50"
 
-const btnSecondaryClass =
-  "cursor-pointer transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 disabled:cursor-not-allowed"
-
-const btnPrimaryClass =
-  "cursor-pointer transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 disabled:cursor-not-allowed"
+const btnFocusClass =
+  "cursor-pointer transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"
 
 const isLineMissingDescription = (item) => !item.description?.trim()
 
@@ -126,10 +131,39 @@ const catalogDropCollisionDetection = (args) => {
 }
 
 const SectionHeading = ({ children }) => (
-  <h3 className="text-xs font-semibold uppercase tracking-wider text-blue-300 mb-3 pt-4 border-t border-blue-500/15 first:border-t-0 first:pt-0">
+  <h3 className="mb-3 border-t border-border/40 pt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground first:border-t-0 first:pt-0">
     {children}
   </h3>
 )
+
+function QuotePageSkeleton() {
+  return (
+    <div
+      className={`${PAGE_SCROLL_SHELL} flex items-start justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4 py-6 sm:py-8`}
+      aria-busy="true"
+      aria-label="Caricamento preventivo"
+    >
+      <div className="w-full max-w-5xl space-y-4">
+        <ChartSection className="space-y-4 p-6 sm:p-8">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-2">
+              <Skeleton className="h-7 w-56" />
+              <Skeleton className="h-4 w-72" />
+            </div>
+            <div className="flex gap-2">
+              <Skeleton className="h-11 w-11 rounded-full" />
+              <Skeleton className="h-11 w-11 rounded-full" />
+            </div>
+          </div>
+          <Skeleton className="h-28 w-full rounded-xl" />
+          <Skeleton className="h-40 w-full rounded-xl" />
+          <Skeleton className="h-32 w-full rounded-xl" />
+          <Skeleton className="h-12 w-full rounded-xl" />
+        </ChartSection>
+      </div>
+    </div>
+  )
+}
 
 const serializeFormSnapshot = (data) => JSON.stringify({
   priorityClass: data.priorityClass || "C",
@@ -146,6 +180,7 @@ export default function Quote() {
   const navigate = useNavigate()
   const location = useLocation()
   const params = useParams()
+  const reduceMotion = useReducedMotion()
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -159,6 +194,8 @@ export default function Quote() {
   const [quote, setQuote] = useState(null)
   const [queryParams, setQueryParams] = useState({})
   const [catalogQuery, setCatalogQuery] = useState("")
+  const [budgetLimit, setBudgetLimit] = useState(null)
+  const [approvedSpent, setApprovedSpent] = useState(0)
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [showSaveBeforeDownload, setShowSaveBeforeDownload] = useState(false)
@@ -303,6 +340,10 @@ export default function Quote() {
     }
     setQueryParams(paramsObj)
 
+    if (paramsObj.comune && !guardComuneAccess({ userData, comune: paramsObj.comune, navigate })) {
+      return
+    }
+
     // Gli admin vedono solo approvazione/revisione, non la compilazione bozze
     if (!canManage && canApprove) {
       if (paramsObj.quoteId) {
@@ -327,6 +368,10 @@ export default function Quote() {
           setQuote(q)
 
           const thName = q.townHallId?.name || paramsObj.comune
+          if (thName && !canUserAccessComune(userData, thName)) {
+            denyUnauthorizedComuneAccess(navigate)
+            return
+          }
           const lpId = q.lightPointId?._id || q.lightPointId
           const [lpRes, configRes] = await Promise.all([
             lpId ? getLightpoint(lpId) : Promise.resolve(null),
@@ -437,6 +482,10 @@ export default function Quote() {
         }
       } catch (err) {
         console.error(err)
+        if (isTownHallAccessDeniedError(err)) {
+          denyUnauthorizedComuneAccess(navigate)
+          return
+        }
         setError(err.response?.data?.error || "Impossibile caricare il preventivo.")
       } finally {
         setLoading(false)
@@ -445,6 +494,35 @@ export default function Quote() {
 
     load()
   }, [userData, canManage, canApprove, navigate, location.search, params.id, getLightpoint, getMaintenanceConfig])
+
+  useEffect(() => {
+    const comune = queryParams.comune
+    if (!comune) {
+      setBudgetLimit(null)
+      setApprovedSpent(0)
+      return
+    }
+
+    let cancelled = false
+    const loadBudget = async () => {
+      try {
+        const usage = await fetchExtraordinaryBudgetUsage(api, comune)
+        if (cancelled) return
+        setBudgetLimit(usage.limit)
+        setApprovedSpent(usage.approvedSpent)
+      } catch (budgetErr) {
+        console.error(budgetErr)
+        if (cancelled) return
+        setBudgetLimit(null)
+        setApprovedSpent(0)
+      }
+    }
+
+    loadBudget()
+    return () => {
+      cancelled = true
+    }
+  }, [queryParams.comune])
 
   const updateLine = (index, patch) => {
     setFormData((prev) => {
@@ -1055,66 +1133,60 @@ export default function Quote() {
     }))
   }
 
-  if (loading) {
-    return (
-      <div className={`${PAGE_SCROLL_SHELL} flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4`}>
-        <LightbulbLoader />
-      </div>
-    )
-  }
+  if (loading) return <QuotePageSkeleton />
 
   return (
     <div className={`${PAGE_SCROLL_SHELL} flex items-start justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4 py-6 sm:py-8`}>
-      <div className="w-full max-w-5xl relative overflow-hidden rounded-2xl shadow-[0_0_40px_rgba(0,149,255,0.15)]">
-        <div className="relative z-10 p-6 sm:p-8 backdrop-blur-xl bg-black/40 border border-blue-500/20">
+      <motion.div
+        initial={reduceMotion ? false : { opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+        className="w-full max-w-5xl space-y-4"
+      >
+        <ChartSection className="space-y-5 p-6 sm:p-8">
           <div className="flex items-start justify-between gap-4 mb-6">
             <div className="flex items-start gap-2 min-w-0">
               <FileSpreadsheet className="h-6 w-6 text-blue-400 shrink-0 mt-1" />
               <div className="min-w-0">
-                <h2 className="text-2xl font-bold text-white">Preventivo IMS</h2>
+                <h1 className="text-2xl font-bold text-foreground">Preventivo IMS</h1>
                 <div className="flex flex-wrap items-center gap-2 mt-1.5">
                   <CapitolatoValidityChip validity={capitolatoValidity} />
                   {quote && (
                     <>
-                      <span
-                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${
-                          QUOTE_STATUS_TAG_STYLES[quote.status]
-                          || "bg-blue-500/25 text-blue-100 border-blue-400/40"
-                        }`}
-                      >
-                        {QUOTE_STATUS_LABELS[quote.status] || quote.status}
-                      </span>
+                      <QuoteStatusBadge status={quote.status} />
                       {quote.protocolNumber && (
-                        <span className="text-xs text-blue-200 font-mono">
+                        <Badge variant="outline" className="font-mono text-[11px] text-blue-200">
                           {quote.protocolNumber}
-                        </span>
+                        </Badge>
                       )}
                     </>
                   )}
                   {isDirty && (
-                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border bg-amber-500/20 text-amber-100 border-amber-400/40">
+                    <Badge variant="outline" className="border-amber-400/40 bg-amber-500/20 text-amber-100">
                       Modifiche non salvate
-                    </span>
+                    </Badge>
                   )}
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <BackNavigationButton onClick={handleBackNavigation} />
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
+                className="min-h-11 min-w-11 rounded-full bg-primary/10 hover:bg-primary/20"
                 onClick={handleHomeNavigation}
                 aria-label="Torna alla dashboard"
-                className={`p-2 rounded-full bg-blue-500/10 hover:bg-blue-500/20 ${btnSecondaryClass}`}
               >
-                <Home className="h-5 w-5 text-blue-400" />
-              </button>
+                <Home className="h-5 w-5 text-blue-400" aria-hidden="true" />
+              </Button>
             </div>
           </div>
 
           {!canEdit && readOnlyMessage && (
-            <div className="mb-4 p-3 rounded-lg bg-slate-800/40 border border-slate-500/30 text-slate-100 text-sm flex gap-2">
-              <Lock className="h-4 w-4 shrink-0 mt-0.5 text-slate-300" />
+            <div className="mb-4 flex gap-2 rounded-xl border border-border/50 bg-secondary/40 p-3 text-sm text-foreground">
+              <Lock className="h-4 w-4 shrink-0 mt-0.5 text-muted-foreground" />
               <p>{readOnlyMessage}</p>
             </div>
           )}
@@ -1122,15 +1194,15 @@ export default function Quote() {
           {(lightpoint || report) && (
             <>
               <SectionHeading>Contesto</SectionHeading>
-              <div className="mb-6 p-4 rounded-xl bg-blue-900/20 border border-blue-500/20 text-sm text-white space-y-1">
+              <div className="mb-6 space-y-1 rounded-xl border border-border/50 bg-secondary/30 p-4 text-sm text-foreground">
                 <p className="flex flex-wrap items-center gap-1.5">
-                  <span className="font-medium text-blue-200">Punto:</span>
+                  <span className="font-medium text-muted-foreground">Punto:</span>
                   {canGoToLightPoint ? (
                     <button
                       type="button"
                       onClick={goToLightPointOnMap}
                       title="Centra la mappa sul punto luce"
-                      className={`inline-flex items-center gap-1 text-blue-300 hover:text-blue-100 underline underline-offset-2 ${btnSecondaryClass}`}
+                      className={`inline-flex items-center gap-1 text-blue-300 hover:text-blue-100 underline underline-offset-2 ${btnFocusClass}`}
                     >
                       <span>{lightpoint?.numero_palo || "—"}</span>
                       <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -1139,15 +1211,15 @@ export default function Quote() {
                     <span>{lightpoint?.numero_palo || "—"}</span>
                   )}
                 </p>
-                <p><span className="font-medium text-blue-200">Comune:</span> {queryParams.comune || "—"}</p>
+                <p><span className="font-medium text-muted-foreground">Comune:</span> {queryParams.comune || "—"}</p>
                 {report && (
                   <div className="flex items-start gap-2">
-                    <span className="font-medium text-blue-200 shrink-0">Segnalazione:</span>
+                    <span className="font-medium text-muted-foreground shrink-0">Segnalazione:</span>
                     <TruncatedTextDetails
                       text={formatReportFaultLabel(report)}
                       title="Dettagli segnalazione"
                       lines={2}
-                      className="text-sm text-white"
+                      className="text-sm text-foreground"
                     />
                   </div>
                 )}
@@ -1156,14 +1228,14 @@ export default function Quote() {
           )}
 
           {error && (
-            <div role="alert" className="mb-4 p-3 rounded-lg bg-red-900/20 border border-red-500/30 text-red-200 flex gap-2">
+            <div role="alert" className="mb-4 flex gap-2 rounded-xl border border-red-500/30 bg-red-950/20 p-3 text-red-200">
               <AlertCircle className="h-5 w-5 shrink-0" />
               <p>{error}</p>
             </div>
           )}
 
           {(quote?.rejectedReason || contestedCount > 0) && canEdit && (
-            <div role="status" className="mb-4 p-3 rounded-lg bg-amber-900/20 border border-amber-500/30 text-amber-100 text-sm space-y-1">
+            <div role="status" className="mb-4 space-y-1 rounded-xl border border-amber-500/30 bg-amber-900/20 p-3 text-sm text-amber-100">
               <p className="font-medium flex items-center gap-2">
                 <AlertCircle className="h-4 w-4 shrink-0" />
                 Preventivo respinto dal DEC
@@ -1190,7 +1262,7 @@ export default function Quote() {
                   <button
                     type="button"
                     onClick={() => setShowFaultDetails(true)}
-                    className={`text-[11px] font-medium text-blue-300 hover:text-blue-100 underline underline-offset-2 ${btnSecondaryClass}`}
+                    className={`text-[11px] font-medium text-blue-300 hover:text-blue-100 underline underline-offset-2 ${btnFocusClass}`}
                   >
                     Dettagli
                   </button>
@@ -1310,7 +1382,7 @@ export default function Quote() {
                   onAdd={addLineFromCatalog}
                   draggable={isDesktopDnD}
                   expandAll={isCatalogSearching}
-                  buttonClassName={btnSecondaryClass}
+                  buttonClassName={btnFocusClass}
                 />
               </div>
             )}
@@ -1322,7 +1394,7 @@ export default function Quote() {
                   <button
                     type="button"
                     onClick={addAdHocLine}
-                    className={`text-xs px-3 py-1.5 rounded-lg border border-amber-500/30 text-amber-200 hover:bg-amber-900/20 flex items-center gap-1 shrink-0 ${btnSecondaryClass}`}
+                    className={`text-xs px-3 py-1.5 rounded-lg border border-amber-500/30 text-amber-200 hover:bg-amber-900/20 flex items-center gap-1 shrink-0 ${btnFocusClass}`}
                   >
                     <Plus className="h-3.5 w-3.5" /> Nuovo prezzo
                   </button>
@@ -1425,7 +1497,7 @@ export default function Quote() {
                               <button
                                 type="button"
                                 onClick={() => removeLine(index)}
-                                className={`p-2 rounded-lg border border-red-500/30 text-red-300 hover:bg-red-900/20 shrink-0 ${btnSecondaryClass}`}
+                                className={`p-2 rounded-lg border border-red-500/30 text-red-300 hover:bg-red-900/20 shrink-0 ${btnFocusClass}`}
                                 aria-label={`Rimuovi voce ${index + 1}`}
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -1737,7 +1809,7 @@ export default function Quote() {
                                   <button
                                     type="button"
                                     onClick={() => removeLine(index)}
-                                    className={`p-1.5 rounded-lg border border-red-500/30 text-red-300 hover:bg-red-900/20 ${btnSecondaryClass}`}
+                                    className={`p-1.5 rounded-lg border border-red-500/30 text-red-300 hover:bg-red-900/20 ${btnFocusClass}`}
                                     aria-label={`Rimuovi voce ${index + 1}`}
                                   >
                                     <Trash2 className="h-4 w-4" />
@@ -1803,25 +1875,38 @@ export default function Quote() {
               </div>
             </div>
 
-            <div className="p-4 rounded-xl bg-blue-950/40 border border-blue-500/20 text-sm text-white space-y-1">
-              <p className="flex justify-between"><span className="text-blue-200">Totale lordo</span><span>€ {totals.subtotal.toFixed(2)}</span></p>
-              <p className="flex justify-between"><span className="text-blue-200">Oneri sicurezza 2%</span><span>€ {totals.safetyAmount.toFixed(2)}</span></p>
-              <p className="flex justify-between"><span className="text-blue-200">Sconto</span><span>€ {totals.discountAmount.toFixed(2)}</span></p>
-              <p className="flex justify-between font-semibold text-white pt-2 border-t border-blue-500/20">
+            <div className="space-y-1 rounded-xl border border-border/50 bg-secondary/30 p-4 text-sm text-foreground">
+              <p className="flex justify-between"><span className="text-muted-foreground">Totale lordo</span><span>€ {totals.subtotal.toFixed(2)}</span></p>
+              <p className="flex justify-between"><span className="text-muted-foreground">Oneri sicurezza 2%</span><span>€ {totals.safetyAmount.toFixed(2)}</span></p>
+              <p className="flex justify-between"><span className="text-muted-foreground">Sconto</span><span>€ {totals.discountAmount.toFixed(2)}</span></p>
+              <p className="flex justify-between border-t border-border/40 pt-2 font-semibold text-foreground">
                 <span>Totale netto</span><span>€ {totals.total.toFixed(2)}</span>
               </p>
             </div>
+
+            {budgetLimit != null ? (
+              <ExtraordinaryBudgetBar
+                spent={approvedSpent}
+                extraSpent={totals.total}
+                limit={budgetLimit}
+                infoText={REVIEW_BUDGET_INFO_TEXT}
+                className="max-w-none lg:w-full"
+              />
+            ) : null}
             </div>
+
+            <Separator className="bg-border/50" />
 
             <SectionHeading>Azioni</SectionHeading>
             <div className="space-y-3 pb-1">
             {(canEdit || quote?._id) && (
               <div className="flex flex-col sm:flex-row gap-2">
-                <button
+                <Button
                   type="button"
+                  variant="outline"
                   disabled={!!downloadingFormat}
                   onClick={() => handleDownloadClick("xlsx")}
-                  className={`flex-1 py-3 rounded-xl border border-blue-500/30 text-blue-100 hover:bg-blue-900/30 disabled:opacity-50 flex items-center justify-center gap-2 ${btnSecondaryClass}`}
+                  className="min-h-12 flex-1"
                 >
                   {downloadingFormat === "xlsx" ? (
                     <>
@@ -1834,7 +1919,7 @@ export default function Quote() {
                       Scarica XLSX
                     </>
                   )}
-                </button>
+                </Button>
                 {/* Scarica PDF nascosto: non ancora supportato in questo deploy */}
               </div>
             )}
@@ -1842,11 +1927,12 @@ export default function Quote() {
             <div className="flex flex-col sm:flex-row gap-2">
               {canEdit && (
                 <>
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
                     disabled={saving || submitting || (!isDirty && !!quote?._id)}
                     onClick={handleSave}
-                    className={`flex-1 py-3 rounded-xl border border-blue-500/30 text-blue-100 hover:bg-blue-900/30 disabled:opacity-50 flex items-center justify-center gap-2 ${btnSecondaryClass}`}
+                    className="min-h-12 flex-1"
                   >
                     {saving ? (
                       <>
@@ -1856,14 +1942,14 @@ export default function Quote() {
                     ) : (
                       "Salva bozza"
                     )}
-                  </button>
+                  </Button>
                   <div className="flex-1 flex items-center gap-1">
-                    <button
+                    <Button
                       type="button"
                       disabled={saving || submitting || !canSubmit}
                       onClick={handleSubmit}
                       title={!canSubmit ? "Solo il titolare manutentore può inviare il preventivo in approvazione." : undefined}
-                      className={`flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-medium disabled:opacity-50 flex items-center justify-center gap-2 ${btnPrimaryClass}`}
+                      className="min-h-12 flex-1 bg-primary text-primary-foreground"
                     >
                       {submitting ? (
                         <>
@@ -1873,7 +1959,7 @@ export default function Quote() {
                       ) : (
                         "Invia in approvazione"
                       )}
-                    </button>
+                    </Button>
                     {!canSubmit && (
                       <InfoTooltip text="Solo il titolare manutentore può inviare il preventivo in approvazione al DEC." />
                     )}
@@ -1881,28 +1967,28 @@ export default function Quote() {
                 </>
               )}
               {quote?._id && quote.status === "PENDING_APPROVAL" && canApprove && (
-                <button
+                <Button
                   type="button"
                   onClick={() => navigate(`/quote/${quote._id}/review`)}
-                  className={`flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium ${btnPrimaryClass}`}
+                  className="min-h-12 flex-1 bg-emerald-600 text-white hover:bg-emerald-500"
                 >
                   Apri revisione DEC
-                </button>
+                </Button>
               )}
               {quote?._id && !canEdit && (
-                <button
+                <Button
                   type="button"
                   onClick={() => navigate("/dashboard")}
-                  className={`flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-medium ${btnPrimaryClass}`}
+                  className="min-h-12 flex-1 bg-primary text-primary-foreground"
                 >
                   Torna alla Dashboard
-                </button>
+                </Button>
               )}
             </div>
             </div>
           </div>
-        </div>
-      </div>
+        </ChartSection>
+      </motion.div>
       <CatalogPickerModal
         isOpen={catalogPickerNpIndex != null}
         onClose={() => setCatalogPickerNpIndex(null)}

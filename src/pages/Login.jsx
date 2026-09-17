@@ -1,255 +1,368 @@
 "use client"
 
-import { useState, useContext, useEffect } from "react"
+import { useState, useEffect } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { UserContext, useUser } from "../context/UserContext"
-import { Eye, EyeOff, Mail, Lock , CheckCircle, ArrowLeft } from "lucide-react"
-import { LightbulbLoader } from "../components/lightbulb-loader"
+import {
+  Eye,
+  EyeOff,
+  Mail,
+  Lock,
+  CheckCircle,
+  ArrowLeft,
+  CircleAlert,
+  Loader2,
+  LogIn,
+} from "lucide-react"
+import { useUser } from "../context/UserContext"
 import Logo from "../components/Logo"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { AuthPageSkeleton } from "@/components/ui/AuthPageSkeleton"
+import { AuthLegalFooter } from "@/components/legal/LegalDocumentPage"
+import { cn } from "@/lib/utils"
 
-const BASE_URL = import.meta.env.VITE_SERVER_URL
+const fieldClass =
+  "h-11 border-blue-500/30 bg-blue-900/20 text-white placeholder:text-blue-300/50 focus-visible:border-blue-500/50 focus-visible:ring-blue-500/40"
+const labelClass = "text-blue-200"
 
-const LoginForm = ({ onForgotPasswordClick, email, setEmail, password, setPassword, rememberMe, setRememberMe, handleSubmit, isLoading, error, showPassword, setShowPassword }) => (
-  <>
-    <div className="flex justify-center">
-      <Logo />
+const AuthShell = ({ children }) => (
+  <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4">
+    <div className="w-full max-w-md">
+      <Card className="relative w-full overflow-hidden border-blue-500/20 bg-black/40 py-0 shadow-[0_0_40px_rgba(0,149,255,0.15)] backdrop-blur-xl">
+        <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-blue-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-32 -left-32 h-80 w-80 rounded-full bg-blue-600/10 blur-3xl" />
+        {children}
+      </Card>
+      <AuthLegalFooter />
     </div>
-    <h2 className=" text-center text-3xl font-bold text-white">Accedi al tuo account</h2>
-    <p className="mt-2 text-center text-sm text-blue-200/70">
-      Accedi alla tua dashboard di gestione dell'illuminazione pubblica
-    </p>
+  </div>
+)
 
-    <form className="mt-2 space-y-6" onSubmit={handleSubmit}>
-      <div className="space-y-4">
-        {/* Email Input */}
-        <div className="relative">
-          <label htmlFor="email" className="block text-sm font-medium text-blue-200 mb-2">
+const getApiErrorMessage = (err, fallback) => {
+  const data = err?.response?.data
+  if (typeof data === "string" && data.trim()) return data
+  if (data && typeof data === "object" && data.message) return data.message
+  return fallback
+}
+
+const LoginForm = ({
+  onForgotPasswordClick,
+  email,
+  setEmail,
+  password,
+  setPassword,
+  rememberMe,
+  setRememberMe,
+  handleSubmit,
+  isLoading,
+  error,
+  showPassword,
+  setShowPassword,
+  needsEmailConfirm,
+  onResendConfirmation,
+  isResendingConfirm,
+  confirmResendMessage,
+}) => (
+  <>
+    <CardHeader className="relative z-10 items-center pb-2 pt-8 text-center">
+      <Logo />
+      <CardTitle className="mt-3 text-3xl text-white">Accedi al tuo account</CardTitle>
+      <CardDescription className="text-blue-200/70">
+        Accedi alla tua dashboard di gestione dell&apos;illuminazione pubblica
+      </CardDescription>
+    </CardHeader>
+
+    <CardContent className="relative z-10 pb-8">
+      <form className="space-y-5" onSubmit={handleSubmit} autoComplete="off">
+        <div className="space-y-2">
+          <Label htmlFor="email" className={labelClass}>
             Indirizzo email
-          </label>
+          </Label>
           <div className="relative">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Mail className="h-5 w-5 text-blue-400" />
-            </div>
-            <input
+            <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-blue-400" />
+            <Input
               id="email"
               name="email"
               type="email"
-              autoComplete="email"
+              autoComplete="off"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="block w-full pl-10 pr-3 py-3 rounded-xl border border-blue-500/30 bg-blue-900/20 text-white placeholder-blue-300/50 backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
+              className={cn(fieldClass, "pl-10")}
               placeholder="you@example.com"
+              disabled={isLoading}
             />
           </div>
         </div>
 
-        {/* Password Input */}
-        <div className="relative">
-          <label htmlFor="password" className="block text-sm font-medium text-blue-200 mb-2">
+        <div className="space-y-2">
+          <Label htmlFor="password" className={labelClass}>
             Password
-          </label>
+          </Label>
           <div className="relative">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-              <Lock className="h-5 w-5 text-blue-400" />
-            </div>
-            <input
+            <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-blue-400" />
+            <Input
               id="password"
               name="password"
               type={showPassword ? "text" : "password"}
-              autoComplete="current-password"
+              autoComplete="off"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="block w-full pl-10 pr-10 py-3 rounded-xl border border-blue-500/30 bg-blue-900/20 text-white placeholder-blue-300/50 backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
+              className={cn(fieldClass, "pl-10 pr-10")}
               placeholder="••••••••"
+              disabled={isLoading}
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
             />
-            <button
+            <Button
               type="button"
-              className="absolute inset-y-0 right-0 pr-3 flex items-center text-blue-400 hover:text-blue-300 transition-colors"
+              variant="ghost"
+              size="icon"
+              className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 text-blue-400 hover:bg-transparent hover:text-blue-300"
               onClick={() => setShowPassword(!showPassword)}
+              disabled={isLoading}
+              aria-label={showPassword ? "Nascondi password" : "Mostra password"}
             >
-              {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-            </button>
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </Button>
           </div>
         </div>
-      </div>
 
-      <div className="flex items-center">
-        <input
-          id="remember-me"
-          name="remember-me"
-          type="checkbox"
-          checked={rememberMe}
-          onChange={(e) => setRememberMe(e.target.checked)}
-          className="h-4 w-4 rounded border-blue-500/40 bg-blue-900/20 text-blue-500 focus:ring-blue-500/50"
-        />
-        <label htmlFor="remember-me" className="ml-2 block text-sm text-blue-200/80">
-          Resta connesso
-        </label>
-      </div>
-
-      {error && (
-        <div className="flex items-center space-x-2 p-3 rounded-lg bg-red-900/20 border border-red-500/30 text-red-200">
-           <svg className="h-5 w-5 text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-           </svg>
-           <p className="text-sm">{error}</p>
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="remember-me"
+            checked={rememberMe}
+            onCheckedChange={(checked) => setRememberMe(checked === true)}
+            disabled={isLoading}
+            className="border-blue-500/40 data-[state=checked]:border-primary data-[state=checked]:bg-primary"
+          />
+          <Label htmlFor="remember-me" className="cursor-pointer text-sm font-normal text-blue-200/80">
+            Resta connesso
+          </Label>
         </div>
-      )}
 
-      <div>
-        <button
+        {error && (
+          <Alert
+            variant="destructive"
+            className="border-red-500/30 bg-red-900/20 text-red-200 [&>svg]:text-red-400"
+          >
+            <CircleAlert className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {confirmResendMessage && (
+          <Alert className="border-blue-500/30 bg-blue-900/20 text-blue-100 [&>svg]:text-blue-400">
+            <Mail className="h-4 w-4" />
+            <AlertDescription>{confirmResendMessage}</AlertDescription>
+          </Alert>
+        )}
+
+        <Button
           type="submit"
           disabled={isLoading}
-          className="w-full py-3 px-4 rounded-xl font-medium text-white bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:ring-offset-2 focus:ring-offset-black shadow-[0_0_15px_rgba(59,130,246,0.5)] transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed disabled:shadow-none"
+          className="h-11 w-full bg-primary text-primary-foreground shadow-[0_0_15px_rgba(59,130,246,0.5)]"
         >
           {isLoading ? (
-            <span className="flex items-center justify-center">
-              <LightbulbLoader />
-              <span className="ml-2">Accesso in corso...</span>
-            </span>
+            <>
+              <Loader2 className="animate-spin" />
+              Accesso in corso...
+            </>
           ) : (
-            "Accedi"
+            <>
+              <LogIn />
+              Accedi
+            </>
           )}
-        </button>
-      </div>
+        </Button>
 
-      <div className="text-center text-sm space-y-2">
-        <p className="text-blue-200/70">
-          Non hai un account?{" "}
-          <Link to="/signin" className="font-medium text-blue-400 hover:text-blue-300 transition-colors">
-            Registrati
-          </Link>
-        </p>
-        <p className="text-blue-200/70">
-          <button
+        {needsEmailConfirm && (
+          <Button
             type="button"
-            className="font-medium text-blue-400 hover:text-blue-300 transition-colors"
-            onClick={onForgotPasswordClick}
+            variant="outline"
+            disabled={isResendingConfirm || !email || isLoading}
+            onClick={onResendConfirmation}
+            className="h-11 w-full border-blue-500/30 bg-transparent text-blue-300 hover:bg-blue-900/30 hover:text-blue-200"
           >
-            Password dimenticata?
-          </button>
-        </p>
-      </div>
-    </form>
+            {isResendingConfirm ? (
+              <>
+                <Loader2 className="animate-spin" />
+                Invio in corso...
+              </>
+            ) : (
+              "Rinvia email di conferma"
+            )}
+          </Button>
+        )}
+
+        <div className="space-y-2 text-center text-sm">
+          <p className="text-blue-200/70">
+            Non hai un account?{" "}
+            <Link
+              to="/signin"
+              className="font-medium text-blue-400 transition-colors hover:text-blue-300"
+            >
+              Registrati
+            </Link>
+          </p>
+          <p>
+            <button
+              type="button"
+              className="font-medium text-blue-400 transition-colors hover:text-blue-300"
+              onClick={onForgotPasswordClick}
+            >
+              Password dimenticata?
+            </button>
+          </p>
+        </div>
+      </form>
+    </CardContent>
   </>
-);
+)
 
-// Componente per il form "Password Dimenticata"
-const ForgotPasswordForm = ({ onBackToLogin, handleSendResetLink, emailForReset, setEmailForReset, isSending, error }) => (
+const ForgotPasswordForm = ({
+  onBackToLogin,
+  handleSendResetLink,
+  emailForReset,
+  setEmailForReset,
+  isSending,
+  error,
+}) => (
   <>
-    <div className="flex justify-center">
+    <CardHeader className="relative z-10 items-center pb-2 pt-8 text-center">
       <Logo className="w-64" />
-    </div>
-    <h2 className="mt-6 text-center text-3xl font-bold text-white">Reimposta Password</h2>
-    <p className="mt-2 text-center text-sm text-blue-200/70">
-      Inserisci la tua email per ricevere le istruzioni.
-    </p>
+      <CardTitle className="mt-3 text-3xl text-white">Reimposta Password</CardTitle>
+      <CardDescription className="text-blue-200/70">
+        Inserisci la tua email per ricevere le istruzioni.
+      </CardDescription>
+    </CardHeader>
 
-    <form className="mt-8 space-y-6" onSubmit={handleSendResetLink}>
-      <div className="relative">
-        <label htmlFor="reset-email" className="block text-sm font-medium text-blue-200 mb-2">
-          Indirizzo email
-        </label>
-        <div className="relative">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Mail className="h-5 w-5 text-blue-400" />
+    <CardContent className="relative z-10 pb-8">
+      <form className="space-y-5" onSubmit={handleSendResetLink}>
+        <div className="space-y-2">
+          <Label htmlFor="reset-email" className={labelClass}>
+            Indirizzo email
+          </Label>
+          <div className="relative">
+            <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-blue-400" />
+            <Input
+              id="reset-email"
+              name="reset-email"
+              type="email"
+              autoComplete="email"
+              required
+              value={emailForReset}
+              onChange={(e) => setEmailForReset(e.target.value)}
+              className={cn(fieldClass, "pl-10")}
+              placeholder="you@example.com"
+              disabled={isSending}
+            />
           </div>
-          <input
-            id="reset-email"
-            name="reset-email"
-            type="email"
-            autoComplete="email"
-            required
-            value={emailForReset}
-            onChange={(e) => setEmailForReset(e.target.value)}
-            className="block w-full pl-10 pr-3 py-3 rounded-xl border border-blue-500/30 bg-blue-900/20 text-white placeholder-blue-300/50 backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
-            placeholder="you@example.com"
-          />
         </div>
-      </div>
-       
-      {error && (
-        <div className="flex items-center space-x-2 p-3 rounded-lg bg-red-900/20 border border-red-500/30 text-red-200">
-           <svg className="h-5 w-5 text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-           </svg>
-           <p className="text-sm">{error}</p>
-        </div>
-      )}
 
-      <div>
-        <button
+        {error && (
+          <Alert
+            variant="destructive"
+            className="border-red-500/30 bg-red-900/20 text-red-200 [&>svg]:text-red-400"
+          >
+            <CircleAlert className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <Button
           type="submit"
           disabled={isSending}
-          className="w-full py-3 px-4 rounded-xl font-medium text-white bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:ring-offset-2 focus:ring-offset-black shadow-[0_0_15px_rgba(59,130,246,0.5)] transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed disabled:shadow-none"
+          className="h-11 w-full bg-primary text-primary-foreground shadow-[0_0_15px_rgba(59,130,246,0.5)]"
         >
           {isSending ? (
-            <span className="flex items-center justify-center">
-              <LightbulbLoader />
-              <span className="ml-2">Invio in corso...</span>
-            </span>
+            <>
+              <Loader2 className="animate-spin" />
+              Invio in corso...
+            </>
           ) : (
             "Invia link per il reset"
           )}
-        </button>
-      </div>
+        </Button>
 
-      <div className="text-center text-sm">
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={onBackToLogin}
-          className="font-medium text-blue-400 hover:text-blue-300 transition-colors flex items-center justify-center w-full"
+          className="w-full text-blue-400 hover:bg-blue-900/20 hover:text-blue-300"
         >
-          <ArrowLeft className="h-4 w-4 mr-2" />
+          <ArrowLeft className="h-4 w-4" />
           Torna al Login
-        </button>
-      </div>
-    </form>
+        </Button>
+      </form>
+    </CardContent>
   </>
-);
+)
 
-// Componente per la schermata di conferma invio email
 const SuccessScreen = ({ email, onBackToLogin, onResend, canResend, countdown }) => {
-    const maskEmail = (email) => {
-        if (!email) return "";
-        const [localPart, domain] = email.split('@');
-        if (!domain) return email;
-        const [domainName, domainTld] = domain.split('.');
-        const maskedLocal = localPart.length > 2 ? `${localPart.substring(0, 2)}***` : `${localPart}***`;
-        const maskedDomain = domainName.length > 2 ? `${domainName.substring(0, 2)}***` : `${domainName.substring(0,1)}**`;
-        return `${maskedLocal}@${maskedDomain}.${domainTld}`;
-    };
+  const maskEmail = (value) => {
+    if (!value) return ""
+    const [localPart, domain] = value.split("@")
+    if (!domain) return value
+    const [domainName, domainTld] = domain.split(".")
+    const maskedLocal =
+      localPart.length > 2 ? `${localPart.substring(0, 2)}***` : `${localPart}***`
+    const maskedDomain =
+      domainName.length > 2
+        ? `${domainName.substring(0, 2)}***`
+        : `${domainName.substring(0, 1)}**`
+    return `${maskedLocal}@${maskedDomain}.${domainTld}`
+  }
 
-    return (
-        <div className="text-center">
-            <CheckCircle className="mx-auto h-16 w-16 text-green-400" />
-            <h2 className="mt-6 text-3xl font-bold text-white">Controlla la tua email</h2>
-            <p className="mt-4 text-blue-200/80">
-                Se l’indirizzo <span className="font-bold text-blue-300">{maskEmail(email)}</span> è associato a un account, riceverai un messaggio con le istruzioni per reimpostare la password.
-            </p>
-            <p className="mt-2 text-sm text-blue-300/60">
-                Non dimenticare di controllare la cartella spam.
-            </p>
-            <div className="mt-8 space-y-4">
-                <button
-                    onClick={onBackToLogin}
-                    className="w-full py-3 px-4 rounded-xl font-medium text-white bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:ring-offset-2 focus:ring-offset-black shadow-[0_0_15px_rgba(59,130,246,0.5)] transition-all duration-200"
-                >
-                    Torna al Login
-                </button>
-                <button
-                    onClick={onResend}
-                    disabled={!canResend}
-                    className="w-full py-3 px-4 rounded-xl font-medium text-blue-300 bg-transparent border border-blue-500/30 hover:bg-blue-900/30 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:ring-offset-2 focus:ring-offset-black transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    {canResend ? "Rinvia email" : `Rinvia email tra ${countdown}s`}
-                </button>
-            </div>
+  return (
+    <>
+      <CardHeader className="relative z-10 items-center pb-2 pt-8 text-center">
+        <div className="mb-2 flex h-16 w-16 items-center justify-center rounded-full border border-green-400/30 bg-green-500/20">
+          <CheckCircle className="h-10 w-10 text-green-400" />
         </div>
-    );
-};
+        <CardTitle className="text-3xl text-white">Controlla la tua email</CardTitle>
+        <CardDescription className="text-blue-200/80">
+          Se l&apos;indirizzo{" "}
+          <span className="font-bold text-blue-300">{maskEmail(email)}</span> è associato a un
+          account, riceverai un messaggio con le istruzioni per reimpostare la password.
+        </CardDescription>
+        <p className="pt-1 text-sm text-blue-300/60">
+          Non dimenticare di controllare la cartella spam.
+        </p>
+      </CardHeader>
+      <CardFooter className="relative z-10 flex-col gap-3 pb-8">
+        <Button
+          onClick={onBackToLogin}
+          className="h-11 w-full bg-primary text-primary-foreground shadow-[0_0_15px_rgba(59,130,246,0.5)]"
+        >
+          Torna al Login
+        </Button>
+        <Button
+          variant="outline"
+          onClick={onResend}
+          disabled={!canResend}
+          className="h-11 w-full border-blue-500/30 bg-transparent text-blue-300 hover:bg-blue-900/30 hover:text-blue-200"
+        >
+          {canResend ? "Rinvia email" : `Rinvia email tra ${countdown}s`}
+        </Button>
+      </CardFooter>
+    </>
+  )
+}
+
 export default function Login() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -257,132 +370,179 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [isLoading, setIsLoading] = useState(false)
-  
-  // Stati per il flow di "Password Dimenticata"
-  const [view, setView] = useState('login'); // 'login', 'forgotPassword', 'success'
-  const [emailForReset, setEmailForReset] = useState('');
-  const [isSending, setIsSending] = useState(false);
-  const [countdown, setCountdown] = useState(60);
-  const [canResend, setCanResend] = useState(false);
+  const [view, setView] = useState("login")
+  const [emailForReset, setEmailForReset] = useState("")
+  const [isSending, setIsSending] = useState(false)
+  const [countdown, setCountdown] = useState(60)
+  const [canResend, setCanResend] = useState(false)
+  const [pageReady, setPageReady] = useState(false)
+  const [needsEmailConfirm, setNeedsEmailConfirm] = useState(false)
+  const [isResendingConfirm, setIsResendingConfirm] = useState(false)
+  const [confirmResendMessage, setConfirmResendMessage] = useState("")
 
-  const { login, forgotPassword } = useUser()
+  const { login, forgotPassword, sendConfirmation, loading } = useUser()
   const navigate = useNavigate()
 
   useEffect(() => {
-    let timer;
-    if (view === 'success' && !canResend) {
-        timer = setInterval(() => {
-            setCountdown(prev => {
-                if (prev <= 1) {
-                    clearInterval(timer);
-                    setCanResend(true);
-                    return 0;
-                }
-                return prev - 1;
-            });
-        }, 1000);
+    if (loading) {
+      setPageReady(false)
+      return
     }
-    return () => clearInterval(timer);
-  }, [view, canResend]);
+    const frame = requestAnimationFrame(() => setPageReady(true))
+    return () => cancelAnimationFrame(frame)
+  }, [loading])
 
+  useEffect(() => {
+    let timer
+    if (view === "success" && !canResend) {
+      timer = setInterval(() => {
+        setCountdown((prev) => {
+          if (prev <= 1) {
+            clearInterval(timer)
+            setCanResend(true)
+            return 0
+          }
+          return prev - 1
+        })
+      }, 1000)
+    }
+    return () => clearInterval(timer)
+  }, [view, canResend])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setIsLoading(true)
     setError("")
+    setConfirmResendMessage("")
+    setNeedsEmailConfirm(false)
 
     try {
       await login(email, password, rememberMe)
       navigate("/dashboard")
     } catch (err) {
-      setError(err.response?.data || "Credenziali non valide. Riprova.")
+      const data = err.response?.data
+      const code = data && typeof data === "object" ? data.code : null
+      setNeedsEmailConfirm(code === "EMAIL_NOT_VERIFIED")
+      setError(getApiErrorMessage(err, "Credenziali non valide. Riprova."))
     } finally {
       setIsLoading(false)
     }
   }
 
+  const handleResendConfirmation = async () => {
+    if (!email) {
+      setError("Inserisci un indirizzo email.")
+      return
+    }
+    setIsResendingConfirm(true)
+    setConfirmResendMessage("")
+    setError("")
+    try {
+      const response = await sendConfirmation(email)
+      setConfirmResendMessage(
+        typeof response?.data === "string"
+          ? response.data
+          : "Se l'email è registrata e non ancora verificata, riceverai un link di conferma."
+      )
+    } catch (err) {
+      setError(getApiErrorMessage(err, "Impossibile inviare la mail di conferma. Riprova più tardi."))
+    } finally {
+      setIsResendingConfirm(false)
+    }
+  }
+
   const handleSendResetLink = async (e) => {
-    if(e) e.preventDefault();
+    if (e) e.preventDefault()
     if (!emailForReset) {
       setError("Inserisci un indirizzo email.")
       return
     }
     setIsSending(true)
     setError("")
-    
+
     try {
-      console.log(emailForReset);
-      await forgotPassword(emailForReset) 
-      setView('success');
-      setCanResend(false);
-      setCountdown(60);
+      await forgotPassword(emailForReset)
+      setView("success")
+      setCanResend(false)
+      setCountdown(60)
     } catch (err) {
-      // Per sicurezza, non riveliamo se l'email esiste o no.
-      // Mostriamo comunque la schermata di successo.
-      console.error("Errore durante forgotPassword:", err);
-      setView('success');
-      setCanResend(false);
-      setCountdown(60);
+      console.error("Errore durante forgotPassword:", err)
+      setView("success")
+      setCanResend(false)
+      setCountdown(60)
     } finally {
       setIsSending(false)
     }
   }
 
   const handleBackToLogin = () => {
-      setView('login');
-      setError('');
-      setEmailForReset('');
+    setView("login")
+    setError("")
+    setEmailForReset("")
+    setNeedsEmailConfirm(false)
+    setConfirmResendMessage("")
+  }
+
+  if (loading || !pageReady) {
+    return (
+      <AuthPageSkeleton
+        variant={view === "forgotPassword" || view === "success" ? "forgot" : "login"}
+      />
+    )
   }
 
   const renderContent = () => {
     switch (view) {
-      case 'forgotPassword':
-        return <ForgotPasswordForm 
-                    onBackToLogin={handleBackToLogin} 
-                    handleSendResetLink={handleSendResetLink}
-                    emailForReset={emailForReset}
-                    setEmailForReset={setEmailForReset}
-                    isSending={isSending}
-                    error={error}
-                />;
-      case 'success':
-        return <SuccessScreen 
-                    email={emailForReset} 
-                    onBackToLogin={handleBackToLogin}
-                    onResend={handleSendResetLink}
-                    canResend={canResend}
-                    countdown={countdown}
-                />;
-      case 'login':
+      case "forgotPassword":
+        return (
+          <ForgotPasswordForm
+            onBackToLogin={handleBackToLogin}
+            handleSendResetLink={handleSendResetLink}
+            emailForReset={emailForReset}
+            setEmailForReset={setEmailForReset}
+            isSending={isSending}
+            error={error}
+          />
+        )
+      case "success":
+        return (
+          <SuccessScreen
+            email={emailForReset}
+            onBackToLogin={handleBackToLogin}
+            onResend={handleSendResetLink}
+            canResend={canResend}
+            countdown={countdown}
+          />
+        )
+      case "login":
       default:
-        return <LoginForm 
-                    onForgotPasswordClick={() => { setView('forgotPassword'); setError(''); }}
-                    email={email}
-                    setEmail={setEmail}
-                    password={password}
-                    setPassword={setPassword}
-                    rememberMe={rememberMe}
-                    setRememberMe={setRememberMe}
-                    handleSubmit={handleSubmit}
-                    isLoading={isLoading}
-                    error={error}
-                    showPassword={showPassword}
-                    setShowPassword={setShowPassword}
-                />;
+        return (
+          <LoginForm
+            onForgotPasswordClick={() => {
+              setView("forgotPassword")
+              setError("")
+              setNeedsEmailConfirm(false)
+              setConfirmResendMessage("")
+            }}
+            email={email}
+            setEmail={setEmail}
+            password={password}
+            setPassword={setPassword}
+            rememberMe={rememberMe}
+            setRememberMe={setRememberMe}
+            handleSubmit={handleSubmit}
+            isLoading={isLoading}
+            error={error}
+            showPassword={showPassword}
+            setShowPassword={setShowPassword}
+            needsEmailConfirm={needsEmailConfirm}
+            onResendConfirmation={handleResendConfirmation}
+            isResendingConfirm={isResendingConfirm}
+            confirmResendMessage={confirmResendMessage}
+          />
+        )
     }
   }
 
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4">
-      <div className="w-full max-w-md relative overflow-hidden rounded-2xl shadow-[0_0_40px_rgba(0,149,255,0.15)]">
-        <div className="relative z-10 p-8 backdrop-blur-xl bg-black/40 border border-blue-500/20">
-          {renderContent()}
-        </div>
-
-        {/* Decorative elements */}
-        <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl"></div>
-        <div className="absolute -bottom-32 -left-32 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl"></div>
-      </div>
-    </div>
-  )
+  return <AuthShell>{renderContent()}</AuthShell>
 }

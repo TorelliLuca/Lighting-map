@@ -17,6 +17,8 @@ import {
   Info,
   FileSpreadsheet,
   ClipboardCheck,
+  ListTodo,
+  Shield,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import toast from "react-hot-toast";
@@ -404,6 +406,19 @@ const UserMenu = ({
                     className="w-full text-left px-4 py-2 hover:bg-blue-900/30 text-white flex items-center gap-2"
                     onClick={() => {
                       setIsUserMenuOpen(false);
+                      navigate("/privacy");
+                    }}
+                  >
+                    <Shield className="h-4 w-4" />
+                    Privacy
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    className="w-full text-left px-4 py-2 hover:bg-blue-900/30 text-white flex items-center gap-2"
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
                       window.open(ILLUMINAZIONE_PUBBLICA_URL, "_blank", "noopener,noreferrer");
                     }}
                   >
@@ -444,6 +459,7 @@ const CityOrganizationsMenu = ({
   handleOrganizzazioniClick,
   handlePreventiviClick,
   handleConsuntiviClick,
+  handleTodoClick,
   handleApprovazioneClick,
   isUserAdmin,
   canManageQuotes,
@@ -537,6 +553,22 @@ const CityOrganizationsMenu = ({
                   </button>
                 </li>
               )}
+              {canManageQuotes && (
+                <li>
+                  <button
+                    type="button"
+                    data-tour="org-todo"
+                    className="w-full text-left px-4 py-2 hover:bg-blue-900/30 text-white flex items-center gap-2"
+                    onClick={() => {
+                      setIsCityMenuOpen(false);
+                      handleTodoClick?.();
+                    }}
+                  >
+                    <ListTodo className="h-4 w-4 text-emerald-400" />
+                    TODO
+                  </button>
+                </li>
+              )}
               {isUserAdmin && (
                 <li>
                   <button
@@ -611,6 +643,11 @@ function Header({
   const handleConsuntiviClick = () => {
     const qs = selectedCity ? `?comune=${encodeURIComponent(selectedCity)}` : "";
     navigate(`/consuntivi${qs}`);
+  };
+
+  const handleTodoClick = () => {
+    const qs = selectedCity ? `?comune=${encodeURIComponent(selectedCity)}` : "";
+    navigate(`/todo${qs}`);
   };
 
   const handleApprovazioneClick = () => {
@@ -738,6 +775,7 @@ function Header({
               handleOrganizzazioniClick={handleOrganizzazioniClick}
               handlePreventiviClick={handlePreventiviClick}
               handleConsuntiviClick={handleConsuntiviClick}
+              handleTodoClick={handleTodoClick}
               handleApprovazioneClick={handleApprovazioneClick}
               isUserAdmin={isUserAdmin}
               canManageQuotes={canManageQuotes}

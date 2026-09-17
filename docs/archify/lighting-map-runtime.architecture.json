@@ -1,0 +1,235 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Lighting-map — architettura runtime",
+    "quality_profile": "showcase",
+    "viewBox": [1080, 560],
+    "views": [
+      {
+        "id": "primary-path",
+        "label": "Percorso primario",
+        "focus": ["operators", "lighting-map", "jwt-auth", "express-api", "mongodb"],
+        "note": "SPA → Bearer JWT → Express → MongoDB Atlas."
+      },
+      {
+        "id": "trust-boundary",
+        "label": "Confine di trust",
+        "focus": ["jwt-auth", "express-api", "mongodb"],
+        "note": "Le route protette passano dal middleware JWT e dai ruoli."
+      },
+      {
+        "id": "side-effects",
+        "label": "Dipendenze esterne",
+        "focus": ["express-api", "smtp-aruba", "web-push", "r2-assets", "map-providers"],
+        "note": "Email, push e storage laterali; mappe client-side."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "operators",
+      "type": "external",
+      "label": "Operatori",
+      "sublabel": "Browser / PWA",
+      "pos": [36, 198],
+      "size": [120, 56]
+    },
+    {
+      "id": "lighting-map",
+      "type": "frontend",
+      "label": "Lighting-map",
+      "sublabel": "React PWA",
+      "tag": "VITE_SERVER_URL",
+      "pos": [210, 198],
+      "size": [136, 56]
+    },
+    {
+      "id": "admin-platform",
+      "type": "frontend",
+      "label": "Pannello admin",
+      "sublabel": "SUPER_ADMIN",
+      "pos": [210, 72],
+      "size": [136, 56]
+    },
+    {
+      "id": "jwt-auth",
+      "type": "security",
+      "label": "Auth JWT",
+      "sublabel": "Bearer + refresh",
+      "tag": "JWT_SECRET",
+      "pos": [404, 198],
+      "size": [136, 56]
+    },
+    {
+      "id": "express-api",
+      "type": "backend",
+      "label": "Express API",
+      "sublabel": "Lighting-Map Server",
+      "pos": [598, 198],
+      "size": [148, 56]
+    },
+    {
+      "id": "mongodb",
+      "type": "database",
+      "label": "MongoDB Atlas",
+      "sublabel": "Mongoose",
+      "brand": "mongodb",
+      "pos": [810, 198],
+      "size": [140, 56]
+    },
+    {
+      "id": "map-providers",
+      "type": "external",
+      "label": "Mappe",
+      "sublabel": "Google / MapTiler",
+      "pos": [210, 370],
+      "size": [136, 56]
+    },
+    {
+      "id": "smtp-aruba",
+      "type": "external",
+      "label": "SMTP Aruba",
+      "sublabel": "nodemailer",
+      "pos": [500, 390],
+      "size": [124, 52]
+    },
+    {
+      "id": "web-push",
+      "type": "external",
+      "label": "Web Push",
+      "sublabel": "VAPID",
+      "pos": [660, 390],
+      "size": [124, 52]
+    },
+    {
+      "id": "r2-assets",
+      "type": "cloud",
+      "label": "Asset email",
+      "sublabel": "R2 o disk",
+      "brand": "cloudflare",
+      "pos": [820, 390],
+      "size": [140, 52]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Client SPA",
+      "wraps": ["lighting-map", "admin-platform"]
+    },
+    {
+      "kind": "security-group",
+      "label": "Confine JWT",
+      "wraps": ["jwt-auth"]
+    },
+    {
+      "kind": "region",
+      "label": "Persistenza",
+      "wraps": ["mongodb"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "ops-to-app",
+      "from": "operators",
+      "to": "lighting-map",
+      "label": "HTTPS",
+      "variant": "emphasis",
+      "labelDy": -24
+    },
+    {
+      "id": "app-to-jwt",
+      "from": "lighting-map",
+      "to": "jwt-auth",
+      "label": "Bearer",
+      "variant": "emphasis",
+      "labelDy": 34
+    },
+    {
+      "id": "admin-to-jwt",
+      "from": "admin-platform",
+      "to": "jwt-auth",
+      "label": "stesso /login",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDx": 44
+    },
+    {
+      "id": "jwt-to-api",
+      "from": "jwt-auth",
+      "to": "express-api",
+      "label": "verify JWT",
+      "variant": "security",
+      "labelDy": 34
+    },
+    {
+      "id": "api-to-db",
+      "from": "express-api",
+      "to": "mongodb",
+      "label": "Mongoose",
+      "variant": "emphasis",
+      "labelDy": 34
+    },
+    {
+      "id": "app-to-maps",
+      "from": "lighting-map",
+      "to": "map-providers",
+      "label": "tiles",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 28
+    },
+    {
+      "id": "api-to-smtp",
+      "from": "express-api",
+      "to": "smtp-aruba",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "api-to-push",
+      "from": "express-api",
+      "to": "web-push",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "api-to-r2",
+      "from": "express-api",
+      "to": "r2-assets",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Client",
+      "items": [
+        "Due SPA sullo stesso backend; nessun sync peer-to-peer",
+        "Admin: upload/download comuni e utenti (solo SUPER_ADMIN)"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "API e dati",
+      "items": [
+        "Express unico: punti luce, report, operazioni, quotes…",
+        "MongoDB Atlas; export CSV·Excel·PDF on-the-fly"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Trust e esterni",
+      "items": [
+        "CORS + rate-limit; Bearer JWT e ruoli per comune",
+        "Mappe dal browser; SMTP, Web Push e R2/disk come side-effect"
+      ]
+    }
+  ]
+}

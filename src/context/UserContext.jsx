@@ -70,10 +70,34 @@ api.interceptors.response.use(
   },
 )
 
+const readInitialAuthState = () => {
+  const storedAuth = readStoredAuth()
+  let parsedUserData = null
+
+  if (storedAuth.userData) {
+    try {
+      parsedUserData = JSON.parse(storedAuth.userData)
+    } catch {
+      parsedUserData = null
+    }
+  }
+
+  if (storedAuth.token) {
+    authTokenRef.current = storedAuth.token
+  }
+
+  return {
+    token: storedAuth.token,
+    userData: parsedUserData,
+    rememberMe: storedAuth.rememberMe,
+  }
+}
+
 export const UserProvider = ({ children }) => {
-  const [userData, setUserData] = useState(null)
-  const [token, setToken] = useState(null)
-  const [rememberMe, setRememberMe] = useState(true)
+  const [initialAuth] = useState(readInitialAuthState)
+  const [userData, setUserData] = useState(initialAuth.userData)
+  const [token, setToken] = useState(initialAuth.token)
+  const [rememberMe, setRememberMe] = useState(initialAuth.rememberMe)
   const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
   const refreshPromiseRef = useRef(null)
@@ -422,14 +446,14 @@ export const UserProvider = ({ children }) => {
     }
   }
   
-  const confirmEmail = async (data) =>{
-    try {
-      const response = await api.get(`/confirm-email`, { params: data });
-      return response
-    } catch (error) {
-      console.error(error)
-      return
-    }
+  const confirmEmail = async (data) => {
+    const response = await api.get(`/confirm-email`, { params: data });
+    return response
+  }
+
+  const sendConfirmation = async (email) => {
+    const response = await api.post(`/send-confirmation`, { email });
+    return response
   }
 
   const getOrganizationByUserId = async (id) => {
@@ -558,10 +582,11 @@ export const UserProvider = ({ children }) => {
         finalizeConsuntivo,
         getExtraordinaryReports,
         confirmEmail,
+        sendConfirmation,
         isAuthenticated: !!token
       }}
     >
-      {!loading && children}
+      {children}
     </UserContext.Provider>
   )
 }

@@ -20,10 +20,17 @@ const DEFAULT_LIST_CLASS =
 
 const SCROLLBAR_CLASS = "overflow-y-auto"
 
+const GAP_PX = 6
+const LIST_PADDING_Y_PX = 8
+
 /**
  * Select glass (blue palette) con lista in portal.
  * options: [{ value, label }]
  * onChange(nextValue) — valore diretto, non evento DOM.
+ *
+ * openUpward:
+ * - true  → forza apertura verso l'alto (es. controlli mappa)
+ * - false → auto: apre sotto se c'è spazio, altrimenti sopra, e limita l'altezza al viewport
  */
 export function GlassSelect({
   id,
@@ -50,30 +57,33 @@ export function GlassSelect({
   const [coords, setCoords] = useState(null)
 
   const selected = options.find((o) => o.value === value)
-  const hideScrollbar = options.length <= 5
 
   const updateCoords = () => {
     const el = triggerRef.current
     if (!el) return
     const rect = el.getBoundingClientRect()
     const visibleCount = Math.min(maxVisible, Math.max(options.length, 1))
-    // py-1 (8px) sul listbox: senza questo margine con poche voci compare comunque lo scroll
-    const maxHeight = visibleCount * ITEM_HEIGHT_PX + (hideScrollbar ? 8 : 0)
-    if (openUpward) {
-      setCoords({
-        left: rect.left,
-        width: Math.max(rect.width, 88),
-        bottom: window.innerHeight - rect.top + 6,
-        maxHeight,
-      })
-    } else {
-      setCoords({
-        left: rect.left,
-        width: Math.max(rect.width, 88),
-        top: rect.bottom + 6,
-        maxHeight,
-      })
-    }
+    const desiredHeight = visibleCount * ITEM_HEIGHT_PX + LIST_PADDING_Y_PX
+    const spaceBelow = window.innerHeight - rect.bottom - GAP_PX
+    const spaceAbove = rect.top - GAP_PX
+
+    // true = forza su; false/undefined = scegli la direzione col più spazio utile
+    const placementUp = openUpward === true
+      ? true
+      : spaceBelow < desiredHeight && spaceAbove > spaceBelow
+
+    const available = placementUp ? spaceAbove : spaceBelow
+    const maxHeight = Math.max(ITEM_HEIGHT_PX, Math.min(desiredHeight, available))
+
+    setCoords({
+      left: rect.left,
+      width: Math.max(rect.width, 88),
+      maxHeight,
+      openUpward: placementUp,
+      ...(placementUp
+        ? { bottom: window.innerHeight - rect.top + GAP_PX }
+        : { top: rect.bottom + GAP_PX }),
+    })
   }
 
   useEffect(() => {
@@ -114,6 +124,11 @@ export function GlassSelect({
     onChange?.(nextValue)
     setOpen(false)
   }
+
+  const contentHeight = options.length * ITEM_HEIGHT_PX + LIST_PADDING_Y_PX
+  const hideScrollbar = coords
+    ? contentHeight <= coords.maxHeight + 0.5
+    : options.length <= maxVisible
 
   return (
     <div className={cn("relative w-full min-w-0", wrapperClassName)}>
@@ -168,7 +183,7 @@ export function GlassSelect({
               left: coords.left,
               width: coords.width,
               maxHeight: coords.maxHeight,
-              ...(openUpward ? { bottom: coords.bottom } : { top: coords.top }),
+              ...(coords.openUpward ? { bottom: coords.bottom } : { top: coords.top }),
             }}
           >
             {options.length === 0 ? (

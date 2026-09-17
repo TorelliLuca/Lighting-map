@@ -22,22 +22,33 @@ import {
   Plus,
   Trash2,
 } from "lucide-react"
-import { LightbulbLoader } from "../components/lightbulb-loader"
+import { motion, useReducedMotion } from "framer-motion"
 import { BackNavigationButton } from "../components/BackNavigationButton"
 import ConfirmDialog from "../components/ui/ConfirmDialog"
 import InfoTooltip from "../components/ui/InfoTooltip"
 import { NumberInput } from "../components/ui/NumberInput"
 import { GlassSelect } from "../components/ui/GlassSelect"
 import { TruncatedTextDetails } from "../components/ui/TruncatedTextDetails"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
+import { ChartSection } from "@/components/infoPanel/DistributionChart"
+import {
+  ExtraordinaryBudgetBar,
+  REVIEW_BUDGET_INFO_TEXT,
+} from "@/components/ui/ExtraordinaryBudgetBar"
+import { QuoteStatusBadge } from "../components/ui/QuoteStatusBadge"
+import { cn } from "@/lib/utils"
 import {
   computeQuoteTotalsClient,
   sumBomUnitPrice,
-  QUOTE_STATUS_LABELS,
   QUOTE_EDITABLE_STATUSES,
   canManageQuotesByRole,
   canSubmitQuoteByRole,
   canApproveQuoteByRole,
 } from "../utils/utils"
+import { fetchExtraordinaryBudgetUsage } from "../utils/extraordinaryBudget"
 import {
   emptyBomChild,
   isEmptyNpLine,
@@ -107,25 +118,14 @@ const clampDiscountPercent = (value, minDiscountPercent = 0) => {
   return Math.min(100, Math.max(minDiscountPercent, normalizedValue))
 }
 
-const QUOTE_STATUS_TAG_STYLES = {
-  DRAFT: "bg-slate-500/30 text-slate-100 border-slate-400/50",
-  PENDING_APPROVAL: "bg-amber-500/30 text-amber-100 border-amber-400/50",
-  APPROVED: "bg-emerald-500/30 text-emerald-100 border-emerald-400/50",
-  REJECTED: "bg-red-500/30 text-red-100 border-red-400/50",
-  NEEDS_REVISION: "bg-amber-500/30 text-amber-100 border-amber-400/50",
-}
-
 const fieldInputClass =
-  "w-full rounded-xl border border-blue-500/30 bg-blue-900/20 text-white px-4 py-3 disabled:opacity-60 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 focus-visible:border-blue-400/50"
+  "w-full rounded-xl border border-border/70 bg-background/50 text-foreground px-4 py-3 disabled:opacity-60 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring/50 placeholder:text-muted-foreground"
 
 const cellInputClass =
-  "w-full min-w-0 rounded-lg border border-blue-500/20 bg-black/30 text-white px-2 py-1.5 text-sm disabled:opacity-60 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 focus-visible:border-blue-400/50"
+  "w-full min-w-0 rounded-lg border border-border/60 bg-background/40 text-foreground px-2 py-1.5 text-sm disabled:opacity-60 transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-ring/50"
 
-const btnSecondaryClass =
-  "cursor-pointer transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 disabled:cursor-not-allowed"
-
-const btnPrimaryClass =
-  "cursor-pointer transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/50 disabled:cursor-not-allowed"
+const btnFocusClass =
+  "cursor-pointer transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed"
 
 const isLineMissingDescription = (item) => !item.description?.trim()
 
@@ -146,10 +146,39 @@ const catalogDropCollisionDetection = (args) => {
 }
 
 const SectionHeading = ({ children }) => (
-  <h3 className="text-xs font-semibold uppercase tracking-wider text-blue-300 mb-3 pt-4 border-t border-blue-500/15 first:border-t-0 first:pt-0">
+  <h3 className="mb-3 border-t border-border/40 pt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground first:border-t-0 first:pt-0">
     {children}
   </h3>
 )
+
+function ConsuntivoPageSkeleton() {
+  return (
+    <div
+      className={`${PAGE_SCROLL_SHELL} flex items-start justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4 py-6 sm:py-8`}
+      aria-busy="true"
+      aria-label="Caricamento consuntivo"
+    >
+      <div className="w-full max-w-5xl space-y-4">
+        <ChartSection className="space-y-4 p-6 sm:p-8">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-2">
+              <Skeleton className="h-7 w-56" />
+              <Skeleton className="h-4 w-72" />
+            </div>
+            <div className="flex gap-2">
+              <Skeleton className="h-11 w-11 rounded-full" />
+              <Skeleton className="h-11 w-11 rounded-full" />
+            </div>
+          </div>
+          <Skeleton className="h-28 w-full rounded-xl" />
+          <Skeleton className="h-40 w-full rounded-xl" />
+          <Skeleton className="h-32 w-full rounded-xl" />
+          <Skeleton className="h-12 w-full rounded-xl" />
+        </ChartSection>
+      </div>
+    </div>
+  )
+}
 
 const serializeFormSnapshot = (data) => JSON.stringify({
   discountPercent: Number(data.discountPercent) || 0,
@@ -177,6 +206,7 @@ export default function Consuntivo() {
   const navigate = useNavigate()
   const { id } = useParams()
   const fromParentRoute = Boolean(useMatch("/quote/:id/consuntivo"))
+  const reduceMotion = useReducedMotion()
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -188,6 +218,8 @@ export default function Consuntivo() {
   const [config, setConfig] = useState(null)
   const [capitolatoValidity, setCapitolatoValidity] = useState(null)
   const [catalogQuery, setCatalogQuery] = useState("")
+  const [budgetLimit, setBudgetLimit] = useState(null)
+  const [approvedSpent, setApprovedSpent] = useState(0)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false)
   const [showSaveBeforeDownload, setShowSaveBeforeDownload] = useState(false)
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false)
@@ -418,6 +450,38 @@ export default function Consuntivo() {
 
     if (id) load()
   }, [userData, navigate, id, fromParentRoute, getMaintenanceConfig, canManage, canApprove])
+
+  const townHallName = consuntivo?.townHallId?.name || parentQuote?.townHallId?.name || ""
+
+  useEffect(() => {
+    if (!townHallName) {
+      setBudgetLimit(null)
+      setApprovedSpent(0)
+      return
+    }
+
+    let cancelled = false
+    const loadBudget = async () => {
+      try {
+        const usage = await fetchExtraordinaryBudgetUsage(api, townHallName, {
+          excludeId: consuntivo?._id,
+        })
+        if (cancelled) return
+        setBudgetLimit(usage.limit)
+        setApprovedSpent(usage.approvedSpent)
+      } catch (budgetErr) {
+        console.error(budgetErr)
+        if (cancelled) return
+        setBudgetLimit(null)
+        setApprovedSpent(0)
+      }
+    }
+
+    loadBudget()
+    return () => {
+      cancelled = true
+    }
+  }, [townHallName, consuntivo?._id])
 
   const updateLine = (index, patch) => {
     setFormData((prev) => {
@@ -944,74 +1008,74 @@ export default function Consuntivo() {
   }
 
   if (loading) {
-    return (
-      <div className={`${PAGE_SCROLL_SHELL} flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4`}>
-        <LightbulbLoader />
-      </div>
-    )
+    return <ConsuntivoPageSkeleton />
   }
 
   return (
     <div className={`${PAGE_SCROLL_SHELL} flex items-start justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4 py-6 sm:py-8`}>
-      <div className="w-full max-w-5xl relative overflow-hidden rounded-2xl shadow-[0_0_40px_rgba(0,149,255,0.15)]">
-        <div className="relative z-10 p-6 sm:p-8 backdrop-blur-xl bg-black/40 border border-blue-500/20">
-          <div className="flex items-start justify-between gap-4 mb-6">
+      <motion.div
+        initial={reduceMotion ? false : { opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+        className="w-full max-w-5xl space-y-4"
+      >
+        <ChartSection className="space-y-5 p-6 sm:p-8">
+          <div className="flex items-start justify-between gap-4">
             <div className="flex items-start gap-2 min-w-0">
-              <FileSpreadsheet className="h-6 w-6 text-amber-400 shrink-0 mt-1" />
+              <FileSpreadsheet className="h-6 w-6 text-amber-400 shrink-0 mt-1" aria-hidden="true" />
               <div className="min-w-0">
-                <h2 className="text-2xl font-bold text-white">Consuntivo IMS</h2>
+                <h1 className="text-2xl font-bold text-foreground">Consuntivo IMS</h1>
                 <div className="flex flex-wrap items-center gap-2 mt-1.5">
                   <CapitolatoValidityChip validity={capitolatoValidity} />
                   {consuntivo && (
                     <>
-                      <span
-                        className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${
-                          QUOTE_STATUS_TAG_STYLES[consuntivo.status]
-                          || "bg-blue-500/25 text-blue-100 border-blue-400/40"
-                        }`}
-                      >
-                        {QUOTE_STATUS_LABELS[consuntivo.status] || consuntivo.status}
-                      </span>
+                      <QuoteStatusBadge status={consuntivo.status} />
                       {consuntivo.protocolNumber && (
-                        <span className="text-xs text-blue-200 font-mono">
+                        <Badge variant="outline" className="font-mono text-xs">
                           {consuntivo.protocolNumber}
-                        </span>
+                        </Badge>
                       )}
                     </>
                   )}
                   {isDirty && (
-                    <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium border bg-amber-500/20 text-amber-100 border-amber-400/40">
+                    <Badge
+                      variant="outline"
+                      className="border-amber-500/40 bg-amber-500/10 text-amber-100"
+                    >
                       Modifiche non salvate
-                    </span>
+                    </Badge>
                   )}
                   {exceedsParentTotal && (
-                    <span
-                      role="status"
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border bg-red-500/20 text-red-100 border-red-400/50"
+                    <Badge
+                      variant="outline"
+                      className="gap-1 border-red-500/50 bg-red-500/10 text-red-100"
                     >
-                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                       Importo totale superiore al preventivo
-                    </span>
+                    </Badge>
                   )}
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <BackNavigationButton onClick={handleBackNavigation} />
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
+                className="min-h-11 min-w-11 rounded-full bg-primary/10 hover:bg-primary/20"
                 onClick={handleHomeNavigation}
                 aria-label="Torna alla dashboard"
-                className={`p-2 rounded-full bg-blue-500/10 hover:bg-blue-500/20 ${btnSecondaryClass}`}
+                title="Torna alla dashboard"
               >
-                <Home className="h-5 w-5 text-blue-400" />
-              </button>
+                <Home className="h-5 w-5 text-blue-400" aria-hidden="true" />
+              </Button>
             </div>
           </div>
 
           {!canEdit && readOnlyMessage && (
-            <div className="mb-4 p-3 rounded-lg bg-slate-800/40 border border-slate-500/30 text-slate-100 text-sm flex gap-2">
-              <Lock className="h-4 w-4 shrink-0 mt-0.5 text-slate-300" />
+            <div className="flex gap-2 rounded-xl border border-border/50 bg-secondary/40 p-3 text-sm text-secondary-foreground">
+              <Lock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
               <p>{readOnlyMessage}</p>
             </div>
           )}
@@ -1019,7 +1083,7 @@ export default function Consuntivo() {
           {parentQuote && (
             <>
               <SectionHeading>Preventivo di riferimento</SectionHeading>
-              <div className="mb-6 p-4 rounded-xl bg-amber-900/20 border border-amber-500/20 text-sm text-amber-100 space-y-1">
+              <div className="mb-2 space-y-1 rounded-xl border border-amber-500/30 bg-amber-950/20 p-4 text-sm text-amber-100">
                 <p>
                   <span className="font-medium text-amber-200">Preventivo:</span>{" "}
                   {parentQuote.protocolNumber || parentQuote._id}
@@ -1037,16 +1101,16 @@ export default function Consuntivo() {
           )}
 
           {error && (
-            <div role="alert" className="mb-4 p-3 rounded-lg bg-red-900/20 border border-red-500/30 text-red-200 flex gap-2">
-              <AlertCircle className="h-5 w-5 shrink-0" />
+            <div role="alert" className="flex gap-2 rounded-xl border border-red-500/30 bg-red-950/20 p-3 text-red-200">
+              <AlertCircle className="h-5 w-5 shrink-0" aria-hidden="true" />
               <p>{error}</p>
             </div>
           )}
 
           {(consuntivo?.rejectedReason || contestedCount > 0) && canEdit && (
-            <div role="status" className="mb-4 p-3 rounded-lg bg-amber-900/20 border border-amber-500/30 text-amber-100 text-sm space-y-1">
-              <p className="font-medium flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 shrink-0" />
+            <div role="status" className="space-y-1 rounded-xl border border-amber-500/30 bg-amber-950/20 p-3 text-sm text-amber-100">
+              <p className="flex items-center gap-2 font-medium">
+                <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
                 Consuntivo respinto dal RUP
                 {contestedCount > 0 ? ` — ${contestedCount} ${contestedCount === 1 ? "voce contestata" : "voci contestate"}` : ""}
               </p>
@@ -1099,7 +1163,7 @@ export default function Consuntivo() {
                   onAdd={addLineFromCatalog}
                   draggable={isDesktopDnD}
                   expandAll={isCatalogSearching}
-                  buttonClassName={btnSecondaryClass}
+                  buttonClassName={btnFocusClass}
                 />
               </div>
             )}
@@ -1111,7 +1175,7 @@ export default function Consuntivo() {
                   <button
                     type="button"
                     onClick={addAdHocLine}
-                    className={`text-xs px-3 py-1.5 rounded-lg border border-amber-500/30 text-amber-200 hover:bg-amber-900/20 flex items-center gap-1 shrink-0 ${btnSecondaryClass}`}
+                    className={`text-xs px-3 py-1.5 rounded-lg border border-amber-500/30 text-amber-200 hover:bg-amber-900/20 flex items-center gap-1 shrink-0 ${btnFocusClass}`}
                   >
                     <Plus className="h-3.5 w-3.5" /> Nuovo prezzo
                   </button>
@@ -1219,7 +1283,7 @@ export default function Consuntivo() {
                               <button
                                 type="button"
                                 onClick={() => removeLine(index)}
-                                className={`p-2 rounded-lg border border-red-500/30 text-red-300 hover:bg-red-900/20 shrink-0 ${btnSecondaryClass}`}
+                                className={`p-2 rounded-lg border border-red-500/30 text-red-300 hover:bg-red-900/20 shrink-0 ${btnFocusClass}`}
                                 aria-label={`Rimuovi voce ${index + 1}`}
                               >
                                 <Trash2 className="h-4 w-4" />
@@ -1532,7 +1596,7 @@ export default function Consuntivo() {
                                   <button
                                     type="button"
                                     onClick={() => removeLine(index)}
-                                    className={`p-1.5 rounded-lg border border-red-500/30 text-red-300 hover:bg-red-900/20 ${btnSecondaryClass}`}
+                                    className={`p-1.5 rounded-lg border border-red-500/30 text-red-300 hover:bg-red-900/20 ${btnFocusClass}`}
                                     aria-label={`Rimuovi voce ${index + 1}`}
                                   >
                                     <Trash2 className="h-4 w-4" />
@@ -1603,24 +1667,26 @@ export default function Consuntivo() {
               </div>
 
               <div
-                className={`p-4 rounded-xl text-sm text-white space-y-1 ${
+                className={cn(
+                  "space-y-1 rounded-xl border p-4 text-sm text-foreground",
                   exceedsParentTotal
-                    ? "bg-red-950/30 border border-red-500/30"
-                    : "bg-blue-950/40 border border-blue-500/20"
-                }`}
+                    ? "border-red-500/30 bg-red-950/30"
+                    : "border-border/60 bg-card/40"
+                )}
               >
-                <p className="flex justify-between"><span className="text-blue-200">Totale lordo</span><span>€ {totals.subtotal.toFixed(2)}</span></p>
-                <p className="flex justify-between"><span className="text-blue-200">Oneri sicurezza 2%</span><span>€ {totals.safetyAmount.toFixed(2)}</span></p>
-                <p className="flex justify-between"><span className="text-blue-200">Sconto</span><span>€ {totals.discountAmount.toFixed(2)}</span></p>
-                <p className={`flex justify-between font-semibold pt-2 border-t ${
+                <p className="flex justify-between"><span className="text-muted-foreground">Totale lordo</span><span>€ {totals.subtotal.toFixed(2)}</span></p>
+                <p className="flex justify-between"><span className="text-muted-foreground">Oneri sicurezza 2%</span><span>€ {totals.safetyAmount.toFixed(2)}</span></p>
+                <p className="flex justify-between"><span className="text-muted-foreground">Sconto</span><span>€ {totals.discountAmount.toFixed(2)}</span></p>
+                <p className={cn(
+                  "flex justify-between font-semibold pt-2 border-t",
                   exceedsParentTotal
-                    ? "text-red-100 border-red-500/30"
-                    : "text-white border-blue-500/20"
-                }`}>
+                    ? "border-red-500/30 text-red-100"
+                    : "border-border/50 text-foreground"
+                )}>
                   <span>Totale consuntivo</span><span>€ {totals.total.toFixed(2)}</span>
                 </p>
                 {parentQuote && (
-                  <p className="flex justify-between text-blue-200/80 pt-1">
+                  <p className="flex justify-between pt-1 text-muted-foreground/80">
                     <span>Riferimento preventivo</span>
                     <span>€ {parentTotal.toFixed(2)}</span>
                   </p>
@@ -1628,26 +1694,38 @@ export default function Consuntivo() {
                 {exceedsParentTotal && (
                   <p
                     role="status"
-                    className="flex items-start gap-2 pt-2 mt-1 border-t border-red-500/25 text-red-200 text-xs"
+                    className="mt-1 flex items-start gap-2 border-t border-red-500/25 pt-2 text-xs text-red-200"
                   >
-                    <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                     <span>
                       Il totale consuntivo supera il preventivo di € {excessOverParent.toFixed(2)}.
                     </span>
                   </p>
                 )}
               </div>
+
+              {budgetLimit != null ? (
+                <ExtraordinaryBudgetBar
+                  spent={approvedSpent}
+                  extraSpent={totals.total}
+                  limit={budgetLimit}
+                  infoText={REVIEW_BUDGET_INFO_TEXT}
+                  className="max-w-none lg:w-full"
+                />
+              ) : null}
             </div>
 
+            <Separator className="bg-border/50" />
             <SectionHeading>Azioni</SectionHeading>
             <div className="space-y-3 pb-1">
               {(canEdit || consuntivo?._id) && (
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <button
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button
                     type="button"
+                    variant="outline"
                     disabled={!!downloadingFormat}
                     onClick={() => handleDownloadClick("xlsx")}
-                    className={`flex-1 py-3 rounded-xl border border-blue-500/30 text-blue-100 hover:bg-blue-900/30 disabled:opacity-50 flex items-center justify-center gap-2 ${btnSecondaryClass}`}
+                    className="min-h-12 flex-1"
                   >
                     {downloadingFormat === "xlsx" ? (
                       <>
@@ -1660,19 +1738,20 @@ export default function Consuntivo() {
                         Scarica XLSX
                       </>
                     )}
-                  </button>
+                  </Button>
                   {/* Scarica PDF nascosto: non ancora supportato in questo deploy */}
                 </div>
               )}
 
-              <div className="flex flex-col sm:flex-row gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row">
                 {canEdit && (
                   <>
-                    <button
+                    <Button
                       type="button"
+                      variant="outline"
                       disabled={saving || submitting || (!isDirty && !!consuntivo?._id)}
                       onClick={handleSave}
-                      className={`flex-1 py-3 rounded-xl border border-blue-500/30 text-blue-100 hover:bg-blue-900/30 disabled:opacity-50 flex items-center justify-center gap-2 ${btnSecondaryClass}`}
+                      className="min-h-12 flex-1"
                     >
                       {saving ? (
                         <>
@@ -1682,14 +1761,14 @@ export default function Consuntivo() {
                       ) : (
                         "Salva bozza"
                       )}
-                    </button>
-                    <div className="flex-1 flex items-center gap-1">
-                      <button
+                    </Button>
+                    <div className="flex flex-1 items-center gap-1">
+                      <Button
                         type="button"
                         disabled={saving || submitting || !canSubmit}
                         onClick={handleSubmit}
                         title={!canSubmit ? "Solo il titolare manutentore può inviare il consuntivo in approvazione." : undefined}
-                        className={`flex-1 py-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-medium disabled:opacity-50 flex items-center justify-center gap-2 ${btnPrimaryClass}`}
+                        className="min-h-12 flex-1 bg-amber-600 text-white hover:bg-amber-500"
                       >
                         {submitting ? (
                           <>
@@ -1699,7 +1778,7 @@ export default function Consuntivo() {
                         ) : (
                           "Invia in approvazione"
                         )}
-                      </button>
+                      </Button>
                       {!canSubmit && (
                         <InfoTooltip text="Solo il titolare manutentore può inviare il consuntivo in approvazione al RUP." />
                       )}
@@ -1707,28 +1786,28 @@ export default function Consuntivo() {
                   </>
                 )}
                 {consuntivo?._id && consuntivo.status === "PENDING_APPROVAL" && canApprove && (
-                  <button
+                  <Button
                     type="button"
                     onClick={() => navigate(`/consuntivo/${consuntivo._id}/review`)}
-                    className={`flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-medium ${btnPrimaryClass}`}
+                    className="min-h-12 flex-1 bg-emerald-600 text-white hover:bg-emerald-500"
                   >
                     Apri revisione RUP
-                  </button>
+                  </Button>
                 )}
                 {consuntivo?._id && !canEdit && !(consuntivo.status === "PENDING_APPROVAL" && canApprove) && (
-                  <button
+                  <Button
                     type="button"
                     onClick={() => navigate("/dashboard")}
-                    className={`flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-medium ${btnPrimaryClass}`}
+                    className="min-h-12 flex-1 bg-primary text-primary-foreground"
                   >
                     Torna alla Dashboard
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
           </div>
-        </div>
-      </div>
+        </ChartSection>
+      </motion.div>
 
       <CatalogPickerModal
         isOpen={catalogPickerNpIndex != null}

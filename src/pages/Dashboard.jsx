@@ -75,6 +75,28 @@ async function copyLatLngToClipboard(lat, lng) {
   document.body.removeChild(ta)
 }
 
+/** Coordinate DB in formato italiano (virgola); parseFloat grezzo tronca a "44" → centro errato. */
+function parseCoordinate(value) {
+  if (value == null || value === "") return Number.NaN
+  return Number.parseFloat(String(value).trim().replace(",", "."))
+}
+
+function centerGoogleMapOnCoords(mapInstance, lat, lng, zoom) {
+  const latNum = parseCoordinate(lat)
+  const lngNum = parseCoordinate(lng)
+  if (!mapInstance || Number.isNaN(latNum) || Number.isNaN(lngNum)) return false
+  if (zoom != null) mapInstance.setZoom(zoom)
+  mapInstance.setCenter(new window.google.maps.LatLng(latNum, lngNum))
+  return true
+}
+
+function triggerMarkerClick(markerRef) {
+  if (!markerRef || !window.google?.maps?.event) return
+  // createMarkers registra "click"; AdvancedMarker emette anche "gmp-click"
+  window.google.maps.event.trigger(markerRef, "click")
+  window.google.maps.event.trigger(markerRef, "gmp-click")
+}
+
 const STORAGE_KEY_PREFIX = "lighting-map-"
 const STORAGE_KEYS = {
   SELECTED_CITY: `${STORAGE_KEY_PREFIX}selected-city`,
@@ -936,11 +958,26 @@ function Dashboard() {
   // Google: badge PL scollegati senza ricaricare tutto il clusterer
   // (gestito dall'effect updateMarkerColors più sotto, che include showTopologyLines)
 
-  // Aggiorna legendColorMap ogni volta che cambiano i marker filtrati o l'opzione di evidenziazione
+  // Aggiorna legendColorMap: in semplice dai marker MapLibre, in complessa dai marker Google filtrati
   useEffect(() => {
-    const colorMap = generateLegendColorMap(filteredMarkers, highlightOption);
-    setLegendColorMap(colorMap);
-  }, [filteredMarkers, highlightOption])
+    if (visualizationMode === "complessa") {
+      if (!cityDataLoaded) return
+      const source =
+        activeMarkers.length > 0 ? activeMarkers : allMarkersData
+      const complexData = source.map((m) => m.data).filter(Boolean)
+      setLegendColorMap(generateLegendColorMap(complexData, highlightOption))
+      return
+    }
+
+    setLegendColorMap(generateLegendColorMap(filteredMarkers, highlightOption))
+  }, [
+    visualizationMode,
+    cityDataLoaded,
+    filteredMarkers,
+    highlightOption,
+    activeMarkers,
+    allMarkersData,
+  ])
 
 
   useEffect(() => {
@@ -1916,9 +1953,9 @@ function Dashboard() {
     // Define the global toggle function
     window.toggleStreetView = (lat, lng) => {
       try {
-        // Parse coordinates to ensure they're numbers
-        const parsedLat = Number.parseFloat(lat)
-        const parsedLng = Number.parseFloat(lng)
+        // Parse coordinates to ensure they're numbers (virgola italiana → punto)
+        const parsedLat = Number.parseFloat(String(lat).trim().replace(",", "."))
+        const parsedLng = Number.parseFloat(String(lng).trim().replace(",", "."))
 
         if (isNaN(parsedLat) || isNaN(parsedLng)) {
           console.error("Invalid coordinates:", lat, lng)
@@ -2158,13 +2195,13 @@ function Dashboard() {
     setCurrentMarkerIndex(0)
     setHighlightedMarkerId(results[0].data._id) // Evidenzia il primo risultato
 
-    // Center map on first result
+    // Center map on first result (coordinate spesso con virgola italiana in DB)
     const firstResult = results[0]
-    map.setZoom(18)
-    map.setCenter(
-      new window.google.maps.LatLng(Number.parseFloat(firstResult.data.lat), Number.parseFloat(firstResult.data.lng)),
-    )
-    window.google.maps.event.trigger(firstResult.ref, "gmp-click")
+    if (!centerGoogleMapOnCoords(map, firstResult.data.lat, firstResult.data.lng, 18)) {
+      toast.error("Coordinate del punto non valide")
+      return
+    }
+    triggerMarkerClick(firstResult.ref)
     setSearchQuery("")
     setShowSuggestions(false)
   }
@@ -2308,21 +2345,21 @@ function Dashboard() {
     const marker = foundMarkers[newIndex]
 
     if (visualizationMode === "semplice") {
-      // MapLibre
-      if (mapLibreRef.current && mapLibreRef.current.flyTo && marker.data.lat && marker.data.lng) {
+      const latNum = parseCoordinate(marker.data.lat)
+      const lngNum = parseCoordinate(marker.data.lng)
+      if (mapLibreRef.current?.flyTo && !Number.isNaN(latNum) && !Number.isNaN(lngNum)) {
         mapLibreRef.current.flyTo({
-          center: [parseFloat(marker.data.lng), parseFloat(marker.data.lat)],
+          center: [lngNum, latNum],
           zoom: 30
         })
       }
-    } else {
-      // Google Maps
-      map.setCenter(new window.google.maps.LatLng(Number.parseFloat(marker.data.lat), Number.parseFloat(marker.data.lng)))
+    } else if (map) {
+      centerGoogleMapOnCoords(map, marker.data.lat, marker.data.lng)
       if (marker.ref) {
         if (!infoWindowRef.current) {
           infoWindowRef.current = new window.google.maps.InfoWindow()
         }
-        window.google.maps.event.trigger(marker.ref, "gmp-click")
+        triggerMarkerClick(marker.ref)
       }
     }
   }
@@ -2338,28 +2375,23 @@ function Dashboard() {
     const marker = foundMarkers[newIndex]
 
     if (visualizationMode === "semplice") {
-      // MapLibre
-      if (mapLibreRef.current && mapLibreRef.current.flyTo && marker.data.lat && marker.data.lng) {
+      const latNum = parseCoordinate(marker.data.lat)
+      const lngNum = parseCoordinate(marker.data.lng)
+      if (mapLibreRef.current?.flyTo && !Number.isNaN(latNum) && !Number.isNaN(lngNum)) {
         mapLibreRef.current.flyTo({
-          center: [parseFloat(marker.data.lng), parseFloat(marker.data.lat)],
+          center: [lngNum, latNum],
           zoom: 30
         })
       }
-    } else {
-      // Google Maps
-      map.setCenter(new window.google.maps.LatLng(Number.parseFloat(marker.data.lat), Number.parseFloat(marker.data.lng)))
+    } else if (map) {
+      centerGoogleMapOnCoords(map, marker.data.lat, marker.data.lng)
       if (marker.ref) {
         if (!infoWindowRef.current) {
           infoWindowRef.current = new window.google.maps.InfoWindow()
         }
-        window.google.maps.event.trigger(marker.ref, "gmp-click")
+        triggerMarkerClick(marker.ref)
       }
     }
-  }
-
-  const parseCoordinate = (value) => {
-    if (value == null) return Number.NaN
-    return Number.parseFloat(String(value).trim().replace(",", "."))
   }
 
   const handleNavigateToPointFromPanel = useCallback((lat, lng, numeroPalo) => {
@@ -2378,8 +2410,7 @@ function Dashboard() {
         })
       }
     } else if (map) {
-      map.setCenter(new window.google.maps.LatLng(latNum, lngNum))
-      map.setZoom(21)
+      centerGoogleMapOnCoords(map, latNum, lngNum, 21)
       const found = allMarkersData.find(
         (m) =>
           m.data.numero_palo === numeroPalo ||
@@ -2389,7 +2420,7 @@ function Dashboard() {
         if (!infoWindowRef.current) {
           infoWindowRef.current = new window.google.maps.InfoWindow()
         }
-        window.google.maps.event.trigger(found.ref, "gmp-click")
+        triggerMarkerClick(found.ref)
       }
     }
 
@@ -3802,14 +3833,13 @@ function Dashboard() {
         <Toaster position="top-right" />
       </div>
 
-      {showInfoPanel && (
-        <InfoPanel
-          activeMarkers={allMarkersData}
-          onClose={() => setShowInfoPanel(false)}
-          townhallName={selectedCity}
-          onNavigateToPoint={handleNavigateToPointFromPanel}
-        />
-      )}
+      <InfoPanel
+        open={showInfoPanel}
+        activeMarkers={allMarkersData}
+        onClose={() => setShowInfoPanel(false)}
+        townhallName={selectedCity}
+        onNavigateToPoint={handleNavigateToPointFromPanel}
+      />
 
       <MapControls
         selectedCity={selectedCity}

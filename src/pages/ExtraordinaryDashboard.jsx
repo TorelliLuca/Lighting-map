@@ -32,6 +32,11 @@ import {
   QUOTE_STATUS_LABELS,
   WORKFLOW_STATUS_LABELS,
 } from "../utils/utils"
+import {
+  denyUnauthorizedComuneAccess,
+  guardComuneAccess,
+  isTownHallAccessDeniedError,
+} from "../utils/townHallAccess"
 
 const PAGE_SIZE = 15
 
@@ -227,11 +232,15 @@ export default function ExtraordinaryDashboard() {
       setItems(res.data || [])
     } catch (err) {
       console.error(err)
+      if (isTownHallAccessDeniedError(err)) {
+        denyUnauthorizedComuneAccess(navigate)
+        return
+      }
       setError(err.response?.data?.error || "Impossibile caricare le straordinarie.")
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [navigate])
 
   useEffect(() => {
     if (!userData) {
@@ -242,8 +251,12 @@ export default function ExtraordinaryDashboard() {
       navigate("/dashboard")
       return
     }
+    const comuneFromQuery = searchParams.get("comune") || ""
+    if (comuneFromQuery && !guardComuneAccess({ userData, comune: comuneFromQuery, navigate })) {
+      return
+    }
     load()
-  }, [userData, navigate, load])
+  }, [userData, navigate, load, searchParams])
 
   const cities = useMemo(() => {
     const fromUser = (userData?.town_halls_list || [])

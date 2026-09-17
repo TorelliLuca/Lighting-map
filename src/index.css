@@ -1,4 +1,82 @@
 @import "tailwindcss";
+@plugin "tailwindcss-animate";
+
+/*
+ * Token shadcn/ui (new-york) — tema dark allineato a Lighting-map.
+ * Usati da Badge, Button, Tabs, Progress, Separator, Sheet.
+ */
+:root {
+  --background: 222 47% 6%;
+  --foreground: 210 40% 98%;
+  --card: 222 47% 8%;
+  --card-foreground: 210 40% 98%;
+  --popover: 222 47% 8%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 217 91% 60%;
+  --primary-foreground: 222 47% 6%;
+  --secondary: 217 33% 17%;
+  --secondary-foreground: 210 40% 96%;
+  --muted: 217 33% 14%;
+  --muted-foreground: 215 20% 65%;
+  --accent: 217 33% 18%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 217 33% 22%;
+  --input: 217 33% 22%;
+  --ring: 217 91% 60%;
+  --radius: 0.625rem;
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --animate-budget-bar-pulse: budget-bar-pulse 4.2s ease-in-out infinite;
+  --animate-budget-bar-fill-pulse: budget-bar-fill-pulse 4.2s ease-in-out infinite;
+
+  @keyframes budget-bar-pulse {
+    0%,
+    100% {
+      filter: brightness(1);
+      opacity: 1;
+    }
+    50% {
+      filter: brightness(1.35);
+      opacity: 0.85;
+    }
+  }
+
+  @keyframes budget-bar-fill-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.91;
+    }
+  }
+}
 
 /*
  * Window Controls Overlay (PWA desktop installata):
@@ -186,3 +264,63 @@
   /* Evita che lo spotlight “tagli” il contenuto nelle card glass */
   overflow: visible !important;
 }
+
+/* PlantStatus — react-vertical-timeline-component (dark glass) */
+.plant-status-timeline .vertical-timeline {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0.25rem 0 0.5rem;
+}
+
+.plant-status-timeline .vertical-timeline::before {
+  width: 3px;
+  background: linear-gradient(
+    180deg,
+    rgba(59, 130, 246, 0.55),
+    rgba(59, 130, 246, 0.2),
+    rgba(59, 130, 246, 0.45)
+  ) !important;
+  left: 18px;
+}
+
+.plant-status-timeline .vertical-timeline-element {
+  margin: 0 0 1.35rem;
+}
+
+.plant-status-timeline .vertical-timeline-element-icon {
+  width: 40px;
+  height: 40px;
+  box-shadow: none;
+}
+
+.plant-status-timeline .vertical-timeline-element-content {
+  margin-left: 70px !important;
+  box-shadow: none !important;
+}
+
+.plant-status-timeline .vertical-timeline-element-content .vertical-timeline-element-date {
+  display: block !important;
+  float: none !important;
+  padding: 0 0 0.45rem !important;
+  margin: 0 !important;
+  position: static !important;
+  left: auto !important;
+  width: auto !important;
+  text-align: left !important;
+}
+
+.plant-status-timeline .vertical-timeline-element-content-arrow {
+  top: 18px;
+}
+
+@media (max-width: 1169px) {
+  .plant-status-timeline .vertical-timeline::before {
+    left: 18px;
+  }
+
+  .plant-status-timeline .vertical-timeline-element-content {
+    margin-left: 70px !important;
+  }
+}
+

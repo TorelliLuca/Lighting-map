@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useContext } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
+import { motion, useReducedMotion } from "framer-motion"
 import { UserContext } from "../context/UserContext"
 import {
   AlertCircle,
@@ -10,33 +11,34 @@ import {
   ClipboardList,
   Home,
   Info,
+  Loader2,
   Map,
   MapPin,
+  Send,
   User,
 } from "lucide-react"
-import { LightbulbLoader } from "../components/lightbulb-loader"
 import { BackNavigationButton } from "../components/BackNavigationButton"
 import { GlassSelect } from "../components/ui/GlassSelect"
+import { CapitolatoValidityChip } from "../components/ui/CapitolatoValidityChip"
+import { Button } from "@/components/ui/button"
+import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
+import { ChartSection } from "@/components/infoPanel/DistributionChart"
+import { cn } from "@/lib/utils"
 import { sendPushNotification } from "../utils/pushNotifications"
 import { PAGE_SCROLL_SHELL } from "../utils/pageScrollShell"
-import { CapitolatoValidityChip } from "../components/ui/CapitolatoValidityChip"
 import { buildLightPointDashboardPushUrl } from "../utils/notificationDeepLinks"
-
-
-const LEGACY_REPORT_TYPES = {
-  LIGHT_POINT_OFF: "Punto luce spento",
-  PLANT_OFF: "Impianto spento",
-  DAMAGED_COMPLEX: "Complesso danneggiato",
-  DAMAGED_SUPPORT: "Morsettiera rotta",
-  BROKEN_TERMINAL_BLOCK: "Sostegno danneggiato",
-  BROKEN_PANEL: "Quadro danneggiato",
-  OTHER: "Altro",
-}
+import { guardComuneAccess } from "../utils/townHallAccess"
+import {
+  LEGACY_REPORT_TYPES,
+  filterFaultLabelsForMarker,
+  filterLegacyReportTypesForMarker,
+} from "../utils/utils"
 
 const fieldClass =
-  "block w-full px-4 py-3 rounded-xl border border-blue-500/30 bg-blue-900/20 text-white placeholder-blue-300/50 backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-colors duration-200"
-const labelClass = "block text-sm font-medium text-blue-100 mb-1.5"
-const hintClass = "mt-1.5 text-xs text-blue-300/75 leading-relaxed"
+  "block w-full px-4 py-3 rounded-xl border border-border/70 bg-background/50 text-foreground placeholder:text-muted-foreground backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring/50 transition-colors duration-200"
+const labelClass = "block text-sm font-medium text-foreground mb-1.5"
+const hintClass = "mt-1.5 text-xs text-muted-foreground leading-relaxed"
 
 const DEMO_LIGHTPOINT = {
   _id: "tour-demo-lightpoint",
@@ -48,10 +50,41 @@ const DEMO_LIGHTPOINT = {
   city: "Demo",
 }
 
+function ReportPageSkeleton() {
+  return (
+    <div
+      className={`${PAGE_SCROLL_SHELL} flex items-start justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4 py-6 sm:py-8`}
+      aria-busy="true"
+      aria-label="Caricamento segnalazione"
+    >
+      <div className="w-full max-w-lg space-y-4">
+        <ChartSection className="space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-2">
+              <Skeleton className="h-7 w-48" />
+              <Skeleton className="h-4 w-56" />
+            </div>
+            <div className="flex gap-2">
+              <Skeleton className="h-11 w-11 rounded-full" />
+              <Skeleton className="h-11 w-11 rounded-full" />
+            </div>
+          </div>
+          <Skeleton className="h-28 w-full rounded-xl" />
+          <Skeleton className="h-20 w-full rounded-xl" />
+          <Skeleton className="h-28 w-full rounded-xl" />
+          <Skeleton className="h-24 w-full rounded-xl" />
+          <Skeleton className="h-12 w-full rounded-xl" />
+        </ChartSection>
+      </div>
+    </div>
+  )
+}
+
 export default function Report() {
   const { userData, getLightpoint, addReport, getMaintenanceConfig } = useContext(UserContext)
   const navigate = useNavigate()
   const location = useLocation()
+  const reduceMotion = useReducedMotion()
   const isTourDemo =
     new URLSearchParams(location.search).get("tourDemo") === "1" ||
     Boolean(location.state?.lmTour?.force || location.state?.tourDemo)
@@ -72,12 +105,15 @@ export default function Report() {
   const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API
   const isAdminReport = ["ADMINISTRATOR", "SUPER_ADMIN"].includes(userData?.user_type)
 
-  const faultLabels = maintenanceConfig?.faultLabels?.length
+  const allFaultLabels = maintenanceConfig?.faultLabels?.length
     ? maintenanceConfig.faultLabels
     : [
-        { code: "SINGLE_OFF", label: "Punto luce singolo spento", suggestedRiskClass: "C" },
-        { code: "NON_URGENT", label: "Anomalia non urgente", suggestedRiskClass: "D" },
+        { code: "SINGLE_OFF", label: "Punto luce singolo spento", suggestedRiskClass: "C", applicableTo: ["PL"] },
+        { code: "PANEL_DAMAGE", label: "Quadro elettrico danneggiato", suggestedRiskClass: "B", applicableTo: ["QE"] },
+        { code: "NON_URGENT", label: "Anomalia non urgente", suggestedRiskClass: "D", applicableTo: ["PL", "QE"] },
       ]
+
+  const faultLabels = filterFaultLabelsForMarker(allFaultLabels, lightpoint?.marker)
 
   const riskClasses = maintenanceConfig?.riskClasses?.length
     ? maintenanceConfig.riskClasses
@@ -111,12 +147,32 @@ export default function Report() {
       navigate("/dashboard")
       return
     }
+    // Il manutentore non apre una segnalazione: va al sopralluogo diretto.
+    if (userData.user_type === "MAINTAINER" && !isTourDemo) {
+      const params = new URLSearchParams(location.search)
+      const comune = params.get("comune")
+      const id = params.get("id")
+      if (comune && !guardComuneAccess({ userData, comune, navigate })) {
+        return
+      }
+      if (comune && id) {
+        navigate(`/inspection?comune=${encodeURIComponent(comune)}&id=${encodeURIComponent(id)}`, {
+          replace: true,
+        })
+      } else {
+        navigate("/dashboard", { replace: true })
+      }
+      return
+    }
 
     const params = new URLSearchParams(location.search)
     const comune = params.get("comune")
     const id = params.get("id")
 
-    // Replay tutorial dal profilo: UI completa senza punto luce reale
+    if (comune && !guardComuneAccess({ userData, comune, navigate })) {
+      return
+    }
+
     if (isTourDemo && !id) {
       setLightpoint(DEMO_LIGHTPOINT)
       setAddress(DEMO_LIGHTPOINT.adr)
@@ -132,17 +188,29 @@ export default function Report() {
         if (configResponse?.data?.config) {
           setMaintenanceConfig(configResponse.data.config)
           setCapitolatoValidity(configResponse.data.validity || null)
-          const firstFault = configResponse.data.config.faultLabels?.[0]
-          if (firstFault) {
-            setFormData((prev) => ({
-              ...prev,
-              faultLabel: firstFault.code,
-              riskClass: firstFault.suggestedRiskClass || "C",
-            }))
-          }
         }
         if (response && response.data) {
           setLightpoint(response.data)
+          if (configResponse?.data?.config) {
+            const markerFiltered = filterFaultLabelsForMarker(
+              configResponse.data.config.faultLabels || [],
+              response.data.marker,
+            )
+            const firstFault = markerFiltered[0]
+            if (firstFault) {
+              setFormData((prev) => ({
+                ...prev,
+                faultLabel: firstFault.code,
+                riskClass: firstFault.suggestedRiskClass || "C",
+                reportType:
+                  response.data.marker === "QE" ? "BROKEN_PANEL" : prev.reportType,
+              }))
+            } else if (response.data.marker === "QE") {
+              setFormData((prev) => ({ ...prev, reportType: "BROKEN_PANEL" }))
+            }
+          } else if (response.data.marker === "QE") {
+            setFormData((prev) => ({ ...prev, reportType: "BROKEN_PANEL" }))
+          }
           if (response.data.lat && response.data.lng) {
             if (response.data.adr) {
               setAddress(response.data.adr)
@@ -193,10 +261,12 @@ export default function Report() {
     label: item.label ? `${item.code} — ${item.label}` : item.code,
   }))
 
-  const reportTypeOptions = Object.entries(LEGACY_REPORT_TYPES).map(([value, label]) => ({
-    value,
-    label,
-  }))
+  const reportTypeOptions = filterLegacyReportTypesForMarker(lightpoint?.marker).map(
+    ([value, label]) => ({
+      value,
+      label,
+    }),
+  )
 
   const getReportLabel = () => {
     if (isAdminReport) {
@@ -208,7 +278,9 @@ export default function Report() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (isTourDemo) {
-      setError("Modalità tutorial: l’invio reale è disabilitato. Torna alla mappa per segnalare un punto luce.")
+      setError(
+        "Modalità tutorial: l’invio reale è disabilitato. Torna alla mappa per segnalare un punto luce.",
+      )
       return
     }
     setIsLoading(true)
@@ -273,92 +345,94 @@ export default function Report() {
 
   if (isSuccess) {
     return (
-      <div className={`${PAGE_SCROLL_SHELL} flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4`}>
-        <div className="w-full max-w-md relative overflow-hidden rounded-2xl shadow-[0_0_40px_rgba(0,149,255,0.15)]">
-          <div className="relative z-10 p-8 backdrop-blur-xl bg-black/40 border border-blue-500/20">
-            <div className="text-center">
-              <div className="mx-auto flex items-center justify-center h-20 w-20 rounded-full bg-blue-500/20 backdrop-blur-sm mb-6 border border-blue-400/30">
-                <CheckCircle className="h-10 w-10 text-blue-400" aria-hidden="true" />
-              </div>
-              <h2 className="text-2xl font-bold text-white">Segnalazione inviata</h2>
-              <p className="mt-2 text-blue-200/80 text-sm leading-relaxed">
-                La segnalazione è stata registrata. La classificazione indicata è provvisoria:
-                verrà revisionata e confermata dal manutentore in fase di sopralluogo.
-              </p>
-              <div className="mt-8">
-                <button
-                  type="button"
-                  onClick={() => navigate("/dashboard")}
-                  className="w-full cursor-pointer py-3 px-4 rounded-xl font-medium text-white
-                  bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400
-                  focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:ring-offset-2 focus:ring-offset-black
-                  shadow-[0_0_15px_rgba(59,130,246,0.5)] transition-all duration-200"
-                >
-                  Torna alla dashboard
-                </button>
-              </div>
+      <div
+        className={`${PAGE_SCROLL_SHELL} flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4`}
+      >
+        <motion.div
+          initial={reduceMotion ? false : { opacity: 0, scale: 0.96, y: 8 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-md"
+        >
+          <ChartSection className="space-y-5 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/15">
+              <CheckCircle className="h-8 w-8 text-emerald-400" aria-hidden="true" />
             </div>
-          </div>
-          <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl" aria-hidden="true" />
-          <div className="absolute -bottom-32 -left-32 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl" aria-hidden="true" />
-        </div>
+            <div>
+              <h2 className="text-2xl font-bold text-foreground">Segnalazione inviata</h2>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                La segnalazione è stata registrata. La classificazione indicata è provvisoria: verrà
+                revisionata e confermata dal manutentore in fase di sopralluogo.
+              </p>
+            </div>
+            <Button
+              type="button"
+              className="min-h-11 w-full bg-primary text-primary-foreground"
+              onClick={() => navigate("/dashboard")}
+            >
+              <Home className="h-4 w-4" />
+              Torna alla dashboard
+            </Button>
+          </ChartSection>
+        </motion.div>
       </div>
     )
   }
 
   if (!lightpoint) {
-    return (
-      <div className={`${PAGE_SCROLL_SHELL} flex items-center justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4`}>
-        <div className="w-full max-w-md flex flex-col items-center justify-center">
-          <LightbulbLoader />
-          <p className="mt-4 text-blue-200">Caricamento punto luce...</p>
-        </div>
-      </div>
-    )
+    return <ReportPageSkeleton />
   }
 
   const pointLabel = lightpoint.marker === "PL" ? "Punto luce" : "Quadro"
   const comune =
-    new URLSearchParams(location.search).get("comune") ||
-    (isTourDemo ? "Comune demo" : null)
+    new URLSearchParams(location.search).get("comune") || (isTourDemo ? "Comune demo" : null)
 
   return (
-    <div className={`${PAGE_SCROLL_SHELL} flex items-start justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4 py-6 sm:py-8`}>
-      <div className="w-full max-w-lg relative rounded-2xl shadow-[0_0_40px_rgba(0,149,255,0.15)]">
-        <div className="relative z-10 p-6 sm:p-8 backdrop-blur-xl bg-black/40 border border-blue-500/20 rounded-2xl">
-          <div className="flex items-start justify-between gap-3 mb-5" data-tour="page-report-title">
+    <div
+      className={`${PAGE_SCROLL_SHELL} flex items-start justify-center bg-gradient-to-br from-black via-blue-950 to-black p-4 py-6 sm:py-8`}
+    >
+      <motion.div
+        initial={reduceMotion ? false : { opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+        className="w-full max-w-lg space-y-4"
+      >
+        <ChartSection className="space-y-5">
+          <div className="flex items-start justify-between gap-3" data-tour="page-report-title">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <ClipboardList className="h-6 w-6 text-blue-400 shrink-0" aria-hidden="true" />
-                <h1 className="text-2xl font-bold text-white truncate">Segnala guasto</h1>
+                <ClipboardList className="h-6 w-6 shrink-0 text-blue-400" aria-hidden="true" />
+                <h1 className="truncate text-2xl font-bold text-foreground">Segnala guasto</h1>
               </div>
               <div className="mt-1.5 flex flex-wrap items-center gap-2">
                 {!isTourDemo ? <CapitolatoValidityChip validity={capitolatoValidity} /> : null}
-                <p className="text-sm text-blue-300/80">
+                <p className="text-sm text-muted-foreground">
                   {isTourDemo
                     ? "Esempio guidato — nessun punto reale selezionato"
                     : "Descrivi l'anomalia sul punto selezionato"}
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex shrink-0 items-center gap-2">
               <BackNavigationButton />
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon"
+                className="min-h-11 min-w-11 rounded-full bg-primary/10 hover:bg-primary/20"
                 onClick={() => navigate("/dashboard")}
                 aria-label="Torna alla mappa"
                 title="Torna alla mappa"
-                className="cursor-pointer inline-flex items-center justify-center min-h-11 min-w-11 p-2 rounded-full bg-blue-500/10 hover:bg-blue-500/20 transition-colors duration-200"
               >
                 <Home className="h-5 w-5 text-blue-400" aria-hidden="true" />
-              </button>
+              </Button>
             </div>
           </div>
 
           {isTourDemo ? (
             <div
               role="status"
-              className="mb-4 p-3 rounded-lg bg-blue-900/30 border border-blue-500/30 text-sm text-blue-100"
+              className="rounded-xl border border-blue-500/30 bg-blue-950/30 p-3 text-sm text-blue-100"
             >
               Modalità tutorial: stai vedendo un esempio. L&apos;invio reale è disabilitato.
             </div>
@@ -367,55 +441,57 @@ export default function Report() {
           <section
             aria-label="Dettagli punto"
             data-tour="page-report-point"
-            className="mb-5 p-4 rounded-xl bg-blue-900/20 border border-blue-500/20 space-y-3"
+            className="space-y-3 rounded-xl border border-border/50 bg-secondary/30 p-4"
           >
             <div className="flex items-start gap-2.5 min-w-0">
-              <MapPin className="w-4 h-4 mt-0.5 text-blue-400 shrink-0" aria-hidden="true" />
-              <p className="text-sm text-blue-100 min-w-0 break-words">
-                <span className="font-medium text-blue-50">{pointLabel}:</span>{" "}
-                <span className="text-blue-200 font-mono">{lightpoint.numero_palo}</span>
-                {comune ? (
-                  <span className="text-blue-300/80"> · {comune}</span>
-                ) : null}
+              <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-blue-400" aria-hidden="true" />
+              <p className="min-w-0 break-words text-sm text-foreground">
+                <span className="font-medium">{pointLabel}:</span>{" "}
+                <span className="font-mono text-muted-foreground">{lightpoint.numero_palo}</span>
+                {comune ? <span className="text-muted-foreground"> · {comune}</span> : null}
               </p>
             </div>
             <div className="flex items-start gap-2.5 min-w-0">
-              <Map className="w-4 h-4 mt-0.5 text-blue-400 shrink-0" aria-hidden="true" />
-              <p className="text-sm text-blue-100 leading-snug min-w-0 break-words">
-                <span className="font-medium text-blue-50">Indirizzo:</span>{" "}
-                <span className="text-blue-200">{address}</span>
+              <Map className="mt-0.5 h-4 w-4 shrink-0 text-blue-400" aria-hidden="true" />
+              <p className="min-w-0 break-words text-sm leading-snug text-foreground">
+                <span className="font-medium">Indirizzo:</span>{" "}
+                <span className="text-muted-foreground">{address}</span>
               </p>
             </div>
             <div className="flex items-start gap-2.5 min-w-0">
-              <User className="w-4 h-4 mt-0.5 text-blue-400 shrink-0" aria-hidden="true" />
-              <p className="text-sm text-blue-100 min-w-0 break-words">
-                <span className="font-medium text-blue-50">Segnalante:</span>{" "}
-                <span className="text-blue-200">{userData?.surname} {userData?.name}</span>
+              <User className="mt-0.5 h-4 w-4 shrink-0 text-blue-400" aria-hidden="true" />
+              <p className="min-w-0 break-words text-sm text-foreground">
+                <span className="font-medium">Segnalante:</span>{" "}
+                <span className="text-muted-foreground">
+                  {userData?.surname} {userData?.name}
+                </span>
               </p>
             </div>
           </section>
 
           <div
-            className="mb-5 p-3.5 rounded-xl bg-amber-900/20 border border-amber-500/30 text-sm text-amber-100"
+            className="rounded-xl border border-amber-500/30 bg-amber-950/20 p-3.5 text-sm text-amber-100"
             role="note"
           >
             <div className="flex gap-2.5">
-              <Info className="h-4 w-4 mt-0.5 text-amber-300 shrink-0" aria-hidden="true" />
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" aria-hidden="true" />
               <div className="space-y-1 leading-relaxed">
                 <p className="font-medium text-amber-50">Classificazione provvisoria</p>
                 <p className="text-amber-100/90">
-                  Il tipo di guasto{isAdminReport ? " e la classe di rischio" : ""} indicati 
-                  in questa fase sono solo una stima iniziale. Verranno revisionati e confermati dal
+                  Il tipo di guasto{isAdminReport ? " e la classe di rischio" : ""} indicati in
+                  questa fase sono solo una stima iniziale. Verranno revisionati e confermati dal
                   manutentore in fase di sopralluogo.
                 </p>
               </div>
             </div>
           </div>
 
+          <Separator className="bg-border/50" />
+
           <form onSubmit={handleSubmit} className="space-y-5" data-tour="page-report-form">
             {isAdminReport ? (
-              <fieldset className="space-y-4 rounded-xl border border-blue-500/20 bg-blue-950/20 p-4">
-                <legend className="px-1 text-sm font-semibold text-blue-100 flex items-center gap-1.5">
+              <fieldset className="space-y-4 rounded-xl border border-border/50 bg-secondary/20 p-4">
+                <legend className="flex items-center gap-1.5 px-1 text-sm font-semibold text-foreground">
                   <AlertTriangle className="h-3.5 w-3.5 text-amber-300" aria-hidden="true" />
                   Classificazione
                 </legend>
@@ -430,11 +506,13 @@ export default function Report() {
                     onChange={(value) => setSelectField("faultLabel", value)}
                     options={faultLabelOptions}
                     aria-label="Tipo di guasto"
-                    className="bg-blue-900/20 border-blue-500/30"
+                    className="border-border/60 bg-background/50"
                     maxVisible={5}
                   />
                   <p className={hintClass}>
-                    Selezionare la voce che meglio descrive l&apos;anomalia osservata.
+                    {lightpoint?.marker === "QE"
+                      ? "Voci specifiche per il quadro elettrico."
+                      : "Selezionare la voce che meglio descrive l'anomalia osservata."}
                   </p>
                 </div>
 
@@ -448,7 +526,7 @@ export default function Report() {
                     onChange={(value) => setSelectField("riskClass", value)}
                     options={riskClassOptions}
                     aria-label="Classe di rischio suggerita"
-                    className="bg-blue-900/20 border-blue-500/30"
+                    className="border-border/60 bg-background/50"
                     maxVisible={6}
                   />
                   <p className={hintClass}>
@@ -473,7 +551,7 @@ export default function Report() {
                   onChange={(value) => setSelectField("reportType", value)}
                   options={reportTypeOptions}
                   aria-label="Tipo di guasto"
-                  className="bg-blue-900/20 border-blue-500/30"
+                  className="border-border/60 bg-background/50"
                   maxVisible={6}
                 />
                 <p className={hintClass}>
@@ -484,8 +562,7 @@ export default function Report() {
 
             <div>
               <label htmlFor="description" className={labelClass}>
-                Descrizione{" "}
-                <span className="font-normal text-blue-300/70">(opzionale)</span>
+                Descrizione <span className="font-normal text-muted-foreground">(opzionale)</span>
               </label>
               <textarea
                 id="description"
@@ -501,40 +578,39 @@ export default function Report() {
               </p>
             </div>
 
-            {error && (
+            {error ? (
               <div
                 role="alert"
-                className="flex items-start gap-2 p-3 rounded-lg bg-red-900/20 border border-red-500/30 text-red-200 text-sm"
+                className="flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-950/20 p-3 text-sm text-red-200"
               >
-                <AlertCircle className="h-5 w-5 text-red-400 shrink-0 mt-0.5" aria-hidden="true" />
+                <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" aria-hidden="true" />
                 <p>{error}</p>
               </div>
-            )}
+            ) : null}
 
-            <button
+            <Button
               type="submit"
               disabled={isLoading}
-              className="w-full cursor-pointer py-3 px-4 rounded-xl font-medium text-white
-              bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400
-              focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:ring-offset-2 focus:ring-offset-black
-              shadow-[0_0_15px_rgba(59,130,246,0.5)] transition-all duration-200
-              disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
+              className={cn(
+                "min-h-12 w-full bg-primary text-primary-foreground",
+                "disabled:cursor-not-allowed disabled:opacity-50",
+              )}
             >
               {isLoading ? (
-                <span className="flex items-center justify-center">
-                  <LightbulbLoader />
-                  <span className="ml-2">Invio in corso...</span>
-                </span>
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Invio in corso...
+                </>
               ) : (
-                "Invia segnalazione"
+                <>
+                  <Send className="h-4 w-4" />
+                  Invia segnalazione
+                </>
               )}
-            </button>
+            </Button>
           </form>
-        </div>
-
-        <div className="absolute -top-24 -right-24 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" aria-hidden="true" />
-        <div className="absolute -bottom-32 -left-32 w-80 h-80 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" aria-hidden="true" />
-      </div>
+        </ChartSection>
+      </motion.div>
     </div>
   )
 }
